@@ -11,7 +11,7 @@ import shared as tl
 # DEBUG
 #from ipdb import set_trace
 
-def init_gru(input_size, hid_size, bias=False): 
+def init_gru(input_size, hid_size, bias=False, name=None): 
     '''
     Most common GRU initialization
 
@@ -25,16 +25,17 @@ def init_gru(input_size, hid_size, bias=False):
     # concatenate all linear transf [W, W_r, W_z]
     W  = tl.array(np.concatenate((W, W_r, W_z)))
     # Naming
-    W.name = '[W, W_r, W_z]'
+    name = ('%s.gru' % name) if name else 'gru'
+    W.name = '%s.[W, W_r, W_z]' % name
 
     # Hidden-Hidden linear transformations
     U   = tl.random((hid_size, hid_size), init='glorot-tanh')
     U_r = tl.random((hid_size, hid_size), init='glorot-sigmoid')
     U_z = tl.random((hid_size, hid_size), init='glorot-sigmoid')
     # Naming
-    U.name   = 'U'
-    U_r.name = 'U_r'
-    U_z.name = 'U_z'
+    U.name   = '%s.U' % name
+    U_r.name = '%s.U_r' % name
+    U_z.name = '%s.U_z' % name
 
     # Append
     param = [W, U, U_r, U_z] 
@@ -42,7 +43,7 @@ def init_gru(input_size, hid_size, bias=False):
     if bias:
         # Input-Hidden Bias
         b_W       = tl.zeros((1, 3*hid_size), broadc=(True, False))
-        b_W.name  = '[b b_r b_z]'
+        b_W.name  = '%s.[b b_r b_z]' % name
         param    += [b_W]
 
         # Hidden-Hidden bias
@@ -50,9 +51,9 @@ def init_gru(input_size, hid_size, bias=False):
         b_Ur = tl.zeros((1, hid_size), broadc=(True, False))
         b_Uz = tl.zeros((1, hid_size), broadc=(True, False))
         # Naming
-        b_U.name  = 'b_U'
-        b_Ur.name = 'b_Ur'       
-        b_Uz.name = 'b_Uz'   
+        b_U.name  = '%s.b_U' % name
+        b_Ur.name = '%s.b_Ur' % name       
+        b_Uz.name = '%s.b_Uz' % name   
         # Append
         param += [b_U, b_Ur, b_Uz]
 
@@ -122,23 +123,24 @@ def gru(z1, param, h0=None):
     # Remove intermediate empty dimension
     return h[:,0,:]
 
-def init_bigru(input_size, hid_size, bias=False): 
+def init_bigru(input_size, hid_size, bias=False, name=None): 
 
     # Forward parameters
     param_f = init_gru(input_size, hid_size, bias=bias)
     # Naming
-    param_f[0].name = '[Wf, W_rf, W_zf]'
-    param_f[1].name   = 'Uf'
-    param_f[2].name = 'U_rf'
-    param_f[3].name = 'U_zf'
+    name = ('%s.bigru' % name) if name else 'bigru'
+    param_f[0].name = '%s.[Wf, W_rf, W_zf]' % name
+    param_f[1].name   = '%s.Uf' % name
+    param_f[2].name = '%s.U_rf' % name
+    param_f[3].name = '%s.U_zf' % name
 
     # Backward parameters
     param_b = init_gru(input_size, hid_size, bias=bias)
     # Naming
-    param_b[0].name = '[Wb, W_rb, W_zb]'
-    param_b[1].name = 'Ub'
-    param_b[2].name = 'U_rb'
-    param_b[3].name = 'U_zb'
+    param_b[0].name = '%s.[Wb, W_rb, W_zb]' % name
+    param_b[1].name = '%s.Ub' % name
+    param_b[2].name = '%s.U_rb' % name
+    param_b[3].name = '%s.U_zb' % name
 
     return param_f + param_b
 
