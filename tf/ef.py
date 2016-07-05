@@ -38,16 +38,12 @@ tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 FLAGS = tf.app.flags.FLAGS
 
 
-def ef_single_state(inputs, labels, sketches, acc_sketches, indices, vocab_size, K, D, N, J, L, r,
+def ef_single_state(inputs, labels, vocab_size, K, D, N, J, L, r,
                     lstm_units):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
     :param inputs:
     :param labels:
-    :param sketches:
-    :param acc_sketches:
-    :param indices:
-    :param vocab_size:
     :param K:
     :param D:
     :param N:
@@ -70,14 +66,25 @@ def ef_single_state(inputs, labels, sketches, acc_sketches, indices, vocab_size,
         :return:
         """
 
+        print "x",x
+        print "y", y
+
+
         with tf.variable_scope("ef_model") as scope:
             if not init:
                 scope.reuse_variables()
+                print "reusing"
+            else:
+                print "new"
+
+            #print scope.reuse
+
             with tf.name_scope("embedding"):
                 M = tf.get_variable(name="M", shape=[vocab_size, D],
                                     initializer=tf.random_uniform_initializer(dtype=tf.float32,
                                     minval=-1, maxval=1.0))
                 emb = tf.nn.embedding_lookup(M, x, name="H")  # LxD
+                print "emb", emb
 
             if lstm_units > 0:
                 with tf.name_scope("lstm"):
@@ -242,30 +249,37 @@ def ef_single_state(inputs, labels, sketches, acc_sketches, indices, vocab_size,
             labels_pred = tf.argmax(p, 1)
 
         with tf.variable_scope("xent"):
-            cross_entropy = tf.reduce_mean(-tf.reduce_sum(tf.one_hot(y, depth=K) * tf.log(p),
-                                           reduction_indices=[1]))  # avg xent over words
-        return cross_entropy, labels_pred, logits_packed, final_S, H
+            cross_entropy = -tf.reduce_sum(tf.one_hot(y, depth=K) * tf.log(p),
+                                           reduction_indices=[1]) # xent over words
+        return cross_entropy, labels_pred
 
-    outputs = []
-    losses = []
-    logits = []
-    final_sketches = []
-    embeddings = []
-    init = True
-    for x, y, S, b, word_indices in zip(inputs, labels, sketches, acc_sketches, indices):
-        loss, output, logit, final_sketch, embedding = forward(x, y, S, b, word_indices, init=init)
-        outputs.append(output)
-        losses.append(loss)
-        logits.append(logit)
-        final_sketches.append(final_sketch)
-        embeddings.append(embedding)
-        init = False
-    outputs = tf.pack(outputs)
-    losses = tf.pack(losses)
-    logits = tf.pack(logits)
-    final_sketches = tf.pack(final_sketches)
-    embeddings = tf.pack(embeddings)
-    return outputs, losses, logits, final_sketches, embeddings
+
+    print inputs, labels
+    state_size = lstm_units if lstm_units > 0 else D
+
+    def single_step(i):
+        input = tf.squeeze(tf.slice(inputs, [i, 0], size=[1, L]))
+        label = tf.squeeze(tf.slice(labels, [i, 0], size=[1, L]))
+        sketch = tf.zeros(shape=[state_size, L], dtype=tf.float32)
+        acc_sketch = tf.zeros(shape=[L], dtype=tf.float32)
+        indices = tf.range(L)
+        init = tf.equal(i, 0)
+        def forward_init():
+            return forward(input, label, sketch, acc_sketch, indices, init=True)
+
+        def forward_reuse():
+            return forward(input, label, sketch, acc_sketch, indices, init=False)
+
+        cross_entropy, labels_pred = tf.cond(init, forward_init, forward_reuse)
+        print cross_entropy, labels_pred
+
+        # labels needs cast because packing after map
+        return cross_entropy, tf.cast(labels_pred, tf.float32)
+
+    iterator = tf.range(tf.shape(inputs))  # forward pass for all inputs in batch
+    losses_and_predictions = tf.map_fn(single_step, iterator, dtype=tf.float32)
+    print "Losses and pred", losses_and_predictions
+    return losses_and_predictions
 
 
 class EasyFirstModel():
@@ -308,12 +322,6 @@ class EasyFirstModel():
         self.optimizer = optimizer_map.get(optimizer,
                                           tf.train.GradientDescentOptimizer)(self.learning_rate)
 
-        # prepare input feeds
-        self.inputs = []
-        self.labels = []
-        self.sketches = []
-        self.acc_sketches = []
-        self.indices = []
         if self.lstm_units > 0:
             self.state_size = self.lstm_units
             print "Model with LSTM RNN encoder of %d units and embeddings of size %d" % \
@@ -322,41 +330,45 @@ class EasyFirstModel():
             self.state_size = D
             print "Model with simple embeddings of size %d" % self.D
 
-        for i in xrange(batch_size):  # feed batch_size many xs and ys to graph
-            self.inputs.append(tf.placeholder(tf.int32, shape=[self.L], name="input{0}".format(i)))
-            self.labels.append(tf.placeholder(tf.int32, shape=[self.L], name="label{0}".format(i)))
-            self.sketches.append(tf.placeholder(tf.float32, shape=[self.state_size, self.L],
-                                                name="sketch{0}".format(i)))
-            self.acc_sketches.append(tf.placeholder(tf.float32, shape=[self.L],
-                                                    name="acc_sketch{0}".format(i)))
-            self.indices.append(tf.placeholder(tf.int32, shape=[self.L],
-                                               name="indices{0}".format(i)))
+        # feed whole batch
+        self.inputs = tf.placeholder(tf.int32, shape=[None, self.L], name="input")
+        self.labels = tf.placeholder(tf.int32, shape=[None, self.L], name="labels")
 
-        def ef_f(inputs, labels, sketches, acc_sketches, indices):
+        def ef_f(inputs, labels):
 
-            return ef_single_state(inputs, labels, sketches, acc_sketches, indices,
+            return ef_single_state(inputs, labels,
                                     vocab_size=vocab_size, K=self.K, D=self.D, N=self.N,
                                     J=self.J, L=self.L, r=self.r, lstm_units=lstm_units)
 
-        self.outputs, self.losses, self.logits, self.final_sketches, self.embeddings = \
-            ef_f(self.inputs, self.labels, self.sketches, self.acc_sketches, self.indices)
-
+        self.output = ef_f(self.inputs, self.labels)  # output contains losses and labels for all instances in batch -> need to be extracted separately
+        print "losses and labels", self.output
+        batch_size = tf.shape(self.inputs)[0]
+        print "batch size", batch_size
+        instances_iterator = tf.range(batch_size)
+        def get_loss(i):
+            return tf.squeeze(tf.slice(self.output, [2*i, 0, 0], [1, 1, L]))
+        def get_predictions(i):
+            return tf.squeeze(tf.slice(self.output, [2*i+1, 0, 0], [1, 1, L]))
+        self.losses = tf.reduce_mean(tf.map_fn(get_loss, instances_iterator, dtype=tf.float32), 1)  # mean loss per sentence
+        print "losses", self.losses
+        self.predictions = tf.map_fn(get_predictions, instances_iterator, name="predictions", dtype=tf.float32)
+        print "predictions", self.predictions
         # gradients and update operation for training the model
+
         if not forward_only:
             params = tf.trainable_variables()
-            #print "updating",  [param.name for param in params]
+            print "updating",  [param.name for param in params]
             gradients = tf.gradients(self.losses, params)
+            print "gradients", gradients
             if max_gradient_norm > -1:
                 print "Clipping gradient to %f" % max_gradient_norm
                 clipped_gradients, norm = tf.clip_by_global_norm(gradients, max_gradient_norm)
                 self.gradient_norms = norm
-                self.updates = (self.optimizer.apply_gradients(
-                    zip(clipped_gradients, params), global_step=self.global_step))
+                self.updates = (self.optimizer.apply_gradients(zip(clipped_gradients, params)))
             else:
                 print "No gradient clipping"
                 self.gradient_norms = tf.global_norm(gradients)
-                self.updates = (self.optimizer.apply_gradients(
-                    zip(gradients, params), global_step=self.global_step))
+                self.updates = (self.optimizer.apply_gradients(zip(gradients, params)))
 
         self.saver = tf.train.Saver(tf.all_variables())
 
@@ -371,34 +383,34 @@ class EasyFirstModel():
         """
         # Input feed: encoder inputs, decoder inputs, target_weights, as provided.
         input_feed = {}
-        for l in xrange(self.batch_size):
+        #for l in xrange(self.batch_size):
             # variables dependent on sequence length
-            L_i = len(inputs[l])
-            S_0 = np.zeros((self.state_size, L_i), dtype=float)
-            b_0 = np.array([1./L_i]*L_i)
+            #L_i = len(inputs[l])
+            #S_0 = np.zeros((self.state_size, L_i), dtype=float)
+            #b_0 = np.array([1./L_i]*L_i)
             #print S_0, b_0
-            word_indices_i = np.arange(L_i)
-            input_feed[self.inputs[l].name] = inputs[l]
-            input_feed[self.labels[l].name] = labels[l]
-            input_feed[self.sketches[l].name] = S_0
-            input_feed[self.acc_sketches[l].name] = b_0
-            input_feed[self.indices[l].name] = word_indices_i
+            #word_indices_i = np.arange(L_i)
+            #input_feed[self.inputs[l].name] = inputs[l]
+            #input_feed[self.labels[l].name] = labels[l]
+            #input_feed[self.sketches[l].name] = S_0
+            #input_feed[self.acc_sketches[l].name] = b_0
+            #input_feed[self.indices[l].name] = word_indices_i
+
+        input_feed[self.inputs.name] = inputs  # list
+        input_feed[self.labels.name] = labels  # list
+
 
         if not forward_only:
             output_feed = [self.updates,
                      self.gradient_norms,
                      self.losses,
-                     self.outputs,
-                     self.logits,
-                     self.final_sketches,
-                     self.embeddings]
+                     self.predictions]
         else:
-            output_feed = [self.losses, self.outputs]
+            output_feed = [self.losses, self.predictions]
 
         outputs = session.run(output_feed, input_feed)
         if not forward_only:
-            return outputs[1], outputs[2], outputs[3], outputs[4], outputs[5], outputs[6]
-        else:
+            return outputs[1], outputs[2], outputs[3]  # grad norm, loss, predictions
             return outputs[0], outputs[1]  # loss, predictions
 
 
@@ -527,7 +539,7 @@ def test():
         test_predictions = []
         loss = 0
         while eval_sample < len(X_test):
-            x_i = X_test[eval_sample:eval_sample+FLAGS.batch_size]
+            x_i = X_test[eval_sample:eval_sample+FLAGS.batch_size]  # TODO should be without batch
             y_i = Y_test[eval_sample:eval_sample+FLAGS.batch_size]
 
             step_loss, predictions = model.step(sess, x_i, y_i, True)
