@@ -3,6 +3,7 @@ import tensorflow as tf
 import numpy as np
 import time
 from sklearn.utils import shuffle
+import sys
 
 
 """
@@ -18,6 +19,7 @@ tf.app.flags.DEFINE_integer("batch_size", 1,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("vocab_size", 10, "Vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory")
+tf.app.flags.DEFINE_string("train_dir", "models/", "Model directory")
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping")
@@ -27,11 +29,12 @@ tf.app.flags.DEFINE_integer("D", 11, "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("N", 5, "number of sketches")
 tf.app.flags.DEFINE_integer("J", 100, "dimensionality of hidden layer")
 tf.app.flags.DEFINE_integer("r", 2, "context size")
-tf.app.flags.DEFINE_boolean("train", True, "training model")
+tf.app.flags.DEFINE_boolean("train", False, "training model")
 tf.app.flags.DEFINE_integer("epochs", 100, "training epochs")
 tf.app.flags.DEFINE_boolean("shuffle", True, "shuffling training data before each epoch")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 10, "save model every x epochs")
 tf.app.flags.DEFINE_boolean("lstm_units", 0, "number of LSTM-RNN encoder units")
+tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 FLAGS = tf.app.flags.FLAGS
 
 
@@ -409,8 +412,13 @@ def create_model(session, forward_only=False):
     model = EasyFirstModel(FLAGS.K, FLAGS.D, FLAGS.N, FLAGS.J, FLAGS.L, FLAGS.r, FLAGS.vocab_size,
                            FLAGS.batch_size, FLAGS.optimizer, FLAGS.learning_rate,
                            FLAGS.max_gradient_norm, FLAGS.lstm_units, forward_only)
-    # TODO add loading from checkpoint
-    session.run(tf.initialize_all_variables())
+    checkpoint = tf.train.get_checkpoint_state(FLAGS.train_dir)
+    if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path):
+        print "Reading model parameters from %s" % checkpoint.model_checkpoint_path
+        model.saver.restore(session, checkpoint.model_checkpoint_path)
+    else:
+        print "Creating model with fresh parameters"
+        session.run(tf.initialize_all_variables())
     return model
 
 
@@ -420,7 +428,6 @@ def train():
     :return:
     """
     print "Training"
-    checkpoint_path = "checkpoints/"
 
     with tf.Session() as sess:
         model = create_model(sess, False)
@@ -487,7 +494,7 @@ def train():
                  train_accuracy, eval_acurracy)
 
             if epoch % FLAGS.checkpoint_freq == 0:
-                 model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+                 model.saver.save(sess, FLAGS.train_dir, global_step=model.global_step)
 
 def accuracy(y_i, predictions):
     correct_words, all = 0.0, 0.0
@@ -505,18 +512,82 @@ def test():
     :return:
     """
     print "Testing"
-    # TODO
-    # load model
-    # eval
+    with tf.Session() as sess:
+        # load model
+        model = create_model(sess, True)
+
+        # TODO read data
+        no_test_instances = 40
+        X_test = np.maximum(np.round(
+            np.random.rand(no_test_instances, FLAGS.L)*FLAGS.vocab_size-1, 0), 0)
+        Y_test = np.round(np.random.rand(no_test_instances, FLAGS.L), 0)
+
+        # eval
+        eval_sample = 0
+        test_predictions = []
+        loss = 0
+        while eval_sample < len(X_test):
+            x_i = X_test[eval_sample:eval_sample+FLAGS.batch_size]
+            y_i = Y_test[eval_sample:eval_sample+FLAGS.batch_size]
+
+            step_loss, predictions = model.step(sess, x_i, y_i, True)
+            loss += np.sum(step_loss)
+            test_predictions.append(predictions)
+
+            eval_sample += FLAGS.batch_size
+
+        test_accuracy = accuracy(Y_test, test_predictions[0])
+
+        print "Test avg loss %f, accuracy %f" % (loss/len(X_test), test_accuracy)
+
+
+def demo():
+    """
+    Test a model dynamically by reading input from stdin
+    :return:
+    """
+    with tf.Session() as sess:
+        # load model
+        model = create_model(sess, True)
+        sys.stdout.write("> ")
+        sys.stdout.flush()
+        sentence = sys.stdin.readline()
+        while sentence:
+            inputs = sentence.split()
+            if len(inputs) > model.L:
+                print "Input too long. Only sequences of length %d allowed." % model.L
+                break
+            elif len(inputs) < model.L:
+                print "Input too short. Only sequences of length %d allowed." % model.L
+                break
+            # TODO from words to vectors (word2id mapping or feature extraction)
+            x = [float(char) for char in inputs]
+            # flter OOV
+            x = [x_i if x_i < FLAGS.vocab_size else 0 for x_i in x]  # TODO ensure that there is an UNK symbol
+            y = [0 for char in inputs]  # dummy labels
+
+            step_loss, predictions = model.step(sess, [x], [y], True)
+            outputs = predictions[0]
+            print "prediction: ", outputs
+            sys.stdout.flush()
+            sys.stdout.write("> ")
+            sys.stdout.flush()
+            sentence = sys.stdin.readline()
+
+
 
 
 def main(_):
-    training = FLAGS.train
 
-    if training:
-        train()
+    if not FLAGS.interactive:
+        training = FLAGS.train
+
+        if training:
+            train()
+        else:
+            test()
     else:
-        test()
+        demo()
 
 
 if __name__ == "__main__":
