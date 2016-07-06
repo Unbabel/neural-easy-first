@@ -469,7 +469,7 @@ def train():
                 loss += np.sum(step_loss)
                 #print current_sample, x_i, _, y_i, predictions, step_loss, embeddings
                 # TODO regularizer
-                train_predictions.append(predictions)
+                train_predictions.append(predictions[0])
 
                 current_sample += FLAGS.batch_size
 
@@ -486,12 +486,12 @@ def train():
                 step_loss, predictions = model.step(sess, x_i, y_i, True)
                 step_time += (time.time() - start_time)
                 loss += np.sum(step_loss)
-                dev_predictions.append(predictions)
+                dev_predictions.append(predictions[0])
 
                 eval_sample += FLAGS.batch_size
 
-            train_accuracy = accuracy(Y_train, train_predictions[0])
-            eval_acurracy = accuracy(Y_dev, dev_predictions[0])
+            train_accuracy = accuracy(Y_train, train_predictions)
+            eval_acurracy = accuracy(Y_dev, dev_predictions)
 
             print "EPOCH %d: avg step time %fs, avg loss %f, train accuracy %f, dev accuracy %f" % \
                 (epoch+1, step_time/len(X_train), loss/len(X_train),
@@ -501,6 +501,12 @@ def train():
                  model.saver.save(sess, FLAGS.train_dir, global_step=model.global_step)
 
 def accuracy(y_i, predictions):
+    """
+    Accuracy of word predictions
+    :param y_i:
+    :param predictions:
+    :return:
+    """
     correct_words, all = 0.0, 0.0
     for y, y_pred in zip(y_i, predictions):
         for y_w, y_pred_w in zip(y, y_pred):  # words
