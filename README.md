@@ -19,9 +19,9 @@ modify this to include other models either in theano
 or TF
 
     python train.py \
-        -train-feat data/WMT2016/task2_en-de_training/train.basic_features_with_tags \
+        -train-feat  data/WMT2016/task2_en-de_training/train.basic_features_with_tags \
         -dev-feat data/WMT2016/task2_en-de_dev/dev.basic_features_with_tags \
-        -model-folder . \
-        -model-type quetch \
-        -embeddings_src data/WMT2016/data/embeddings/polyglot-de-wmt2016.txt  \
-        -embeddings_trg data/WMT2016/data/embeddings/polyglot-en-wmt2016.txt  
+        -model-folder  . \
+        -model-type theano-neural-easy-first \
+        -embeddings_src data/embeddings/polyglot-de-wmt2016.txt \
+        -embeddings_trg data/embeddings/polyglot-en-wmt2016.txt
