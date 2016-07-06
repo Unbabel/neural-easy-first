@@ -435,14 +435,18 @@ def train():
         # TODO read the data
         # dummy data
         no_train_instances = 40
-        X_train = np.maximum(np.round(
-            np.random.rand(no_train_instances, FLAGS.L)*FLAGS.vocab_size-1, 0), 0)
-        Y_train = np.round(np.random.rand(no_train_instances, FLAGS.L), 0)
+        X_train = np.floor(
+            np.random.rand(no_train_instances, FLAGS.L)*FLAGS.vocab_size)
+        # Create a simple deterministic target just as a sanity check.
+        Y_train = np.array(X_train < FLAGS.vocab_size/2.)
+        #Y_train = np.round(np.random.rand(no_train_instances, FLAGS.L), 0)
 
         no_dev_instances = 10
-        X_dev = np.maximum(np.round(
-            np.random.rand(no_dev_instances, FLAGS.L)*FLAGS.vocab_size-1, 0), 0)
-        Y_dev = np.round(np.random.rand(no_dev_instances, FLAGS.L), 0)
+        X_dev = np.floor(
+            np.random.rand(no_dev_instances, FLAGS.L)*FLAGS.vocab_size)
+        # Create a simple deterministic target just as a sanity check.
+        Y_dev = np.array(X_dev < FLAGS.vocab_size/2.)
+        #Y_dev = np.round(np.random.rand(no_dev_instances, FLAGS.L), 0)
 
         # Training loop
         for epoch in xrange(FLAGS.epochs):
@@ -518,9 +522,11 @@ def test():
 
         # TODO read data
         no_test_instances = 40
-        X_test = np.maximum(np.round(
-            np.random.rand(no_test_instances, FLAGS.L)*FLAGS.vocab_size-1, 0), 0)
-        Y_test = np.round(np.random.rand(no_test_instances, FLAGS.L), 0)
+        X_test = np.floor(
+            np.random.rand(no_test_instances, FLAGS.L)*FLAGS.vocab_size)
+        # Create a simple deterministic target just as a sanity check.
+        Y_test = np.array(X_test < FLAGS.vocab_size/2.)
+        #Y_test = np.round(np.random.rand(no_test_instances, FLAGS.L), 0)
 
         # eval
         eval_sample = 0
