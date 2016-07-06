@@ -1,13 +1,39 @@
-TF has to be installed with specific URLs for each platform 
+# Neural Easy-First Model in Tensorflow #
 
-    https://www.tensorflow.org/versions/r0.9/get_started/os_setup.html#pip-installation
+##1. Prerequisites##
 
-For Example Mac OS X, CPU only, Python 2.7, needs
+  TF has to be installed with specific URLs for each platform
 
-    virtualenv tf
-    source tf/bin/activate
-    pip install --upgrade https://storage.googleapis.com/tensorflow/mac/tensorflow-0.9.0-py2-none-any.whl
+      https://www.tensorflow.org/versions/r0.9/get_started/os_setup.html#pip-installation
 
-The rest can be installed with the usual
+  For Example Mac OS X, CPU only, Python 2.7, needs
 
-    pip install -r requirements.txt
+      virtualenv tf
+      source tf/bin/activate
+      pip install --upgrade https://storage.googleapis.com/tensorflow/mac/tensorflow-0.9.0-py2-none-any.whl
+
+  The rest can be installed with the usual
+
+      pip install -r requirements.txt
+
+
+##2. Training a model##
+
+  See all options
+  
+      `python ef.py -h`
+    
+  Train a model
+  
+      `python ef.py --train`
+
+
+##3. Testing a model##
+
+  1. On batch data
+  
+    `python ef.py`
+
+  2. Interactively
+  
+    `python ef.py --interactive`
