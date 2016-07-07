@@ -69,7 +69,8 @@ def random_interdependent_data(numbers_of_instances, instance_length, vocab_size
         ys.append(np.array(y))
     return xs, ys
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     print random_data(3, 4, 10, 3)
     print random_deterministic_data(3, 4, 10, 3)
     print random_interdependent_data(2, 5, 4, 3)

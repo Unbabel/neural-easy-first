@@ -39,7 +39,7 @@ tf.app.flags.DEFINE_boolean("concat", False, "concatenating s_i and h_i for pred
 tf.app.flags.DEFINE_boolean("train", False, "training model")
 tf.app.flags.DEFINE_integer("epochs", 100, "training epochs")
 tf.app.flags.DEFINE_boolean("shuffle", False, "shuffling training data before each epoch")
-tf.app.flags.DEFINE_integer("checkpoint_freq", 10, "save model every x epochs")
+tf.app.flags.DEFINE_integer("checkpoint_freq", 5, "save model every x epochs")
 tf.app.flags.DEFINE_integer("lstm_units", 10, "number of LSTM-RNN encoder units")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
@@ -567,15 +567,19 @@ def test():
     :return:
     """
     print "Testing"
+    FLAGS.restore = True  # has to be loaded
     with tf.Session() as sess:
         # load model
         model = create_model(sess, True)
 
-        # TODO read data
+        # TODO use real data
         no_test_instances = 40
-        X_test, Y_test = random_interdependent_data(no_test_instances, FLAGS.L, FLAGS.vocab_size,
-                                                  FLAGS.K)
         print "Testing on %d instances" % no_test_instances
+
+        # TODO doesn't make sense for testing, since distributions differ from training
+        xs, ys = random_interdependent_data([no_test_instances], FLAGS.L, FLAGS.vocab_size,
+                                            FLAGS.K)
+        X_test, Y_test = xs[0], ys[0]
 
         # eval
         eval_sample = 0
@@ -601,9 +605,9 @@ def demo():
     Test a model dynamically by reading input from stdin
     :return:
     """
+    FLAGS.restore = True
     with tf.Session() as sess:
         # load model
-        FLAGS.restore = True
         model = create_model(sess, True)
         sys.stdout.write("> ")
         sys.stdout.flush()

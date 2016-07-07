@@ -23,16 +23,15 @@
   
       python ef.py -h
     
-  Train a model
+  Train a model (and store in `models` directory)
   
       mkdir -p models
-      rm models/*
       python ef.py --train
 
 
 ##3. Testing a model##
 
-  1. On batch data
+  1. On batch data from stored model
   
     python ef.py
 
