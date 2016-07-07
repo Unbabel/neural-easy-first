@@ -4,17 +4,23 @@ import numpy as np
 import time
 from sklearn.utils import shuffle
 import sys
+from data_generator import *
 
 
 """
 Tensorflow implementation of the neural easy-first model
 - Single-State Model
+
+
+Tensorflow issues:
+- no rmsprop support for sparse gradient updates in version 0.9
+- no nested while loops supported in version 0.9
 """
 
 # Flags
-tf.app.flags.DEFINE_float("learning_rate", 0.1, "Learning rate.")
-tf.app.flags.DEFINE_string("optimizer", "sgd", "Optimizer [sgd, adam, adagrad, adadelta, momentum, "
-                                               "rmsprop]")
+tf.app.flags.DEFINE_float("learning_rate", 0.2, "Learning rate.")
+tf.app.flags.DEFINE_string("optimizer", "sgd", "Optimizer [sgd, adam, adagrad, adadelta, "
+                                                    "momentum]")
 tf.app.flags.DEFINE_integer("batch_size", 1,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("vocab_size", 10, "Vocabulary size.")
@@ -26,20 +32,39 @@ tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for cl
 tf.app.flags.DEFINE_integer("L", 7, "length of sequences")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
 tf.app.flags.DEFINE_integer("D", 11, "dimensionality of embeddings")
-tf.app.flags.DEFINE_integer("N", 5, "number of sketches")
+tf.app.flags.DEFINE_integer("N", 7, "number of sketches")
 tf.app.flags.DEFINE_integer("J", 100, "dimensionality of hidden layer")
-tf.app.flags.DEFINE_integer("r", 2, "context size")
+tf.app.flags.DEFINE_integer("r", 1, "context size")
+tf.app.flags.DEFINE_boolean("concat", False, "concatenating s_i and h_i for prediction")
 tf.app.flags.DEFINE_boolean("train", False, "training model")
 tf.app.flags.DEFINE_integer("epochs", 100, "training epochs")
-tf.app.flags.DEFINE_boolean("shuffle", True, "shuffling training data before each epoch")
+tf.app.flags.DEFINE_boolean("shuffle", False, "shuffling training data before each epoch")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 10, "save model every x epochs")
-tf.app.flags.DEFINE_boolean("lstm_units", 0, "number of LSTM-RNN encoder units")
+tf.app.flags.DEFINE_integer("lstm_units", 10, "number of LSTM-RNN encoder units")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
+tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
 FLAGS = tf.app.flags.FLAGS
 
 
+def glorot_init(shape, distribution, type):
+    """
+    Glorot initialization scheme
+    Glorot & Bengio: http://jmlr.org/proceedings/papers/v9/glorot10a/glorot10a.pdf
+    :param shape:
+    :param distribution:
+    :param type:
+    :return:
+    """
+    fan_in, fan_out = shape
+    if distribution=="uniform":
+        val = np.sqrt(6./(fan_in+fan_out))
+        return tf.random_uniform_initializer(dtype=type, minval=-val, maxval=val)
+    else:
+        val = np.sqrt(2./(fan_in+fan_out))
+        return tf.random_normal_initializer(dtype=type, stddev=val)
+
 def ef_single_state(inputs, labels, sketches, acc_sketches, indices, vocab_size, K, D, N, J, L, r,
-                    lstm_units):
+                    lstm_units, concat):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
     :param inputs:
@@ -75,12 +100,13 @@ def ef_single_state(inputs, labels, sketches, acc_sketches, indices, vocab_size,
                 scope.reuse_variables()
             with tf.name_scope("embedding"):
                 M = tf.get_variable(name="M", shape=[vocab_size, D],
-                                    initializer=tf.random_uniform_initializer(dtype=tf.float32,
-                                    minval=-1, maxval=1.0))
+                                    initializer=glorot_init((vocab_size, D),
+                                                            "uniform", type=tf.float32))
                 emb = tf.nn.embedding_lookup(M, x, name="H")  # LxD
 
             if lstm_units > 0:
                 with tf.name_scope("lstm"):
+                    # alternatively use LSTMCell supporting peep-holes and output projection
                     cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=lstm_units, state_is_tuple=True)
                     rnn_outputs, rnn_states = tf.nn.rnn(cell, [emb],
                                     sequence_length=tf.fill([tf.shape(x)[0]], L), dtype=tf.float32)
@@ -96,26 +122,35 @@ def ef_single_state(inputs, labels, sketches, acc_sketches, indices, vocab_size,
                 V = tf.get_variable(name="V", shape=[L, J],
                                     initializer=tf.random_uniform_initializer(dtype=tf.float32))
                 W_hz = tf.get_variable(name="W_hz", shape=[J, state_size],
-                                            initializer=tf.random_uniform_initializer(
-                                                dtype=tf.float32))
+                                       initializer=glorot_init((J, state_size),
+                                                               "uniform", type=tf.float32))
                 W_sz = tf.get_variable(name="W_sz", shape=[J, state_size*(2*r+1)],
-                                       initializer=tf.random_uniform_initializer(dtype=tf.float32))
+                                       initializer=glorot_init((J, state_size*(2*r+1)),
+                                                               "uniform", type=tf.float32))
                 W_bz = tf.get_variable(name="W_bz", shape=[J, 2*r+1],
-                                       initializer=tf.random_uniform_initializer(dtype=tf.float32))
+                                       initializer=glorot_init((J, 2*r+1),
+                                                               "uniform", type=tf.float32))
 
             with tf.name_scope("beta"):
                 W_hs = tf.get_variable(name="W_hs", shape=[state_size, state_size],
-                                       initializer=tf.random_uniform_initializer(dtype=tf.float32))
+                                       initializer=glorot_init((state_size, state_size),
+                                                               "uniform", type=tf.float32))
                 W_ss = tf.get_variable(name="W_ss", shape=[state_size*(2*r+1), state_size],
-                                       initializer=tf.random_uniform_initializer(dtype=tf.float32))
+                                       initializer=glorot_init((state_size*(2*r+1), state_size),
+                                                               "uniform", type=tf.float32))
                 w_s = tf.get_variable(name="w_s", shape=[state_size],
                                       initializer=tf.random_uniform_initializer(dtype=tf.float32))
 
             with tf.name_scope("prediction"):
                 w_p = tf.get_variable(name="w_p", shape=[K],
                                        initializer=tf.random_uniform_initializer(dtype=tf.float32))
-                W_sp = tf.get_variable(name="W_sp", shape=[state_size, K],
-                                       initializer=tf.random_uniform_initializer(dtype=tf.float32))
+
+                wsp_size = state_size
+                if concat:  # h_i and s_i are concatenated before prediction
+                    wsp_size = state_size*2
+                W_sp = tf.get_variable(name="W_sp", shape=[wsp_size, K],
+                                       initializer=glorot_init((wsp_size, K),
+                                                               "uniform", type=tf.float32))
 
             with tf.name_scope("paddings"):
                 padding_s_col = tf.constant([[0, 0], [r, r]], name="padding_s_col")
@@ -223,8 +258,11 @@ def ef_single_state(inputs, labels, sketches, acc_sketches, indices, vocab_size,
                 """
                 Score the word at index i
                 """
-                S_i = tf.slice(final_S, [0, i], [state_size, 1])  # state vector for this word (column)
-                l = tf.matmul(S_i, W_sp, transpose_a=True) + w_p
+                s_i = tf.slice(final_S, [0, i], [state_size, 1])  # state vector for this word (column)
+                h_i = tf.slice(H, [i, 0], [1, state_size], name="h_i")
+                if concat:
+                    s_i = tf.concat(0, [s_i, tf.transpose(h_i)])
+                l = tf.matmul(s_i, W_sp, transpose_a=True) + w_p
                 shaped = tf.reshape(l, [K])
                 return shaped
 
@@ -273,7 +311,7 @@ class EasyFirstModel():
     Neural easy-first model
     """
     def __init__(self, K, D, N, J, L, r, vocab_size, batch_size, optimizer, learning_rate,
-                 max_gradient_norm, lstm_units, forward_only=False):
+                 max_gradient_norm, lstm_units, concat, forward_only=False):
         """
         Initialize the model
         :param K:
@@ -301,6 +339,7 @@ class EasyFirstModel():
         self.vocab_size = vocab_size
         self.batch_size = batch_size
         self.learning_rate = learning_rate
+        self.concat = concat
         self.global_step = tf.Variable(0, trainable=False)
         optimizer_map = {"sgd": tf.train.GradientDescentOptimizer, "adam": tf.train.AdamOptimizer,
                         "adagrad": tf.train.AdagradOptimizer, "adadelta": tf.train.AdadeltaOptimizer,
@@ -322,6 +361,14 @@ class EasyFirstModel():
             self.state_size = D
             print "Model with simple embeddings of size %d" % self.D
 
+        if self.N > 0:
+            print "Model with %d sketches" % self.N
+        else:
+            print "No sketches"
+
+        if self.concat or self.N == 0:
+            print "Concatenating H and S for predictions"
+
         for i in xrange(batch_size):  # feed batch_size many xs and ys to graph
             self.inputs.append(tf.placeholder(tf.int32, shape=[self.L], name="input{0}".format(i)))
             self.labels.append(tf.placeholder(tf.int32, shape=[self.L], name="label{0}".format(i)))
@@ -335,8 +382,9 @@ class EasyFirstModel():
         def ef_f(inputs, labels, sketches, acc_sketches, indices):
 
             return ef_single_state(inputs, labels, sketches, acc_sketches, indices,
-                                    vocab_size=vocab_size, K=self.K, D=self.D, N=self.N,
-                                    J=self.J, L=self.L, r=self.r, lstm_units=lstm_units)
+                                   vocab_size=vocab_size, K=self.K, D=self.D, N=self.N,
+                                   J=self.J, L=self.L, r=self.r, lstm_units=lstm_units,
+                                   concat=self.concat)
 
         self.outputs, self.losses, self.logits, self.final_sketches, self.embeddings = \
             ef_f(self.inputs, self.labels, self.sketches, self.acc_sketches, self.indices)
@@ -409,11 +457,13 @@ def create_model(session, forward_only=False):
     :param forward_only:
     :return:
     """
-    model = EasyFirstModel(FLAGS.K, FLAGS.D, FLAGS.N, FLAGS.J, FLAGS.L, FLAGS.r, FLAGS.vocab_size,
-                           FLAGS.batch_size, FLAGS.optimizer, FLAGS.learning_rate,
-                           FLAGS.max_gradient_norm, FLAGS.lstm_units, forward_only)
+    model = EasyFirstModel(K=FLAGS.K, D=FLAGS.D, N=FLAGS.N, J=FLAGS.J, L=FLAGS.L, r=FLAGS.r,
+                           vocab_size=FLAGS.vocab_size, batch_size=FLAGS.batch_size,
+                           optimizer=FLAGS.optimizer, learning_rate=FLAGS.learning_rate,
+                           max_gradient_norm=FLAGS.max_gradient_norm, lstm_units=FLAGS.lstm_units,
+                           concat=FLAGS.concat, forward_only=forward_only)
     checkpoint = tf.train.get_checkpoint_state(FLAGS.train_dir)
-    if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path):
+    if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
         print "Reading model parameters from %s" % checkpoint.model_checkpoint_path
         model.saver.restore(session, checkpoint.model_checkpoint_path)
     else:
@@ -434,19 +484,14 @@ def train():
 
         # TODO read the data
         # dummy data
-        no_train_instances = 40
-        X_train = np.floor(
-            np.random.rand(no_train_instances, FLAGS.L)*FLAGS.vocab_size)
-        # Create a simple deterministic target just as a sanity check.
-        Y_train = np.array(X_train < FLAGS.vocab_size/2.)
-        #Y_train = np.round(np.random.rand(no_train_instances, FLAGS.L), 0)
-
+        no_train_instances = 1000
         no_dev_instances = 10
-        X_dev = np.floor(
-            np.random.rand(no_dev_instances, FLAGS.L)*FLAGS.vocab_size)
-        # Create a simple deterministic target just as a sanity check.
-        Y_dev = np.array(X_dev < FLAGS.vocab_size/2.)
-        #Y_dev = np.round(np.random.rand(no_dev_instances, FLAGS.L), 0)
+        print "Training on %d instances" % no_train_instances
+        print "Validating on %d instances" % no_dev_instances
+
+        xs, ys = random_interdependent_data([no_train_instances, no_dev_instances], FLAGS.L, FLAGS.vocab_size,
+                                                      FLAGS.K)
+        X_train, Y_train, X_dev, Y_dev = xs[0], ys[0], xs[1], ys[1]
 
         # Training loop
         for epoch in xrange(FLAGS.epochs):
@@ -528,11 +573,9 @@ def test():
 
         # TODO read data
         no_test_instances = 40
-        X_test = np.floor(
-            np.random.rand(no_test_instances, FLAGS.L)*FLAGS.vocab_size)
-        # Create a simple deterministic target just as a sanity check.
-        Y_test = np.array(X_test < FLAGS.vocab_size/2.)
-        #Y_test = np.round(np.random.rand(no_test_instances, FLAGS.L), 0)
+        X_test, Y_test = random_interdependent_data(no_test_instances, FLAGS.L, FLAGS.vocab_size,
+                                                  FLAGS.K)
+        print "Testing on %d instances" % no_test_instances
 
         # eval
         eval_sample = 0
@@ -544,11 +587,11 @@ def test():
 
             step_loss, predictions = model.step(sess, x_i, y_i, True)
             loss += np.sum(step_loss)
-            test_predictions.append(predictions)
+            test_predictions.append(predictions[0])
 
             eval_sample += FLAGS.batch_size
 
-        test_accuracy = accuracy(Y_test, test_predictions[0])
+        test_accuracy = accuracy(Y_test, test_predictions)
 
         print "Test avg loss %f, accuracy %f" % (loss/len(X_test), test_accuracy)
 
@@ -560,6 +603,7 @@ def demo():
     """
     with tf.Session() as sess:
         # load model
+        FLAGS.restore = True
         model = create_model(sess, True)
         sys.stdout.write("> ")
         sys.stdout.flush()
@@ -585,8 +629,6 @@ def demo():
             sys.stdout.write("> ")
             sys.stdout.flush()
             sentence = sys.stdin.readline()
-
-
 
 
 def main(_):
