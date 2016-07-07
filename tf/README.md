@@ -21,19 +21,21 @@
 
   See all options
   
-      `python ef.py -h`
+      python ef.py -h
     
   Train a model
   
-      `python ef.py --train`
+      mkdir -p models
+      rm models/*
+      python ef.py --train
 
 
 ##3. Testing a model##
 
   1. On batch data
   
-    `python ef.py`
+    python ef.py
 
   2. Interactively
   
-    `python ef.py --interactive`
+    python ef.py --interactive
