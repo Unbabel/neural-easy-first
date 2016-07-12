@@ -63,7 +63,7 @@ def glorot_init(shape, distribution, type):
         val = np.sqrt(2./(fan_in+fan_out))
         return tf.random_normal_initializer(dtype=type, stddev=val)
 
-def ef_single_state(inputs, labels, vocab_size, K, D, N, J, L, r,
+def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r,
                     lstm_units, concat):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
@@ -80,7 +80,7 @@ def ef_single_state(inputs, labels, vocab_size, K, D, N, J, L, r,
     :return:
     """
 
-    def forward(x, y):
+    def forward(x, y, mask, seq_lens):
         """
         Compute a forward step for the easy first model and return loss and predictions for a batch
         :param x:
@@ -99,7 +99,6 @@ def ef_single_state(inputs, labels, vocab_size, K, D, N, J, L, r,
                 with tf.name_scope("lstm"):
                     # alternatively use LSTMCell supporting peep-holes and output projection
                     cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=lstm_units, state_is_tuple=True)
-
                     # see: https://github.com/aymericdamien/TensorFlow-Examples/blob/master/examples/3_NeuralNetworks/dynamic_rnn.py
                     # Permuting batch_size and n_steps
                     remb = tf.transpose(emb, [1, 0, 2])  # L x batch_size x D
@@ -109,8 +108,7 @@ def ef_single_state(inputs, labels, vocab_size, K, D, N, J, L, r,
                     remb = tf.split(0, L, remb)
 
                     rnn_outputs, rnn_states = tf.nn.rnn(cell, remb,
-                                    sequence_length=tf.fill([batch_size], L), dtype=tf.float32)
-                    # TODO feed actual sentence length
+                                    sequence_length=seq_lens, dtype=tf.float32)
                     # 'outputs' is a list of output at every timestep (until L)
                     rnn_outputs = tf.pack(rnn_outputs)
                     rnn_outputs = tf.transpose(rnn_outputs, [1, 0, 2])  # batch_size x L x lstm_units
@@ -161,7 +159,7 @@ def ef_single_state(inputs, labels, vocab_size, K, D, N, J, L, r,
                 padding_b = tf.constant([[0, 0], [r, r]], name="padding_b")
 
 
-        def z_i(i):
+        def z_i(i):  # TODO mask already here?
             """
             Compute attention weight
             :param i:
@@ -194,7 +192,7 @@ def ef_single_state(inputs, labels, vocab_size, K, D, N, J, L, r,
             for i in np.arange(L):
                 z.append(z_i(i))
             z_packed = tf.pack(z)
-            rz = tf.reshape(z_packed, [batch_size, L])
+            rz = tf.cast(mask, tf.float32)*tf.reshape(z_packed, [batch_size, L])  # masked
             a_n = tf.nn.softmax(rz)
             return a_n
 
@@ -210,7 +208,7 @@ def ef_single_state(inputs, labels, vocab_size, K, D, N, J, L, r,
             # now gather indices of padded
             transposed_S = tf.transpose(S_padded, [2,1,0])  # batch is last dimension -> L x state_size x batch_size
             contexts = []
-            for i in np.arange(r,L+r):
+            for i in np.arange(r, L+r):
                 # extract 2r+1 rows around i for each batch
                 context_i = transposed_S[i-r:i+r+1, :, :]  # 2*r+1 x state_size x batch_size
                 # concatenate
@@ -241,14 +239,15 @@ def ef_single_state(inputs, labels, vocab_size, K, D, N, J, L, r,
             _1 = tf.matmul(h_avg, W_hs)
             _2 = tf.matmul(s_avg, W_ss)
             s_n = tf.nn.tanh(_1 + _2 + w_s)  # batch_size x state_size
-            S_update = tf.batch_matmul(tf.expand_dims(s_n, [2]), tf.expand_dims(a_n, [1]))
+            S_update = tf.batch_matmul(tf.expand_dims(s_n, [2]), tf.expand_dims(a_n, [1]))  # TODO mask
             S_n = S + S_update
             return n+1, b_n, S_n
 
         with tf.variable_scope("sketching"):
             n = tf.constant(1, dtype=tf.int32, name="n")
             S = tf.zeros(shape=[batch_size, state_size, L], dtype=tf.float32)
-            b = tf.zeros(shape=[batch_size, L], dtype=tf.float32)  # TODO init uniformly
+            b = tf.ones(shape=[batch_size, L], dtype=tf.float32)
+            b = b/L
 
             (final_n, final_b, final_S) = tf.while_loop(
                 cond=lambda n, _1, _2: n <= N,
@@ -272,30 +271,24 @@ def ef_single_state(inputs, labels, vocab_size, K, D, N, J, L, r,
 
         with tf.variable_scope("scoring"):
 
-            logits = []
-            ps = []
             pred_labels = []
             losses = []
             for i in np.arange(L):  # compute score, probs and losses per word for whole batch
                 word_label_score = score(i)
-                logits.append(word_label_score)
                 word_label_probs = tf.nn.softmax(word_label_score)
-                ps.append(word_label_probs)
                 word_preds = tf.argmax(word_label_probs, 1)
                 pred_labels.append(word_preds)
                 y_words = tf.reshape(tf.slice(y, [0,i], [batch_size, 1]), [batch_size])
                 cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(word_label_score,
                                                                                y_words)
                 losses.append(cross_entropy)
-            pred_labels = tf.transpose(tf.pack(pred_labels), [1, 0])  # batch_size x L
-            losses = tf.reduce_mean(tf.transpose(tf.pack(losses), [1, 0]), 1)  # batch_size x 1
+            pred_labels = mask*tf.transpose(tf.pack(pred_labels), [1, 0])  # masked, batch_size x L
+            losses = tf.reduce_mean(tf.cast(mask, tf.float32)*tf.transpose(tf.pack(losses), [1, 0]),
+                                    1)  # masked, batch_size x 1
 
         return losses, pred_labels
 
-
-    print inputs, labels
-    losses, predictions = forward(inputs, labels)
-    print losses, predictions
+    losses, predictions = forward(inputs, labels, mask, seq_lens)
     return losses, predictions
 
 
@@ -359,15 +352,17 @@ class EasyFirstModel():
         # feed whole batch
         self.inputs = tf.placeholder(tf.int32, shape=[None, self.L], name="input")
         self.labels = tf.placeholder(tf.int32, shape=[None, self.L], name="labels")
+        self.mask = tf.placeholder(tf.int64, shape=[None, self.L], name="mask")
+        self.seq_lens = tf.placeholder(tf.int32, shape=[None], name="sent_lens")
 
-        def ef_f(inputs, labels):
+        def ef_f(inputs, labels, mask, seq_lens):
 
-            return ef_single_state(inputs, labels,
+            return ef_single_state(inputs, labels, mask, seq_lens,
                                    vocab_size=vocab_size, K=self.K, D=self.D, N=self.N,
                                    J=self.J, L=self.L, r=self.r, lstm_units=lstm_units,
                                    concat=self.concat)
 
-        self.losses, self.predictions = ef_f(self.inputs, self.labels)
+        self.losses, self.predictions = ef_f(self.inputs, self.labels, self.mask, self.seq_lens)
 
         # gradients and update operation for training the model
         if not forward_only:
@@ -394,24 +389,30 @@ class EasyFirstModel():
         :param forward_only:
         :return:
         """
-        # Input feed: encoder inputs, decoder inputs, target_weights, as provided.
+        # fill up data with paddings up till maxlen and create mask
+        inputs_padded, labels_padded, mask, seq_lens = pad_data(inputs, labels, max_len=self.L)
+
         input_feed = {}
-        input_feed[self.inputs.name] = inputs  # list
-        input_feed[self.labels.name] = labels  # list
+        input_feed[self.inputs.name] = inputs_padded  # list
+        input_feed[self.labels.name] = labels_padded  # list
+        input_feed[self.mask.name] = mask
+        input_feed[self.seq_lens.name] = seq_lens
 
         if not forward_only:
-            output_feed = [self.updates,
-                     self.gradient_norms,
-                     self.losses,
-                     self.predictions]
+            output_feed = [self.losses,
+                           self.predictions,
+                           self.updates,
+                           self.gradient_norms]
         else:
             output_feed = [self.losses, self.predictions]
 
         outputs = session.run(output_feed, input_feed)
-        if not forward_only:
-            return outputs[1], outputs[2], outputs[3]  # grad norm, loss, predictions
-        else:
-            return outputs[0], outputs[1]  # loss, predictions
+
+        predictions = []
+        for seq_len, pred in zip(seq_lens, outputs[1]):
+                predictions.append(pred[:seq_len].tolist())
+
+        return outputs[0], predictions  # loss, predictions
 
 
 def create_model(session, forward_only=False):
@@ -436,6 +437,33 @@ def create_model(session, forward_only=False):
     return model
 
 
+def pad_data(X, Y, max_len):
+    """
+    Pad data up till maximum length and create masks and lists of sentence lengths
+    :param X:
+    :param Y:
+    :param max_len:
+    :return:
+    """
+    seq_lens = []
+    masks = np.zeros(shape=(len(X), max_len))
+    i = 0
+    X_padded = np.zeros(shape=(len(X), max_len))
+    Y_padded = np.zeros(shape=(len(Y), max_len))
+
+    for x, y in zip(X, Y):
+        assert len(x) == len(y)
+        seq_len = len(x)
+        if seq_len > max_len:
+            seq_len = max_len
+        seq_lens.append(seq_len)
+        for j in range(seq_len):
+            masks[i][j] = 1
+            X_padded[i][j] = x[j]
+            Y_padded[i][j] = y[j]
+        i += 1
+    return X_padded, Y_padded, masks, seq_lens
+
 def train():
     """
     Train a model
@@ -448,14 +476,20 @@ def train():
 
         # TODO read the data
         # dummy data
-        no_train_instances = 13
-        no_dev_instances = 5
+        no_train_instances = 1000
+        no_dev_instances = 40
         print "Training on %d instances" % no_train_instances
         print "Validating on %d instances" % no_dev_instances
 
         xs, ys = random_interdependent_data([no_train_instances, no_dev_instances], FLAGS.L,
                                             FLAGS.vocab_size, FLAGS.K)
         X_train, Y_train, X_dev, Y_dev = xs[0], ys[0], xs[1], ys[1]
+
+        #X_train = [[2,2,2,2,3,3,3,3,2], [2,1,2], [2,1,2]]
+        #Y_train = [[0,1,1,1,1,1,1,1,1], [1,1,1], [1,0,1]]
+
+        #X_dev = [[2,2,2,2,3,3,3,3,2], [2,1,2], [2,1,2]]
+        #Y_dev = [[0,1,1,1,1,1,1,1,1], [1,1,1], [1,0,1]]
 
         # Training loop
         for epoch in xrange(FLAGS.epochs):
@@ -472,13 +506,13 @@ def train():
                 y_i = Y_train[current_sample:current_sample+FLAGS.batch_size]
 
                 start_time = time.time()
-                _, step_loss, predictions = model.batch_update(sess, x_i, y_i, False)
+                step_loss, predictions = model.batch_update(sess, x_i, y_i, False)
 
                 step_time += (time.time() - start_time)
-                loss += np.sum(step_loss)
+                loss += np.sum(step_loss)  # sum over batch
                 #print current_sample, x_i, _, y_i, predictions, step_loss, embeddings
                 # TODO regularizer
-                train_predictions.append(predictions[0])
+                train_predictions.extend(predictions)
 
                 current_sample += FLAGS.batch_size
 
@@ -493,7 +527,7 @@ def train():
                 step_loss, predictions = model.batch_update(sess, x_i, y_i, True)
                 step_time += (time.time() - start_time)
                 loss += np.sum(step_loss)
-                dev_predictions.append(predictions[0])
+                dev_predictions.extend(predictions)
 
                 eval_sample += FLAGS.batch_size
 
@@ -507,6 +541,7 @@ def train():
             if epoch % FLAGS.checkpoint_freq == 0:
                  model.saver.save(sess, FLAGS.train_dir, global_step=model.global_step)
 
+
 def accuracy(y_i, predictions):
     """
     Accuracy of word predictions
@@ -514,9 +549,11 @@ def accuracy(y_i, predictions):
     :param predictions:
     :return:
     """
+    assert len(y_i) == len(predictions)
     correct_words, all = 0.0, 0.0
     for y, y_pred in zip(y_i, predictions):
-        for y_w, y_pred_w in zip(y, y_pred):  # words
+        # predictions can be shorter than y, because inputs are cropped to specified maximum length
+        for y_w, y_pred_w in zip(y, y_pred):
             all += 1
             if y_pred_w == y_w:
                 correct_words += 1
@@ -576,12 +613,12 @@ def demo():
         sentence = sys.stdin.readline()
         while sentence:
             inputs = sentence.split()
-            if len(inputs) > model.L:
-                print "Input too long. Only sequences of length %d allowed." % model.L
-                break
-            elif len(inputs) < model.L:
-                print "Input too short. Only sequences of length %d allowed." % model.L
-                break
+            # if len(inputs) > model.L:
+            #    print "Input too long. Only sequences of length %d allowed." % model.L
+            #    break
+            #elif len(inputs) < model.L:
+            #    print "Input too short. Only sequences of length %d allowed." % model.L
+            #    break
             # TODO from words to vectors (word2id mapping or feature extraction)
             x = [float(char) for char in inputs]
             # filter OOV,  TODO ensure that there is an UNK symbol
@@ -611,3 +648,9 @@ def main(_):
 
 if __name__ == "__main__":
     tf.app.run()
+
+
+# TODO
+# - load existing embeddings
+# - padding & masking
+# - how to feed in QE data?
