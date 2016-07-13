@@ -143,7 +143,7 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                 padding_b = tf.constant([[0, 0], [r, r]], name="padding_b")
 
 
-        def z_i(i):  # TODO mask already here?
+        def z_i(i):
             """
             Compute attention weight
             :param i:
@@ -176,7 +176,7 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
             for i in np.arange(L):
                 z.append(z_i(i))
             z_packed = tf.pack(z)
-            rz = tf.cast(mask, tf.float32)*tf.reshape(z_packed, [batch_size, L])  # masked
+            rz = tf.reshape(z_packed, [batch_size, L])
             a_n = tf.nn.softmax(rz)
             return a_n
 
@@ -223,7 +223,7 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
             _1 = tf.matmul(h_avg, W_hs)
             _2 = tf.matmul(s_avg, W_ss)
             s_n = tf.nn.tanh(_1 + _2 + w_s)  # batch_size x state_size
-            S_update = tf.batch_matmul(tf.expand_dims(s_n, [2]), tf.expand_dims(a_n, [1]))  # TODO mask
+            S_update = tf.batch_matmul(tf.expand_dims(s_n, [2]), tf.expand_dims(a_n, [1]))
             S_n = S + S_update
             return n+1, b_n, S_n
 
@@ -590,5 +590,5 @@ if __name__ == "__main__":
 
 # TODO
 # - load existing embeddings
-# - padding & masking
 # - how to feed in QE data?
+# - variable sequence-length -> bucketing?
