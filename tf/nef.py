@@ -437,9 +437,11 @@ def train():
         print "Training on %d instances" % no_train_instances
         print "Validating on %d instances" % no_dev_instances
 
-        xs, ys = random_interdependent_data([no_train_instances, no_dev_instances], FLAGS.L,
+        xs, ys = random_interdependent_data_with_len([no_train_instances, no_dev_instances], FLAGS.L,
                                             FLAGS.vocab_size, FLAGS.K)
         X_train, Y_train, X_dev, Y_dev = xs[0], ys[0], xs[1], ys[1]
+
+        print "Training data samples:", X_train[:3], Y_train[:3]
 
         #X_train = [[2,2,2,2,3,3,3,3,2], [2,1,2], [2,1,2]]
         #Y_train = [[0,1,1,1,1,1,1,1,1], [1,1,1], [1,0,1]]
@@ -514,8 +516,8 @@ def test():
         print "Testing on %d instances" % no_test_instances
 
         # TODO doesn't make sense for testing, since distributions differ from training
-        xs, ys = random_interdependent_data([no_test_instances], FLAGS.L, FLAGS.vocab_size,
-                                            FLAGS.K)
+        xs, ys = random_interdependent_data_with_len([no_test_instances], FLAGS.L, FLAGS.vocab_size,
+                                                     FLAGS.K)
         X_test, Y_test = xs[0], ys[0]
 
         # eval
