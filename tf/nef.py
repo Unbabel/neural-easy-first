@@ -22,33 +22,40 @@ Tensorflow issues:
 tf.app.flags.DEFINE_float("learning_rate", 0.2, "Learning rate.")
 tf.app.flags.DEFINE_string("optimizer", "sgd", "Optimizer [sgd, adam, adagrad, adadelta, "
                                                     "momentum]")
-tf.app.flags.DEFINE_integer("batch_size", 2,
+tf.app.flags.DEFINE_integer("batch_size", 10,
                             "Batch size to use during training.")
-tf.app.flags.DEFINE_integer("vocab_size", 10, "Vocabulary size.")
-tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory")
-tf.app.flags.DEFINE_string("train_dir", "models/", "Model directory")
-tf.app.flags.DEFINE_integer("max_train_data_size", 0,
+tf.app.flags.DEFINE_integer("vocab_size", 20000, "Vocabulary size.")
+tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
+tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
+tf.app.flags.DEFINE_integer("max_train_data_size", 100,
                             "Limit on the size of training data (0: no limit).")
-tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping")
-tf.app.flags.DEFINE_integer("L", 7, "length of sequences")
+tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
+tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
+tf.app.flags.DEFINE_integer("buckets", 7, "number of buckets")
+tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
+tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
+#tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
+#tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
-tf.app.flags.DEFINE_integer("D", 10, "dimensionality of embeddings")
-tf.app.flags.DEFINE_integer("N", 7, "number of sketches")
+tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
+tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
 tf.app.flags.DEFINE_integer("J", 100, "dimensionality of hidden layer")
-tf.app.flags.DEFINE_integer("r", 1, "context size")
+tf.app.flags.DEFINE_integer("r", 2, "context size")
+tf.app.flags.DEFINE_integer("bad_weight", 0.9, "weight for BAD instances" )
 tf.app.flags.DEFINE_boolean("concat", False, "concatenating s_i and h_i for prediction")
 tf.app.flags.DEFINE_boolean("train", True, "training model")
 tf.app.flags.DEFINE_integer("epochs", 100, "training epochs")
 tf.app.flags.DEFINE_boolean("shuffle", False, "shuffling training data before each epoch")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 5, "save model every x epochs")
-tf.app.flags.DEFINE_integer("lstm_units", 10, "number of LSTM-RNN encoder units")
+tf.app.flags.DEFINE_integer("lstm_units", 100, "number of LSTM-RNN encoder units")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
 FLAGS = tf.app.flags.FLAGS
 
 
 def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r,
-                    lstm_units, concat):
+                    lstm_units, concat, window_size, src_embeddings=None, tgt_embeddings=None,
+                    class_weights=None):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
     :param inputs:
@@ -64,7 +71,7 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
     :return:
     """
 
-    def forward(x, y, mask, seq_lens):
+    def forward(x, y, mask, seq_lens, class_weights=None):
         """
         Compute a forward step for the easy first model and return loss and predictions for a batch
         :param x:
@@ -74,10 +81,36 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
         batch_size = tf.shape(x)[0]
         with tf.name_scope("ef_model"):
             with tf.name_scope("embedding"):
-                M = tf.get_variable(name="M", shape=[vocab_size, D],
-                                    initializer=glorot_init((vocab_size, D),
-                                                            "uniform", type=tf.float32))
-                emb = tf.nn.embedding_lookup(M, x, name="H")  # batch_size x L x D
+                print src_embeddings, tgt_embeddings
+                if src_embeddings.table is None:
+                    print "Random src embeddings of dimensionality %d" % D
+                    M_src = tf.get_variable(name="M_src", shape=[vocab_size, D],  # TODO vocab size
+                                    initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
+                    emb_size = D
+                else:
+                    M_src = tf.Variable(src_embeddings.table)
+                    D_loaded = len(tgt_embeddings.table[0])
+                    print "Loading existing src embeddings of dimensionality %d" % D_loaded
+                    emb_size = D_loaded
+
+
+                if tgt_embeddings.table is None:
+                    print "Random tgt embeddings of dimensionality %d" % D
+                    M_tgt = tf.get_variable(name="M_tgt", shape=[vocab_size, D],
+                                    initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
+                    emb_size += D
+                else:
+                    M_tgt = tf.Variable(tgt_embeddings.table)  # TODO parameter if update embeddings or not
+                    D_loaded = len(tgt_embeddings.table[0])
+                    print "Loading existing tgt embeddings of dimensionality %d" % D_loaded  # TODO what if not same
+                    emb_size += D_loaded
+
+                print "embedding size", emb_size
+                x_src, x_tgt = tf.split(2, 2, x)  # split src and tgt part of input
+                emb_tgt = tf.nn.embedding_lookup(M_tgt, x_src, name="emg_tgt")  # batch_size x L x window_size x emb_size
+                emb_src = tf.nn.embedding_lookup(M_src, x_tgt, name="emb_src")  # batch_size x L x window_size x emb_size
+                emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
+                emb = tf.reshape(emb_comb, [batch_size, L, window_size*emb_size], name="emb") # batch_size x L x window_size*emb_size
 
             if lstm_units > 0:
                 with tf.name_scope("lstm"):
@@ -85,10 +118,10 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                     cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=lstm_units, state_is_tuple=True)
                     # see: https://github.com/aymericdamien/TensorFlow-Examples/blob/master/examples/3_NeuralNetworks/dynamic_rnn.py
                     # Permuting batch_size and n_steps
-                    remb = tf.transpose(emb, [1, 0, 2])  # L x batch_size x D
+                    remb = tf.transpose(emb, [1, 0, 2])  # L x batch_size x window_size*emb_size
                     # Reshaping to (n_steps*batch_size, n_input)
-                    remb = tf.reshape(remb, [-1, D])  # L*batch_size x D
-                    # Split to get a list of 'n_steps=L' tensors of shape (batch_size, D)
+                    remb = tf.reshape(remb, [-1, window_size*emb_size])  # L*batch_size x window_size*emb_size
+                    # Split to get a list of 'n_steps=L' tensors of shape (batch_size, window_size*emb_size)
                     remb = tf.split(0, L, remb)
 
                     rnn_outputs, rnn_states = tf.nn.rnn(cell, remb,
@@ -100,7 +133,7 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                     state_size = lstm_units
             else:
                 H = emb
-                state_size = D
+                state_size = 2*window_size*emb_size
 
             with tf.name_scope("alpha"):
                 w_z = tf.get_variable(name="w_z", shape=[J],
@@ -108,22 +141,17 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                 V = tf.get_variable(name="V", shape=[J, L],
                                     initializer=tf.random_uniform_initializer(dtype=tf.float32))
                 W_hz = tf.get_variable(name="W_hz", shape=[state_size, J],
-                                       initializer=glorot_init((state_size, J),
-                                                               "uniform", type=tf.float32))
+                                       initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
                 W_sz = tf.get_variable(name="W_sz", shape=[state_size*(2*r+1), J],
-                                       initializer=glorot_init((state_size*(2*r+1), J),
-                                                               "uniform", type=tf.float32))
+                                       initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
                 W_bz = tf.get_variable(name="W_bz", shape=[2*r+1, J],
-                                       initializer=glorot_init((2*r+1, J),
-                                                               "uniform", type=tf.float32))
+                                       initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
 
             with tf.name_scope("beta"):
                 W_hs = tf.get_variable(name="W_hs", shape=[state_size, state_size],
-                                       initializer=glorot_init((state_size, state_size),
-                                                               "uniform", type=tf.float32))
+                                       initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
                 W_ss = tf.get_variable(name="W_ss", shape=[state_size*(2*r+1), state_size],
-                                       initializer=glorot_init((state_size*(2*r+1), state_size),
-                                                               "uniform", type=tf.float32))
+                                       initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
                 w_s = tf.get_variable(name="w_s", shape=[state_size],
                                       initializer=tf.random_uniform_initializer(dtype=tf.float32))
 
@@ -135,8 +163,7 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                 if concat:  # h_i and s_i are concatenated before prediction
                     wsp_size = state_size*2
                 W_sp = tf.get_variable(name="W_sp", shape=[wsp_size, K],
-                                       initializer=glorot_init((wsp_size, K),
-                                                               "uniform", type=tf.float32))
+                                       initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
 
             with tf.name_scope("paddings"):
                 padding_s_col = tf.constant([[0, 0], [0, 0], [r, r]], name="padding_s_col")
@@ -250,21 +277,37 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                 if concat:
                     # 1st dimension is batch size
                     s_i = tf.concat(1, [s_i, tf.transpose(h_i, [0,2,1])])
-                l = tf.matmul(tf.reshape(s_i, [batch_size, state_size]), W_sp) + w_p
+                l = tf.matmul(tf.reshape(s_i, [batch_size, -1]), W_sp) + w_p
                 return l  # batch_size x K
 
         with tf.variable_scope("scoring"):
 
+            # avg word-level xent
             pred_labels = []
             losses = []
+
+            # need weight matrix to multiply losses with:  weights = class_weights[y_words]
+            # for whole batch
+            # tf.equal
+            # tf.select
+            # tf.where
+            if class_weights is not None:
+                class_weights = tf.constant(class_weights, name="class_weights")
+
             for i in np.arange(L):  # compute score, probs and losses per word for whole batch
                 word_label_score = score(i)
                 word_label_probs = tf.nn.softmax(word_label_score)
                 word_preds = tf.argmax(word_label_probs, 1)
                 pred_labels.append(word_preds)
-                y_words = tf.reshape(tf.slice(y, [0,i], [batch_size, 1]), [batch_size])
-                cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(word_label_score,
-                                                                               y_words)
+                y_words = tf.reshape(tf.slice(y, [0, i], [batch_size, 1]), [batch_size])
+                y_words_full = tf.one_hot(y_words, depth=K, on_value=1.0, off_value=0.0)
+                cross_entropy = tf.nn.softmax_cross_entropy_with_logits(word_label_score,
+                                                                                y_words_full)
+                if class_weights is not None:
+                    # see: https://github.com/lopuhin/skflow/blob/5c978498d24472bac44235964b6ab528ca952918/skflow/ops/losses_ops.py
+                    label_weights = tf.reduce_mean(tf.mul(y_words_full, class_weights), 1)
+                    cross_entropy = tf.mul(cross_entropy, label_weights)
+
                 losses.append(cross_entropy)
             pred_labels = mask*tf.transpose(tf.pack(pred_labels), [1, 0])  # masked, batch_size x L
             losses = tf.reduce_mean(tf.cast(mask, tf.float32)*tf.transpose(tf.pack(losses), [1, 0]),
@@ -272,7 +315,7 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
 
         return losses, pred_labels
 
-    losses, predictions = forward(inputs, labels, mask, seq_lens)
+    losses, predictions = forward(inputs, labels, mask, seq_lens, class_weights)
     return losses, predictions
 
 
@@ -281,7 +324,8 @@ class EasyFirstModel():
     Neural easy-first model
     """
     def __init__(self, K, D, N, J, L, r, vocab_size, batch_size, optimizer, learning_rate,
-                 max_gradient_norm, lstm_units, concat, forward_only=False):
+                 max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
+                 tgt_embeddings, forward_only=False, class_weights=None):
         """
         Initialize the model
         :param K:
@@ -297,6 +341,9 @@ class EasyFirstModel():
         :param learning_rate:
         :param max_gradient_norm:
         :param forward_only:
+        :param buckets:
+        :param src_embeddings
+        :param tgt_embeddings
         :return:
         """
         self.K = K
@@ -310,20 +357,27 @@ class EasyFirstModel():
         self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.concat = concat
+        self.window_size = window_size
         self.global_step = tf.Variable(0, trainable=False)
         optimizer_map = {"sgd": tf.train.GradientDescentOptimizer, "adam": tf.train.AdamOptimizer,
                         "adagrad": tf.train.AdagradOptimizer, "adadelta": tf.train.AdadeltaOptimizer,
                         "rmsprop": tf.train.RMSPropOptimizer, "momemtum": tf.train.MomentumOptimizer}
         self.optimizer = optimizer_map.get(optimizer,
                                            tf.train.GradientDescentOptimizer)(self.learning_rate)
+        self.src_embeddings = src_embeddings
+        self.tgt_embeddings = tgt_embeddings
+
+        self.class_weights = class_weights if class_weights is not None else [1./K]*K
 
         if self.lstm_units > 0:
-            self.state_size = self.lstm_units
-            print "Model with LSTM RNN encoder of %d units and embeddings of size %d" % \
-                  (self.lstm_units, self.D)
+            print "Model with LSTM RNN encoder of %d units" % self.lstm_units
         else:
-            self.state_size = D
-            print "Model with simple embeddings of size %d" % self.D
+            if self.src_embeddings.table is None and self.tgt_embeddings.table is None:
+                print "Model with simple embeddings of size %d" % self.D
+            else:
+                print "Model with simple embeddings of size %d (src) & %d (tgt)" % \
+                      (self.src_embeddings.table.shape[0], self.tgt_embeddings.table.shape[0])
+
 
         if self.N > 0:
             print "Model with %d sketches" % self.N
@@ -333,20 +387,31 @@ class EasyFirstModel():
         if self.concat or self.N == 0:
             print "Concatenating H and S for predictions"
 
+        # TODO for each bucket, create input feed with fixed L
+
+        # seq2seq model with buckets: (for in AND output)
+        # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/models/rnn/translate/seq2seq_model.py#L31
+        # https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/seq2seq.py#L970
+
         # feed whole batch
-        self.inputs = tf.placeholder(tf.int32, shape=[None, self.L], name="input")
+        self.inputs = tf.placeholder(tf.int32, shape=[None, self.L, 2*self.window_size], name="input")  # window_size: the same for src and tgt
         self.labels = tf.placeholder(tf.int32, shape=[None, self.L], name="labels")
         self.mask = tf.placeholder(tf.int64, shape=[None, self.L], name="mask")
         self.seq_lens = tf.placeholder(tf.int32, shape=[None], name="sent_lens")
 
-        def ef_f(inputs, labels, mask, seq_lens):
+        def ef_f(inputs, labels, mask, seq_lens, window_size, src_embeddings=None, tgt_embeddings=None):
 
             return ef_single_state(inputs, labels, mask, seq_lens,
                                    vocab_size=vocab_size, K=self.K, D=self.D, N=self.N,
                                    J=self.J, L=self.L, r=self.r, lstm_units=lstm_units,
-                                   concat=self.concat)
+                                   concat=self.concat, window_size=window_size,
+                                   src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
+                                   class_weights=class_weights)
 
-        self.losses, self.predictions = ef_f(self.inputs, self.labels, self.mask, self.seq_lens)
+        self.losses, self.predictions = ef_f(self.inputs, self.labels, self.mask, self.seq_lens,
+                                             window_size=self.window_size,
+                                             src_embeddings=self.src_embeddings,
+                                             tgt_embeddings=self.tgt_embeddings)
 
         # gradients and update operation for training the model
         if not forward_only:
@@ -374,7 +439,10 @@ class EasyFirstModel():
         :return:
         """
         # fill up data with paddings up till maxlen and create mask
-        inputs_padded, labels_padded, mask, seq_lens = pad_data(inputs, labels, max_len=self.L)
+        PAD_symbol = self.tgt_embeddings.PAD_id
+        inputs_padded, labels_padded, mask, seq_lens = pad_data(inputs, labels,
+                                                                max_len=self.L,
+                                                                PAD_symbol=PAD_symbol)
 
         input_feed = {}
         input_feed[self.inputs.name] = inputs_padded  # list
@@ -399,19 +467,25 @@ class EasyFirstModel():
         return outputs[0], predictions  # loss, predictions
 
 
-def create_model(session, forward_only=False):
+def create_model(session, forward_only=False, src_embeddings=None, tgt_embeddings=None,
+                 class_weights=None):
     """
     Create a model
     :param session:
     :param forward_only:
     :return:
     """
+    bucket_borders = np.linspace(0, FLAGS.L, FLAGS.buckets, dtype=int)
+    print "Buckets:", bucket_borders
+
     model = EasyFirstModel(K=FLAGS.K, D=FLAGS.D, N=FLAGS.N, J=FLAGS.J, L=FLAGS.L, r=FLAGS.r,
                            vocab_size=FLAGS.vocab_size, batch_size=FLAGS.batch_size,
                            optimizer=FLAGS.optimizer, learning_rate=FLAGS.learning_rate,
                            max_gradient_norm=FLAGS.max_gradient_norm, lstm_units=FLAGS.lstm_units,
-                           concat=FLAGS.concat, forward_only=forward_only)
-    checkpoint = tf.train.get_checkpoint_state(FLAGS.train_dir)
+                           concat=FLAGS.concat, forward_only=forward_only, buckets=bucket_borders,
+                           src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
+                           window_size=3, class_weights=class_weights)
+    checkpoint = tf.train.get_checkpoint_state(FLAGS.model_dir)
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
         print "Reading model parameters from %s" % checkpoint.model_checkpoint_path
         model.saver.restore(session, checkpoint.model_checkpoint_path)
@@ -419,6 +493,7 @@ def create_model(session, forward_only=False):
         print "Creating model with fresh parameters"
         session.run(tf.initialize_all_variables())
     return model
+
 
 def train():
     """
@@ -428,29 +503,62 @@ def train():
     print "Training"
 
     with tf.Session() as sess:
-        model = create_model(sess, False)
 
-        # TODO read the data
+        # load data and embeddings
+        src_embeddings = load_embedding(FLAGS.src_embeddings) if FLAGS.src_embeddings != "" \
+            else None
+        tgt_embeddings = load_embedding(FLAGS.tgt_embeddings) if FLAGS.tgt_embeddings != "" \
+            else None
+
+        train_dir = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags"  # TODO language as parameter
+        dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.basic_features_with_tags"
+
+        train_feature_vectors, train_tgt_sentences, train_labels, train_label_dict, train_src_embeddings, train_tgt_embeddings = \
+            load_data(train_dir, src_embeddings, tgt_embeddings, max_sent = FLAGS.max_train_data_size, train=True, labeled=True)
+        dev_feature_vectors, dev_tgt_sentences, dev_labels, dev_label_dict = \
+            load_data(dev_dir, train_src_embeddings, train_tgt_embeddings, train=False, labeled=True)  # use training vocab for dev
+
+        if FLAGS.src_embeddings == "":
+            src_embeddings = embedding.embedding(None, train_src_embeddings.word2id, train_src_embeddings.id2word, train_src_embeddings.UNK_id, train_src_embeddings.PAD_id, train_src_embeddings.end_id, train_src_embeddings.start_id)
+        if FLAGS.tgt_embeddings == "":
+            tgt_embeddings = embedding.embedding(None, train_tgt_embeddings.word2id, train_tgt_embeddings.id2word, train_tgt_embeddings.UNK_id, train_tgt_embeddings.PAD_id, train_tgt_embeddings.end_id, train_tgt_embeddings.start_id)
+
+        X_train = train_feature_vectors
+        Y_train = train_labels
+
+        X_dev = dev_feature_vectors
+        Y_dev = dev_labels
+
+        src_vocab_size = len(train_src_embeddings.word2id)
+        tgt_vocab_size = len(train_tgt_embeddings.word2id)
+        print "src vocab size", src_vocab_size
+        print "tgt vocab size", tgt_vocab_size
+
         # dummy data
-        no_train_instances = 1000
-        no_dev_instances = 40
-        print "Training on %d instances" % no_train_instances
-        print "Validating on %d instances" % no_dev_instances
+        #no_train_instances = 1000
+        #no_dev_instances = 40
 
-        xs, ys = random_interdependent_data_with_len([no_train_instances, no_dev_instances], FLAGS.L,
-                                            FLAGS.vocab_size, FLAGS.K)
-        X_train, Y_train, X_dev, Y_dev = xs[0], ys[0], xs[1], ys[1]
+        #xs, ys = random_interdependent_data_with_len([no_train_instances, no_dev_instances], FLAGS.L,
+        #                                    FLAGS.vocab_size, FLAGS.K)
+        #X_train, Y_train, X_dev, Y_dev = xs[0], ys[0], xs[1], ys[1]
+
+        print "Training on %d instances" % len(X_train)
+        print "Validating on %d instances" % len(X_dev)
+
+        print "Maximum sentence length (train):", max([len(y) for y in Y_train])
+        print "Maximum sentence length (dev):", max([len(y) for y in Y_dev])
+
 
         print "Training data samples:", X_train[:3], Y_train[:3]
+        class_weights = [1-FLAGS.bad_weight, FLAGS.bad_weight]  # TODO QE specific
+        print "Weights for classes:", class_weights
 
-        #X_train = [[2,2,2,2,3,3,3,3,2], [2,1,2], [2,1,2]]
-        #Y_train = [[0,1,1,1,1,1,1,1,1], [1,1,1], [1,0,1]]
-
-        #X_dev = [[2,2,2,2,3,3,3,3,2], [2,1,2], [2,1,2]]
-        #Y_dev = [[0,1,1,1,1,1,1,1,1], [1,1,1], [1,0,1]]
+        model = create_model(sess, False, src_embeddings, tgt_embeddings, class_weights)
 
         # Training loop
         for epoch in xrange(FLAGS.epochs):
+            start_time_epoch = time.time()
+
             current_sample = 0
             step_time, loss = 0.0, 0.0
             train_predictions = []
@@ -469,7 +577,7 @@ def train():
                 step_time += (time.time() - start_time)
                 loss += np.sum(step_loss)  # sum over batch
                 #print current_sample, x_i, _, y_i, predictions, step_loss, embeddings
-                # TODO regularizer
+                # TODO regularizer or dropout?
                 train_predictions.extend(predictions)
 
                 current_sample += FLAGS.batch_size
@@ -490,14 +598,18 @@ def train():
                 eval_sample += FLAGS.batch_size
 
             train_accuracy = accuracy(Y_train, train_predictions)
-            eval_acurracy = accuracy(Y_dev, dev_predictions)
+            dev_acurracy = accuracy(Y_dev, dev_predictions)
+            train_f1_1, train_f1_2 = f1s_binary(Y_train, train_predictions)
+            dev_f1_1, dev_f1_2 = f1s_binary(Y_dev, dev_predictions)
 
-            print "EPOCH %d: avg step time %fs, avg loss %f, train accuracy %f, dev accuracy %f" % \
+            print "EPOCH %d: avg step time %fs, avg loss %f, train acc. %f, f1 prod %f (%f/%f), " \
+                  "dev acc. %f, f1 prod %f (%f/%f)" % \
                 (epoch+1, step_time/len(X_train), loss/len(X_train),
-                 train_accuracy, eval_acurracy)
+                 train_accuracy,  train_f1_1*train_f1_2, train_f1_1, train_f1_2, dev_acurracy,
+                 dev_f1_1*dev_f1_2, dev_f1_1, dev_f1_2)
 
             if epoch % FLAGS.checkpoint_freq == 0:
-                 model.saver.save(sess, FLAGS.train_dir, global_step=model.global_step)
+                 model.saver.save(sess, FLAGS.model_dir, global_step=model.global_step)
 
 
 def test():
@@ -508,17 +620,30 @@ def test():
     print "Testing"
     FLAGS.restore = True  # has to be loaded
     with tf.Session() as sess:
+         # load data and embeddings
+
+        # embeddings need to be loaded for mapping words to ids  # TODO doesnt work if no pre-training, make sure that word2id mapping from training is used
+        src_embeddings = load_embedding(FLAGS.src_embeddings) if FLAGS.src_embeddings != "" \
+            else None
+        tgt_embeddings = load_embedding(FLAGS.tgt_embeddings) if FLAGS.tgt_embeddings != "" \
+            else None
+
+        test_dir = FLAGS.data_dir+"/task2_en-de_test/test.features"
+        test_feature_vectors, test_tgt_sentences, test_labels, test_label_dict = \
+            load_data(test_dir, src_embeddings, tgt_embeddings, train=False, labeled=False)  # TODO use training vocab for dev
+
         # load model
-        model = create_model(sess, True)
+        model = create_model(sess, True, src_embeddings, tgt_embeddings)  # FIXME loading model with embeddings
 
-        # TODO use real data
-        no_test_instances = 40
-        print "Testing on %d instances" % no_test_instances
+        X_test = test_feature_vectors
+        Y_test = test_labels
 
-        # TODO doesn't make sense for testing, since distributions differ from training
-        xs, ys = random_interdependent_data_with_len([no_test_instances], FLAGS.L, FLAGS.vocab_size,
-                                                     FLAGS.K)
-        X_test, Y_test = xs[0], ys[0]
+        #no_test_instances = 40
+        #xs, ys = random_interdependent_data_with_len([no_test_instances], FLAGS.L, FLAGS.vocab_size,
+        #                                             FLAGS.K)
+        #X_test, Y_test = xs[0], ys[0]
+
+        print "Testing on %d instances" % len(X_test)
 
         # eval
         eval_sample = 0
@@ -535,8 +660,13 @@ def test():
             eval_sample += FLAGS.batch_size
 
         test_accuracy = accuracy(Y_test, test_predictions)
+        test_f1_1, test_f1_2 = f1s_binary(Y_test, test_predictions)
 
-        print "Test avg loss %f, accuracy %f" % (loss/len(X_test), test_accuracy)
+        print "Test avg loss %f, accuracy %f, f1 prod %f (%f / %f)" % (loss/len(X_test),
+                                                                       test_accuracy,
+                                                                       test_f1_1*test_f1_2,
+                                                                       test_f1_1, test_f1_2)
+
 
 
 def demo():
@@ -591,6 +721,7 @@ if __name__ == "__main__":
 
 
 # TODO
-# - load existing embeddings
-# - how to feed in QE data?
 # - variable sequence-length -> bucketing?
+# - weighting of BAD instances
+# - F1 as loss?
+# - regularization
