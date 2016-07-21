@@ -32,10 +32,10 @@ tf.app.flags.DEFINE_integer("max_train_data_size", 100,
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 7, "number of buckets")
-tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
-tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
-#tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
-#tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
+#tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
+#tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
+tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
+tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
 tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
@@ -571,10 +571,8 @@ def train():
                 x_i = X_train[current_sample:current_sample+FLAGS.batch_size]
                 y_i = Y_train[current_sample:current_sample+FLAGS.batch_size]
 
-                start_time = time.time()
                 step_loss, predictions = model.batch_update(sess, x_i, y_i, False)
 
-                step_time += (time.time() - start_time)
                 loss += np.sum(step_loss)  # sum over batch
                 #print current_sample, x_i, _, y_i, predictions, step_loss, embeddings
                 # TODO regularizer or dropout?
@@ -582,29 +580,19 @@ def train():
 
                 current_sample += FLAGS.batch_size
 
+            time_epoch = time.time() - start_time_epoch
+
             # eval on dev
-            eval_sample = 0
-            dev_predictions = []
-            while eval_sample < len(X_dev):
-                x_i = X_dev[eval_sample:eval_sample+FLAGS.batch_size]
-                y_i = Y_dev[eval_sample:eval_sample+FLAGS.batch_size]
-
-                start_time = time.time()
-                step_loss, predictions = model.batch_update(sess, x_i, y_i, True)
-                step_time += (time.time() - start_time)
-                loss += np.sum(step_loss)
-                dev_predictions.extend(predictions)
-
-                eval_sample += FLAGS.batch_size
+            step_loss, dev_predictions = model.batch_update(sess, X_dev, Y_dev, True)
 
             train_accuracy = accuracy(Y_train, train_predictions)
             dev_acurracy = accuracy(Y_dev, dev_predictions)
             train_f1_1, train_f1_2 = f1s_binary(Y_train, train_predictions)
             dev_f1_1, dev_f1_2 = f1s_binary(Y_dev, dev_predictions)
 
-            print "EPOCH %d: avg step time %fs, avg loss %f, train acc. %f, f1 prod %f (%f/%f), " \
+            print "EPOCH %d: epoch time %fs, avg loss %f, train acc. %f, f1 prod %f (%f/%f), " \
                   "dev acc. %f, f1 prod %f (%f/%f)" % \
-                (epoch+1, step_time/len(X_train), loss/len(X_train),
+                (epoch+1, time_epoch, loss/len(X_train),
                  train_accuracy,  train_f1_1*train_f1_2, train_f1_1, train_f1_2, dev_acurracy,
                  dev_f1_1*dev_f1_2, dev_f1_1, dev_f1_2)
 
@@ -623,10 +611,25 @@ def test():
          # load data and embeddings
 
         # embeddings need to be loaded for mapping words to ids  # TODO doesnt work if no pre-training, make sure that word2id mapping from training is used
-        src_embeddings = load_embedding(FLAGS.src_embeddings) if FLAGS.src_embeddings != "" \
-            else None
-        tgt_embeddings = load_embedding(FLAGS.tgt_embeddings) if FLAGS.tgt_embeddings != "" \
-            else None
+        if FLAGS.src_embeddings != "":
+            src_embeddings = load_embedding(FLAGS.src_embeddings)
+        else:
+            src_train_vocab_file =  FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.src.pkl"
+            print "Reading src vocabulary from %s" % src_train_vocab_file
+            src_train_vocab = pkl.load(open(src_train_vocab_file, "rb"))
+            src_word2id = {w:i for i,w in enumerate(src_train_vocab)}
+            src_id2word = {i:w for w,i in src_word2id.items()}
+            src_embeddings = embedding.embedding(None, src_word2id, src_id2word, 0, 1, 2, 3)
+
+        if FLAGS.tgt_embeddings != "":
+            tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
+        else:
+            tgt_train_vocab_file =  FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.tgt.pkl"
+            print "Reading tgt vocabulary from %s" % tgt_train_vocab_file
+            tgt_train_vocab = pkl.load(open(tgt_train_vocab_file, "rb"))
+            tgt_word2id = {w:i for i,w in enumerate(tgt_train_vocab)}
+            tgt_id2word = {i:w for w,i in tgt_word2id.items()}
+            tgt_embeddings = embedding.embedding(None, tgt_word2id, tgt_id2word, 0, 1, 2, 3)
 
         test_dir = FLAGS.data_dir+"/task2_en-de_test/test.features"
         test_feature_vectors, test_tgt_sentences, test_labels, test_label_dict = \
@@ -646,18 +649,10 @@ def test():
         print "Testing on %d instances" % len(X_test)
 
         # eval
-        eval_sample = 0
-        test_predictions = []
         loss = 0
-        while eval_sample < len(X_test):
-            x_i = X_test[eval_sample:eval_sample+FLAGS.batch_size]
-            y_i = Y_test[eval_sample:eval_sample+FLAGS.batch_size]
 
-            step_loss, predictions = model.batch_update(sess, x_i, y_i, True)
-            loss += np.sum(step_loss)
-            test_predictions.append(predictions[0])
-
-            eval_sample += FLAGS.batch_size
+        step_loss, test_predictions = model.batch_update(sess, X_test, Y_test, True)
+        loss += np.sum(step_loss)
 
         test_accuracy = accuracy(Y_test, test_predictions)
         test_f1_1, test_f1_2 = f1s_binary(Y_test, test_predictions)
@@ -666,7 +661,6 @@ def test():
                                                                        test_accuracy,
                                                                        test_f1_1*test_f1_2,
                                                                        test_f1_1, test_f1_2)
-
 
 
 def demo():
@@ -682,7 +676,9 @@ def demo():
         sys.stdout.flush()
         sentence = sys.stdin.readline()
         while sentence:
-            inputs = sentence.split()
+            inputs = sentence.split("|")
+            src = inputs[0]
+            tgt = inputs[1]
             # if len(inputs) > model.L:
             #    print "Input too long. Only sequences of length %d allowed." % model.L
             #    break
@@ -722,6 +718,5 @@ if __name__ == "__main__":
 
 # TODO
 # - variable sequence-length -> bucketing?
-# - weighting of BAD instances
 # - F1 as loss?
 # - regularization

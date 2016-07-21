@@ -26,9 +26,9 @@ def load_embedding(pkl_file):
     return emb
 
 
-def build_vocab(feature_file, origin):
+def build_vocab(feature_file, origin, store=False):
     # FIXME not very efficient
-    vocab = ["<UNK>", "<PAD>", "<s>", "</s>"]
+    vocab = ["<PAD>", "<UNK>", "<s>", "</s>"]
     with codecs.open(feature_file, "r", "utf8") as qe_data:
         for line in qe_data:
             stripped = line.strip()
@@ -44,6 +44,10 @@ def build_vocab(feature_file, origin):
                     if token not in vocab:
                         vocab.append(token)
     print "Built %s vocabulary of %d words" % (origin, len(vocab))
+    if store:
+        dump_file = feature_file+".vocab."+origin+".pkl"
+        pkl.dump(vocab, open(dump_file, "wb"))
+        print "Stored %s vocabulary in %s" % (origin, dump_file)
     return vocab, 0, 1, 2, 3
 
 
@@ -75,14 +79,14 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
 
     if embedding_src is None:
         # if embeddings are not given, build vocabulary  # TODO specify vocab size
-        vocab, UNK_id, PAD_id, start_id, end_id = build_vocab(feature_label_file, "src")
+        vocab, UNK_id, PAD_id, start_id, end_id = build_vocab(feature_label_file, "src", True)
         word2id = {word: i for i, word in enumerate(vocab)}
         id2word = {i: word for i, word in enumerate(vocab)}
         embedding_src = embedding.embedding(None, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
 
     if embedding_tgt is None:
         # if embeddings are not given, build vocabulary
-        vocab, UNK_id, PAD_id, start_id, end_id = build_vocab(feature_label_file, "tgt")
+        vocab, UNK_id, PAD_id, start_id, end_id = build_vocab(feature_label_file, "tgt", True)
         word2id = {word: i for i, word in enumerate(vocab)}
         id2word = {i: word for i, word in enumerate(vocab)}
         embedding_tgt = embedding.embedding(None, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
@@ -229,8 +233,8 @@ def f1s_binary(y_i, predictions):
     tp_2 = tn_1
     precision_1 = tp_1 / (tp_1 + fp_1) if (tp_1 + fp_1) > 0 else 0
     precision_2 = tp_2 / (tp_2 + fp_2) if (tp_2 + fp_2) > 0 else 0
-    recall_1 = tp_1 / (tp_1 + fn_1)
-    recall_2 = tp_2 / (tp_2 + fn_2)
+    recall_1 = tp_1 / (tp_1 + fn_1) if (tp_1 + fn_1) > 0 else 0
+    recall_2 = tp_2 / (tp_2 + fn_2) if (tp_2 + fn_2) > 0 else 0
     f1_1 = 2 * (precision_1*recall_1) / (precision_1 + recall_1) if (precision_1 + recall_1) > 0 else 0
     f1_2 = 2 * (precision_2*recall_2) / (precision_2 + recall_2) if (precision_2 + recall_2) > 0 else 0
     return f1_1, f1_2
