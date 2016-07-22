@@ -1,10 +1,10 @@
 # coding=utf-8
+
 import tensorflow as tf
 import numpy as np
 import time
-from sklearn.utils import shuffle
+#from sklearn.utils import shuffle
 import sys
-from data_generator import *
 from utils import *
 
 
@@ -27,18 +27,18 @@ tf.app.flags.DEFINE_integer("batch_size", 10,
 tf.app.flags.DEFINE_integer("vocab_size", 20000, "Vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
-tf.app.flags.DEFINE_integer("max_train_data_size", 100,
+tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
-tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
+tf.app.flags.DEFINE_integer("L", 60, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 7, "number of buckets")
-#tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
-#tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
-tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
-tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
+tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
+tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
+#tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
+#tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
 tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
-tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
+tf.app.flags.DEFINE_integer("N", 60, "number of sketches")
 tf.app.flags.DEFINE_integer("J", 100, "dimensionality of hidden layer")
 tf.app.flags.DEFINE_integer("r", 2, "context size")
 tf.app.flags.DEFINE_integer("bad_weight", 0.9, "weight for BAD instances" )
@@ -416,7 +416,7 @@ class EasyFirstModel():
         # gradients and update operation for training the model
         if not forward_only:
             params = tf.trainable_variables()
-            gradients = tf.gradients(self.losses, params)
+            gradients = tf.gradients(tf.reduce_mean(self.losses, 0), params)  # batch normalization
             if max_gradient_norm > -1:
                 print "Clipping gradient to %f" % max_gradient_norm
                 clipped_gradients, norm = tf.clip_by_global_norm(gradients, max_gradient_norm)
@@ -563,8 +563,8 @@ def train():
             step_time, loss = 0.0, 0.0
             train_predictions = []
 
-            if FLAGS.shuffle:
-                X_train, Y_train = shuffle(X_train, Y_train, random_state=0)
+            #if FLAGS.shuffle:
+            #   X_train, Y_train = shuffle(X_train, Y_train, random_state=0)
 
             while current_sample < len(X_train):
 
@@ -590,9 +590,9 @@ def train():
             train_f1_1, train_f1_2 = f1s_binary(Y_train, train_predictions)
             dev_f1_1, dev_f1_2 = f1s_binary(Y_dev, dev_predictions)
 
-            print "EPOCH %d: epoch time %fs, avg loss %f, train acc. %f, f1 prod %f (%f/%f), " \
+            print "EPOCH %d: epoch time %fs, loss %f, train acc. %f, f1 prod %f (%f/%f), " \
                   "dev acc. %f, f1 prod %f (%f/%f)" % \
-                (epoch+1, time_epoch, loss/len(X_train),
+                (epoch+1, time_epoch, loss,
                  train_accuracy,  train_f1_1*train_f1_2, train_f1_1, train_f1_2, dev_acurracy,
                  dev_f1_1*dev_f1_2, dev_f1_1, dev_f1_2)
 
@@ -610,7 +610,6 @@ def test():
     with tf.Session() as sess:
          # load data and embeddings
 
-        # embeddings need to be loaded for mapping words to ids  # TODO doesnt work if no pre-training, make sure that word2id mapping from training is used
         if FLAGS.src_embeddings != "":
             src_embeddings = load_embedding(FLAGS.src_embeddings)
         else:
@@ -633,7 +632,7 @@ def test():
 
         test_dir = FLAGS.data_dir+"/task2_en-de_test/test.features"
         test_feature_vectors, test_tgt_sentences, test_labels, test_label_dict = \
-            load_data(test_dir, src_embeddings, tgt_embeddings, train=False, labeled=False)  # TODO use training vocab for dev
+            load_data(test_dir, src_embeddings, tgt_embeddings, train=False, labeled=False)
 
         # load model
         model = create_model(sess, True, src_embeddings, tgt_embeddings)  # FIXME loading model with embeddings
@@ -657,7 +656,7 @@ def test():
         test_accuracy = accuracy(Y_test, test_predictions)
         test_f1_1, test_f1_2 = f1s_binary(Y_test, test_predictions)
 
-        print "Test avg loss %f, accuracy %f, f1 prod %f (%f / %f)" % (loss/len(X_test),
+        print "Test loss %f, accuracy %f, f1 prod %f (%f / %f)" % (loss/len(X_test),
                                                                        test_accuracy,
                                                                        test_f1_1*test_f1_2,
                                                                        test_f1_1, test_f1_2)
