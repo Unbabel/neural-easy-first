@@ -48,13 +48,14 @@ tf.app.flags.DEFINE_integer("epochs", 100, "training epochs")
 tf.app.flags.DEFINE_boolean("shuffle", False, "shuffling training data before each epoch")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 5, "save model every x epochs")
 tf.app.flags.DEFINE_integer("lstm_units", 100, "number of LSTM-RNN encoder units")
+tf.app.flags.DEFINE_float("l2_scale", 0.0001, "L2 regularization constant")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
 FLAGS = tf.app.flags.FLAGS
 
 
 def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r,
-                    lstm_units, concat, window_size, src_embeddings=None, tgt_embeddings=None,
+                    lstm_units, concat, window_size,l2_scale, src_embeddings=None, tgt_embeddings=None,
                     class_weights=None):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
@@ -79,7 +80,7 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
         :return:
         """
         batch_size = tf.shape(x)[0]
-        with tf.name_scope("ef_model"):
+        with tf.variable_scope("ef_model", regularizer=tf.contrib.layers.l2_regularizer(l2_scale)):
             with tf.name_scope("embedding"):
                 print src_embeddings, tgt_embeddings
                 if src_embeddings.table is None:
@@ -308,7 +309,13 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                     label_weights = tf.reduce_mean(tf.mul(y_words_full, class_weights), 1)
                     cross_entropy = tf.mul(cross_entropy, label_weights)
 
-                losses.append(cross_entropy)
+                if l2_scale > 0:
+                    l2_loss = tf.reduce_sum(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+                    loss = tf.add(cross_entropy, l2_loss)
+                else:
+                    loss = cross_entropy
+
+                losses.append(loss)
             pred_labels = mask*tf.transpose(tf.pack(pred_labels), [1, 0])  # masked, batch_size x L
             losses = tf.reduce_mean(tf.cast(mask, tf.float32)*tf.transpose(tf.pack(losses), [1, 0]),
                                     1)  # masked, batch_size x 1
@@ -325,7 +332,7 @@ class EasyFirstModel():
     """
     def __init__(self, K, D, N, J, L, r, vocab_size, batch_size, optimizer, learning_rate,
                  max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
-                 tgt_embeddings, forward_only=False, class_weights=None):
+                 tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0.1):
         """
         Initialize the model
         :param K:
@@ -344,6 +351,7 @@ class EasyFirstModel():
         :param buckets:
         :param src_embeddings
         :param tgt_embeddings
+        :param l2_scale
         :return:
         """
         self.K = K
@@ -366,6 +374,7 @@ class EasyFirstModel():
                                            tf.train.GradientDescentOptimizer)(self.learning_rate)
         self.src_embeddings = src_embeddings
         self.tgt_embeddings = tgt_embeddings
+        self.l2_scale = l2_scale
 
         self.class_weights = class_weights if class_weights is not None else [1./K]*K
 
@@ -387,6 +396,9 @@ class EasyFirstModel():
         if self.concat or self.N == 0:
             print "Concatenating H and S for predictions"
 
+        if self.l2_scale > 0:
+            print "L2 regularizer with weight %f" % self.l2_scale
+
         # TODO for each bucket, create input feed with fixed L
 
         # seq2seq model with buckets: (for in AND output)
@@ -406,7 +418,7 @@ class EasyFirstModel():
                                    J=self.J, L=self.L, r=self.r, lstm_units=lstm_units,
                                    concat=self.concat, window_size=window_size,
                                    src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
-                                   class_weights=class_weights)
+                                   class_weights=class_weights, l2_scale=l2_scale)
 
         self.losses, self.predictions = ef_f(self.inputs, self.labels, self.mask, self.seq_lens,
                                              window_size=self.window_size,
@@ -484,7 +496,7 @@ def create_model(session, forward_only=False, src_embeddings=None, tgt_embedding
                            max_gradient_norm=FLAGS.max_gradient_norm, lstm_units=FLAGS.lstm_units,
                            concat=FLAGS.concat, forward_only=forward_only, buckets=bucket_borders,
                            src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
-                           window_size=3, class_weights=class_weights)
+                           window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale)
     checkpoint = tf.train.get_checkpoint_state(FLAGS.model_dir)
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
         print "Reading model parameters from %s" % checkpoint.model_checkpoint_path
@@ -575,7 +587,6 @@ def train():
 
                 loss += np.sum(step_loss)  # sum over batch
                 #print current_sample, x_i, _, y_i, predictions, step_loss, embeddings
-                # TODO regularizer or dropout?
                 train_predictions.extend(predictions)
 
                 current_sample += FLAGS.batch_size
@@ -718,4 +729,3 @@ if __name__ == "__main__":
 # TODO
 # - variable sequence-length -> bucketing?
 # - F1 as loss?
-# - regularization
