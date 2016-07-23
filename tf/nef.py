@@ -7,7 +7,6 @@ import time
 import sys
 from utils import *
 
-
 """
 Tensorflow implementation of the neural easy-first model
 - Single-State Model
@@ -49,14 +48,16 @@ tf.app.flags.DEFINE_boolean("shuffle", False, "shuffling training data before ea
 tf.app.flags.DEFINE_integer("checkpoint_freq", 5, "save model every x epochs")
 tf.app.flags.DEFINE_integer("lstm_units", 100, "number of LSTM-RNN encoder units")
 tf.app.flags.DEFINE_float("l2_scale", 0.0001, "L2 regularization constant")
+tf.app.flags.DEFINE_float("dropout_prob", 0.5, "keep probability for dropout during training")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
+tf.app.flags.DEFINE_integer("threads", 1, "number of threads")
 FLAGS = tf.app.flags.FLAGS
 
 
 def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r,
-                    lstm_units, concat, window_size,l2_scale, src_embeddings=None, tgt_embeddings=None,
-                    class_weights=None):
+                    lstm_units, concat, window_size, l2_scale, dropout_prob,
+                    src_embeddings=None, tgt_embeddings=None, class_weights=None):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
     :param inputs:
@@ -249,8 +250,10 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
             s_avg = tf.batch_matmul(tf.expand_dims(a_n, [1]), conv)  # batch_size x 1 x state_size*(2*r+1)
             s_avg = tf.reshape(s_avg, [batch_size, state_size*(2*r+1)])
             _1 = tf.matmul(h_avg, W_hs)
+            _1_dropout = tf.nn.dropout(_1, dropout_prob)  # TODO use same dropout mask in all time steps? (http://arxiv.org/pdf/1512.05287v3.pdf)
             _2 = tf.matmul(s_avg, W_ss)
-            s_n = tf.nn.tanh(_1 + _2 + w_s)  # batch_size x state_size
+            _2_dropout = tf.nn.dropout(_2, dropout_prob)
+            s_n = tf.nn.tanh(_1_dropout + _2_dropout + w_s)  # batch_size x state_size
             S_update = tf.batch_matmul(tf.expand_dims(s_n, [2]), tf.expand_dims(a_n, [1]))
             S_n = S + S_update
             return n+1, b_n, S_n
@@ -332,7 +335,8 @@ class EasyFirstModel():
     """
     def __init__(self, K, D, N, J, L, r, vocab_size, batch_size, optimizer, learning_rate,
                  max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
-                 tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0.1):
+                 tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0.1,
+                 dropout_prob=0.5):
         """
         Initialize the model
         :param K:
@@ -352,6 +356,7 @@ class EasyFirstModel():
         :param src_embeddings
         :param tgt_embeddings
         :param l2_scale
+        :param dropout_prob
         :return:
         """
         self.K = K
@@ -375,6 +380,7 @@ class EasyFirstModel():
         self.src_embeddings = src_embeddings
         self.tgt_embeddings = tgt_embeddings
         self.l2_scale = l2_scale
+        self.dropout_prob = dropout_prob
 
         self.class_weights = class_weights if class_weights is not None else [1./K]*K
 
@@ -399,6 +405,9 @@ class EasyFirstModel():
         if self.l2_scale > 0:
             print "L2 regularizer with weight %f" % self.l2_scale
 
+        if self.dropout_prob > 0:
+            print "Dropout with p=%f" % self.dropout_prob
+
         # TODO for each bucket, create input feed with fixed L
 
         # seq2seq model with buckets: (for in AND output)
@@ -418,7 +427,8 @@ class EasyFirstModel():
                                    J=self.J, L=self.L, r=self.r, lstm_units=lstm_units,
                                    concat=self.concat, window_size=window_size,
                                    src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
-                                   class_weights=class_weights, l2_scale=l2_scale)
+                                   class_weights=class_weights, l2_scale=l2_scale,
+                                   dropout_prob=dropout_prob)
 
         self.losses, self.predictions = ef_f(self.inputs, self.labels, self.mask, self.seq_lens,
                                              window_size=self.window_size,
@@ -496,7 +506,8 @@ def create_model(session, forward_only=False, src_embeddings=None, tgt_embedding
                            max_gradient_norm=FLAGS.max_gradient_norm, lstm_units=FLAGS.lstm_units,
                            concat=FLAGS.concat, forward_only=forward_only, buckets=bucket_borders,
                            src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
-                           window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale)
+                           window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale,
+                           dropout_prob=1 if forward_only else FLAGS.dropout_prob)
     checkpoint = tf.train.get_checkpoint_state(FLAGS.model_dir)
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
         print "Reading model parameters from %s" % checkpoint.model_checkpoint_path
@@ -512,9 +523,9 @@ def train():
     Train a model
     :return:
     """
-    print "Training"
+    print "Training on %d thread(s)" % FLAGS.threads
 
-    with tf.Session() as sess:
+    with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
         # load data and embeddings
         src_embeddings = load_embedding(FLAGS.src_embeddings) if FLAGS.src_embeddings != "" \
@@ -597,18 +608,18 @@ def train():
             step_loss, dev_predictions = model.batch_update(sess, X_dev, Y_dev, True)
 
             train_accuracy = accuracy(Y_train, train_predictions)
-            dev_acurracy = accuracy(Y_dev, dev_predictions)
+            dev_accuracy = accuracy(Y_dev, dev_predictions)
             train_f1_1, train_f1_2 = f1s_binary(Y_train, train_predictions)
             dev_f1_1, dev_f1_2 = f1s_binary(Y_dev, dev_predictions)
 
             print "EPOCH %d: epoch time %fs, loss %f, train acc. %f, f1 prod %f (%f/%f), " \
                   "dev acc. %f, f1 prod %f (%f/%f)" % \
                 (epoch+1, time_epoch, loss,
-                 train_accuracy,  train_f1_1*train_f1_2, train_f1_1, train_f1_2, dev_acurracy,
+                 train_accuracy,  train_f1_1*train_f1_2, train_f1_1, train_f1_2, dev_accuracy,
                  dev_f1_1*dev_f1_2, dev_f1_1, dev_f1_2)
 
             if epoch % FLAGS.checkpoint_freq == 0:
-                 model.saver.save(sess, FLAGS.model_dir, global_step=model.global_step)
+                model.saver.save(sess, FLAGS.model_dir, global_step=model.global_step)
 
 
 def test():
@@ -624,17 +635,17 @@ def test():
         if FLAGS.src_embeddings != "":
             src_embeddings = load_embedding(FLAGS.src_embeddings)
         else:
-            src_train_vocab_file =  FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.src.pkl"
+            src_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.src.pkl"
             print "Reading src vocabulary from %s" % src_train_vocab_file
             src_train_vocab = pkl.load(open(src_train_vocab_file, "rb"))
-            src_word2id = {w:i for i,w in enumerate(src_train_vocab)}
-            src_id2word = {i:w for w,i in src_word2id.items()}
+            src_word2id = {w: i for i, w in enumerate(src_train_vocab)}
+            src_id2word = {i: w for w, i in src_word2id.items()}
             src_embeddings = embedding.embedding(None, src_word2id, src_id2word, 0, 1, 2, 3)
 
         if FLAGS.tgt_embeddings != "":
             tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
         else:
-            tgt_train_vocab_file =  FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.tgt.pkl"
+            tgt_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.tgt.pkl"
             print "Reading tgt vocabulary from %s" % tgt_train_vocab_file
             tgt_train_vocab = pkl.load(open(tgt_train_vocab_file, "rb"))
             tgt_word2id = {w:i for i,w in enumerate(tgt_train_vocab)}
@@ -668,9 +679,9 @@ def test():
         test_f1_1, test_f1_2 = f1s_binary(Y_test, test_predictions)
 
         print "Test loss %f, accuracy %f, f1 prod %f (%f / %f)" % (loss/len(X_test),
-                                                                       test_accuracy,
-                                                                       test_f1_1*test_f1_2,
-                                                                       test_f1_1, test_f1_2)
+                                                                   test_accuracy,
+                                                                   test_f1_1*test_f1_2,
+                                                                   test_f1_1, test_f1_2)
 
 
 def demo():
@@ -728,4 +739,5 @@ if __name__ == "__main__":
 
 # TODO
 # - variable sequence-length -> bucketing?
-# - F1 as loss?
+# - sent. F1 as loss?
+# - shuffling
