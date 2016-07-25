@@ -2,15 +2,20 @@
 Neural Easy First model code
 '''
 
+import os
 import theano
 import theano.tensor as TT
 import numpy as np
+import sys
+
+from ipdb import set_trace
+
 # local
+sys.path.append(os.path.dirname(os.path.realpath(__file__)) + '/tools')
 import shared
 from cnn import splice
 import gru as rnn
 import misc 
-
 
 def attention(H, S, conv_dim, W_hz, W_sz, w_z, v, name=None):
     '''
@@ -121,3 +126,94 @@ def easy_first(H, nr_sketch, attention_dim, sketch_dim, conv_dim, nr_classes,
     # no params right now
         
     return p
+
+class NeuralEasyFirst():
+
+    def __init__(self, nr_classes=2, emb_matrices=None, model_path=None):
+
+        # config par
+        conv_dim = 3  
+        attention_dim = 10 
+        nr_sketch = 1
+        sketch_dim = 20
+
+        # Optimization
+        lrate = 0.01
+
+        # QUETCH Layer
+        if emb_matrices:
+
+            hidden_size = 20
+
+            E_src, E_trg = emb_matrices
+            emb_size_trg, voc_size_trg = E_trg.shape
+
+            # Embeddings
+            emb_size_src, voc_size_src = E_src.shape
+            E_src = shared.random(size=(emb_size_trg, voc_size_trg), 
+                                  name='embeddings_src')
+            emb_size_trg, voc_size_trg = E_trg.shape
+            E_trg = shared.random(size=(emb_size_trg, voc_size_trg), 
+                                  name='embeddings_trg')
+
+            # Input
+            x = TT.matrix('x')
+
+            # Quetch layer
+            z1 = TT.concatenate((
+                E_trg[:, TT.cast(x[0, :], 'int32')],
+                E_trg[:, TT.cast(x[1, :], 'int32')],
+                E_trg[:, TT.cast(x[2, :], 'int32')],
+                E_src[:, TT.cast(x[3, :], 'int32')],
+                E_src[:, TT.cast(x[4, :], 'int32')],
+                E_src[:, TT.cast(x[5, :], 'int32')]))
+            z1_size = emb_size_src*3 + emb_size_trg*3    
+            W = shared.random(size=(sketch_dim, z1_size), name='W')
+            H = TT.dot(W, z1)
+
+            # GRU
+            #param_GRU = gru.init_gru(emb_size, sketch_dim, bias=True)
+            #H = gru.gru(emb.T, param_GRU).T
+        else:
+            x = TT.matrix('H')
+            H = x
+
+        #set_trace()
+        #dbg = theano.function([x], H)
+        #dbg(np.tile(np.arange(20),(6, 1)))
+
+        # Forward 
+        if nr_sketch > 1:
+            # Easy frist
+            p_y = easy_first(H, nr_sketch, attention_dim, sketch_dim, 
+                             conv_dim, nr_classes)
+        else:
+            # Standard quetch
+            W2 = shared.random(size=(nr_classes, sketch_dim), name='W2')
+            b2 = shared.zeros(size=(1, nr_classes), name='b', 
+                              broadc=(True, False))
+            z3 = TT.dot(W2, H) #+ b2
+            p_y = TT.nnet.softmax(z3)
+
+        print "Compiling forward pass"                 
+        self._forward = theano.function([x], p_y)
+
+        # Get params from forward
+        self.param = misc.get_param(p_y, named_only=True)
+
+        # SGD Batch update
+        y = TT.ivector('y')
+        cost = -TT.mean(TT.log(p_y)[y, TT.arange(y.shape[0])])
+        updates = [(par, par - lrate*TT.grad(cost, par)) for par in self.param]
+        print "Compiling batch update"                 
+        self._batch_update = theano.function([x, y], cost, updates=updates)
+                 
+    def predict(self, input_feat):
+        return np.argmax(self._forward(input_feat), 0)    
+
+    def batch_update(self, input_feat, target):
+        return self._batch_update(input_feat, target)
+
+    def save(self, model_path):
+        raise NotImplementedError()
+        pass
