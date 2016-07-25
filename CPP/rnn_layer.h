@@ -133,9 +133,9 @@ template<typename Real> class RNNLayer : public Layer<Real> {
       this->GetMutableOutput()->leftCols(length-1).transpose();
     if (use_hidden_start_) {
       if (!use_control_) {
-	dh0_.noalias() += dhnext;
+        dh0_.noalias() += dhnext;
       } else {
-	*(this->input_derivatives_[1]) += dhnext;
+        *(this->input_derivatives_[1]) += dhnext;
       }
     }
   }
@@ -184,11 +184,11 @@ template<typename Real> class BiRNNLayer : public RNNLayer<Real> {
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
-			    std::vector<Vector<Real>*> *biases,
-			    std::vector<std::string> *weight_names,
-			    std::vector<std::string> *bias_names) {
+                            std::vector<Vector<Real>*> *biases,
+                            std::vector<std::string> *weight_names,
+                            std::vector<std::string> *bias_names) {
     RNNLayer<Real>::CollectAllParameters(weights, biases, weight_names,
-					 bias_names);
+                                         bias_names);
 
     weights->push_back(&Wxl_);
     weights->push_back(&Wll_);
