@@ -4,6 +4,7 @@ import tensorflow as tf
 import cPickle as pkl
 import codecs
 import embedding
+from scipy import stats
 
 def load_embedding(pkl_file):
     word2id = {}
@@ -139,10 +140,8 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                     label = split_line[-1]
                 else:
                     # dummy labels
-                    label = "OK"  # TODO
+                    label = "OK"
                 label_sentence.append(label_dict[label])
-
-
 
     print "Loaded %d sentences" % len(feature_vectors)
     if train:
@@ -160,12 +159,12 @@ def pad_data(X, Y, max_len, PAD_symbol=0):
     :return:
     """
     #print "to pad", X[0], Y[0]
-    window_size = len(X[0][0])
-    #print "window size", window_size
+    feature_size = len(X[0][0])
+    #print "feature size", feature_size
     seq_lens = []
     masks = np.zeros(shape=(len(X), max_len))
     i = 0
-    X_padded = np.zeros(shape=(len(X), max_len, window_size))
+    X_padded = np.zeros(shape=(len(X), max_len, feature_size))
     X_padded.fill(PAD_symbol)
     Y_padded = np.zeros(shape=(len(Y), max_len))
     Y_padded.fill(PAD_symbol)
@@ -183,6 +182,42 @@ def pad_data(X, Y, max_len, PAD_symbol=0):
         i += 1
     #print "padded", X_padded[0], seq_lens[0]
     return X_padded, Y_padded, masks, seq_lens
+
+
+def buckets_by_length(data_array, labels, buckets=20, mode='pad'):
+    """
+    :param data_array: a numpy array of samples.
+    :param buckets: list of buckets (lengths) into which to group samples according to their length.
+    :param mode: either 'truncate' or 'pad':
+                * When truncation, remove the final part of a sample that does not match a bucket length;
+                * When padding, fill in sample with zeros up to a bucket length.
+                The obvious consequence of truncating is that no sample will be padded.
+    :return: a dictionary of grouped data and a dictionary of the data original indexes, both keyed by bucket.
+    """
+    input_lengths = np.array([len(s) for s in data_array], dtype='int')
+    if isinstance(buckets, (list, tuple, np.ndarray)):
+        buckets = np.array(buckets, dtype='int')
+    else:
+        buckets = np.linspace(min(input_lengths) - 1, max(input_lengths) + 1, buckets,
+                              endpoint=False, dtype='int')
+    print "buckets: ", buckets
+    bin_edges = stats.mstats.mquantiles(input_lengths, (buckets - buckets[0]) /
+                                        float(max(input_lengths) - buckets[0]))
+    bin_edges = np.append(bin_edges, [input_lengths.max() + 1])
+    input_bucket_index = np.digitize(input_lengths, bin_edges, right=False)
+
+    if mode == 'truncate':
+        input_bucket_index -= 1
+    bucketed_data = {}
+    reordering_indexes = {}
+    for bucket in list(np.unique(input_bucket_index)):
+        length_indexes = np.where(input_bucket_index == bucket)[0]
+        reordering_indexes[bucket] = length_indexes
+        maxlen = int(np.floor(bin_edges[bucket]))
+        padded = pad_data(data_array[length_indexes], labels[length_indexes], max_len=maxlen)
+        bucketed_data[bucket] = padded
+
+    return bucketed_data, reordering_indexes
 
 
 def accuracy(y_i, predictions):
@@ -248,11 +283,18 @@ if __name__ == "__main__":
     tgt_embeddings = load_embedding("/home/julia/Dokumente/Unbabel/neural-easy-first/data/WMT2016/embeddings/polyglot-de.pkl")
     src_embeddings = load_embedding("/home/julia/Dokumente/Unbabel/neural-easy-first/data/WMT2016/embeddings/polyglot-en.pkl")
 
-
     # test data loader
     data_file = "/home/julia/Dokumente/Unbabel/neural-easy-first/data/WMT2016/WMT2016/task2_en-de_dev/dev.basic_features_with_tags"
     data = load_data(data_file, src_embeddings, tgt_embeddings,  max_sent=10)
     print data
+
+    # test padding and bucketing
+    feature_vectors, tgt_sentences, labels, label_dict = data
+    #print pad_data(feature_vectors, labels, max_len=30)
+
+    bucketed_data, reordering_indexes = buckets_by_length(np.asarray(feature_vectors), np.asarray(labels), buckets=3, mode="truncate")
+    print "bucketed data", bucketed_data  # X_padded, Y_padded, masks, seq_lens
+    print "reordering idx", reordering_indexes
 
     # test f1 eval
     y = [[0,1,1,1,1,0], [0,1,1,1]]
