@@ -270,8 +270,10 @@ def f1s_binary(y_i, predictions):
     precision_2 = tp_2 / (tp_2 + fp_2) if (tp_2 + fp_2) > 0 else 0
     recall_1 = tp_1 / (tp_1 + fn_1) if (tp_1 + fn_1) > 0 else 0
     recall_2 = tp_2 / (tp_2 + fn_2) if (tp_2 + fn_2) > 0 else 0
-    f1_1 = 2 * (precision_1*recall_1) / (precision_1 + recall_1) if (precision_1 + recall_1) > 0 else 0
-    f1_2 = 2 * (precision_2*recall_2) / (precision_2 + recall_2) if (precision_2 + recall_2) > 0 else 0
+    f1_1 = 2 * (precision_1*recall_1) / (precision_1 + recall_1) if (precision_1 + recall_1) > 0 \
+        else 0
+    f1_2 = 2 * (precision_2*recall_2) / (precision_2 + recall_2) if (precision_2 + recall_2) > 0 \
+        else 0
     return f1_1, f1_2
 
 
@@ -280,11 +282,11 @@ def f1s_binary(y_i, predictions):
 if __name__ == "__main__":
 
     # test embedding loader
-    tgt_embeddings = load_embedding("/home/julia/Dokumente/Unbabel/neural-easy-first/data/WMT2016/embeddings/polyglot-de.pkl")
-    src_embeddings = load_embedding("/home/julia/Dokumente/Unbabel/neural-easy-first/data/WMT2016/embeddings/polyglot-en.pkl")
+    tgt_embeddings = load_embedding("../data/WMT2016/embeddings/polyglot-de.pkl")
+    src_embeddings = load_embedding("../data/WMT2016/embeddings/polyglot-en.pkl")
 
     # test data loader
-    data_file = "/home/julia/Dokumente/Unbabel/neural-easy-first/data/WMT2016/WMT2016/task2_en-de_dev/dev.basic_features_with_tags"
+    data_file = "../data/WMT2016/WMT2016/task2_en-de_dev/dev.basic_features_with_tags"
     data = load_data(data_file, src_embeddings, tgt_embeddings,  max_sent=10)
     print data
 
@@ -292,7 +294,8 @@ if __name__ == "__main__":
     feature_vectors, tgt_sentences, labels, label_dict = data
     #print pad_data(feature_vectors, labels, max_len=30)
 
-    bucketed_data, reordering_indexes = buckets_by_length(np.asarray(feature_vectors), np.asarray(labels), buckets=3, mode="truncate")
+    bucketed_data, reordering_indexes = buckets_by_length(np.asarray(feature_vectors),
+                                                          np.asarray(labels), buckets=3, mode="pad")
     print "bucketed data", bucketed_data  # X_padded, Y_padded, masks, seq_lens
     print "reordering idx", reordering_indexes
 
