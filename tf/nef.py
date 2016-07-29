@@ -21,15 +21,15 @@ Tensorflow issues:
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "Learning rate.")
 tf.app.flags.DEFINE_string("optimizer", "sgd", "Optimizer [sgd, adam, adagrad, adadelta, "
                                                     "momentum]")
-tf.app.flags.DEFINE_integer("batch_size", 10,
+tf.app.flags.DEFINE_integer("batch_size", 100,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("vocab_size", 20000, "Vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
-tf.app.flags.DEFINE_integer("max_train_data_size", 1000,
+tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
-tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
+tf.app.flags.DEFINE_integer("L", 51, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 5, "number of buckets")
 tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
 tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
@@ -40,14 +40,14 @@ tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
 tf.app.flags.DEFINE_integer("J", 100, "dimensionality of hidden layer")
 tf.app.flags.DEFINE_integer("r", 2, "context size")
-tf.app.flags.DEFINE_integer("bad_weight", 0.7, "weight for BAD instances" )
+tf.app.flags.DEFINE_integer("bad_weight", 0.9, "weight for BAD instances" )
 tf.app.flags.DEFINE_boolean("concat", False, "concatenating s_i and h_i for prediction")
 tf.app.flags.DEFINE_boolean("train", True, "training model")
 tf.app.flags.DEFINE_integer("epochs", 100, "training epochs")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 1, "save model every x epochs")
 tf.app.flags.DEFINE_integer("lstm_units", 100, "number of LSTM-RNN encoder units")
 tf.app.flags.DEFINE_float("l2_scale", 0.001, "L2 regularization constant")
-tf.app.flags.DEFINE_float("keep_prob", 0.9, "keep probability for dropout during training (1: no dropout)")  # TODO fix
+tf.app.flags.DEFINE_float("keep_prob", 0.9, "keep probability for dropout during training (1: no dropout)")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
 tf.app.flags.DEFINE_integer("threads", 8, "number of threads")
@@ -340,7 +340,8 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                                     1)  # masked, batch_size x 1
             if l2_scale > 0:
                 weights_list = [M_src, M_tgt, W_sz, W_hs, W_ss, W_bz, W_sp, W_hz]
-                l2_loss = tf.contrib.layers.apply_regularization(tf.contrib.layers.l2_regularizer(l2_scale), weights_list=weights_list)
+                l2_loss = tf.contrib.layers.apply_regularization(
+                    tf.contrib.layers.l2_regularizer(l2_scale), weights_list=weights_list)
                 losses_reg = losses + l2_loss
             else:
                 losses_reg = losses
@@ -351,40 +352,58 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
     return losses, losses_reg, predictions
 
 
-
-# TODO quetch: outsource emb, b, init, deeper, regularizer...
-def quetch(x, y, masks, seq_lens, vocab_size, K, D, N, J, L, r, lstm_units, concat, window_size, src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob):
+def quetch(x, y, masks, seq_lens, vocab_size, K, D, N, J, L, r, lstm_units, concat, window_size,
+           src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob):
+    """
+    QUETCH model for word-level QE predictions witho MLP based on embeddings
+    :param x:
+    :param y:
+    :param masks:
+    :param seq_lens:
+    :param vocab_size:
+    :param K:
+    :param D:
+    :param N:
+    :param J:
+    :param L:
+    :param r:
+    :param lstm_units:
+    :param concat:
+    :param window_size:
+    :param src_embeddings:
+    :param tgt_embeddings:
+    :param class_weights:
+    :param l2_scale:
+    :param keep_prob:
+    :return:
+    """
     batch_size = tf.shape(x)[0]
     with tf.name_scope("embedding"):
         if src_embeddings.table is None:
-            #print "Random src embeddings of dimensionality %d" % D
-            M_src = tf.get_variable(name="M_src", shape=[vocab_size, D],  # TODO vocab size
-                            initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
+            M_src = tf.get_variable(name="M_src", shape=[vocab_size, D],
+                            initializer=tf.contrib.layers.xavier_initializer(
+                                uniform=True, dtype=tf.float32))
             emb_size = D
         else:
             M_src = tf.Variable(src_embeddings.table)
             D_loaded = len(tgt_embeddings.table[0])
-            #print "Loading existing src embeddings of dimensionality %d" % D_loaded
             emb_size = D_loaded
 
 
         if tgt_embeddings.table is None:
-            #print "Random tgt embeddings of dimensionality %d" % D
             M_tgt = tf.get_variable(name="M_tgt", shape=[vocab_size, D],
-                            initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
+                            initializer=tf.contrib.layers.xavier_initializer(
+                                uniform=True, dtype=tf.float32))
             emb_size += D
         else:
-            M_tgt = tf.Variable(tgt_embeddings.table)  # TODO parameter if update embeddings or not
+            M_tgt = tf.Variable(tgt_embeddings.table)
             D_loaded = len(tgt_embeddings.table[0])
-            #print "Loading existing tgt embeddings of dimensionality %d" % D_loaded
             emb_size += D_loaded
 
         if keep_prob < 1:  # dropout for word embeddings ("pervasive dropout")
-            #print "Dropping out word embeddings"
             M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
             M_src = tf.nn.dropout(M_src, keep_prob)
 
-        #print "embedding size", emb_size
         x_src, x_tgt = tf.split(2, 2, x)  # split src and tgt part of input
         emb_tgt = tf.nn.embedding_lookup(M_tgt, x_src, name="emg_tgt")  # batch_size x L x window_size x emb_size
         emb_src = tf.nn.embedding_lookup(M_src, x_tgt, name="emb_src")  # batch_size x L x window_size x emb_size
@@ -393,14 +412,35 @@ def quetch(x, y, masks, seq_lens, vocab_size, K, D, N, J, L, r, lstm_units, conc
 
     with tf.name_scope("mlp"):
         x = tf.reshape(emb, [-1, window_size*emb_size])
-        W = tf.Variable(tf.random_uniform(shape=[window_size*emb_size, K]), name="W")
-        a = tf.tanh(tf.matmul(x, W))  # batch_size*L, K
-        logits = tf.reshape(a, [batch_size, L, K])
+        W_1 = tf.get_variable(shape=[window_size*emb_size, J],
+                              initializer=tf.contrib.layers.xavier_initializer(
+                                  uniform=True, dtype=tf.float32), name="W_1")
+        W_2 = tf.get_variable(shape=[J, K],
+                              initializer=tf.contrib.layers.xavier_initializer(
+                                  uniform=True, dtype=tf.float32), name="W_2")
+        b_1 = tf.get_variable(shape=[J], initializer=tf.random_uniform_initializer(
+            dtype=tf.float32), name="b_1")
+        b_2 = tf.get_variable(shape=[K], initializer=tf.random_uniform_initializer(
+            dtype=tf.float32), name="b_2")
+        hidden = tf.tanh(tf.matmul(x, W_1) + b_1)  # batch_size*emb_size, J
+        if keep_prob < 1:
+            hidden = tf.nn.dropout(hidden, keep_prob)
+        out = tf.matmul(hidden, W_2) + b_2  # batch_size*emb_size, K
+        logits = tf.reshape(out, [batch_size, L, K])
         pred_labels = masks*tf.argmax(logits, 2)  # batch_size x L
         y_full = tf.one_hot(y, depth=K, on_value=1.0, off_value=0.0)
         cross_entropy = tf.cast(masks, dtype=tf.float32)*tf.reduce_mean(tf.log(logits*y_full), 2)  # batch_size x L
         losses = cross_entropy
-    return losses, pred_labels
+        if l2_scale > 0:
+            weights_list = [M_src, M_tgt, W_1, W_2]
+            l2_loss = tf.contrib.layers.apply_regularization(
+                tf.contrib.layers.l2_regularizer(l2_scale), weights_list=weights_list)
+            losses_reg = losses + l2_loss
+        else:
+            losses_reg = losses
+
+    return losses, losses_reg, pred_labels
+
 
 
 class EasyFirstModel():
@@ -510,21 +550,25 @@ class EasyFirstModel():
         self.losses_reg = []
         self.predictions = []
         for j, max_len in enumerate(self.buckets):
-            self.inputs.append(tf.placeholder(tf.int32, shape=[None, max_len, 2*self.window_size], name="inputs{0}".format(j)))
-            self.labels.append(tf.placeholder(tf.int32, shape=[None, max_len], name="labels{0}".format(j)))
-            self.masks.append(tf.placeholder(tf.int64, shape=[None, max_len], name="masks{0}".format(j)))
-            self.seq_lens.append(tf.placeholder(tf.int32, shape=[None], name="seq_lens{0}".format(j)))
-            with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None): #, regularizer=tf.contrib.layers.l2_regularizer(self.l2_scale)):
+            self.inputs.append(tf.placeholder(tf.int32,
+                                              shape=[None, max_len, 2*self.window_size],
+                                              name="inputs{0}".format(j)))
+            self.labels.append(tf.placeholder(tf.int32,
+                                              shape=[None, max_len], name="labels{0}".format(j)))
+            self.masks.append(tf.placeholder(tf.int64,
+                                             shape=[None, max_len], name="masks{0}".format(j)))
+            self.seq_lens.append(tf.placeholder(tf.int32,
+                                                shape=[None], name="seq_lens{0}".format(j)))
+            with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 print "Initializing parameters for bucket with max len", max_len
-                bucket_losses, bucket_losses_reg, bucket_predictions = ef_single_state(self.inputs[j], self.labels[j],
-                                                                     self.masks[j], self.seq_lens[j],
-                                                                     vocab_size=vocab_size, K=self.K,
-                                                                     D=self.D, N=max_len,  # TODO number of sketches is fixed to sequence length
-                                                                     J=self.J, L=max_len, r=self.r, lstm_units=lstm_units,
-                                                                     concat=self.concat, window_size=window_size,
-                                                                     src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
-                                                                     class_weights=class_weights,
-                                                                     keep_prob=keep_prob, l2_scale=l2_scale)
+                bucket_losses, bucket_losses_reg, bucket_predictions = ef_single_state(
+                    self.inputs[j], self.labels[j], self.masks[j], self.seq_lens[j],
+                    vocab_size=vocab_size, K=self.K, D=self.D, N=max_len,  # number of sketches is fixed to sequence length
+                    J=self.J, L=max_len, r=self.r, lstm_units=lstm_units, concat=self.concat,
+                    window_size=window_size, src_embeddings=src_embeddings,
+                    tgt_embeddings=tgt_embeddings, class_weights=class_weights,
+                    keep_prob=keep_prob, l2_scale=l2_scale)
+
                 self.losses_reg.append(bucket_losses_reg)
                 self.losses.append(bucket_losses) # list of tensors, one for each bucket
                 self.predictions.append(bucket_predictions)  # list of tensors, one for each bucket
@@ -613,8 +657,10 @@ def create_model(session, buckets, forward_only=False, src_embeddings=None, tgt_
         session.run(tf.initialize_all_variables())
     return model
 
+
 def print_config():
     print "Configuration:", FLAGS.__dict__["__flags"]
+
 
 def train():
     """
@@ -632,18 +678,31 @@ def train():
         tgt_embeddings = load_embedding(FLAGS.tgt_embeddings) if FLAGS.tgt_embeddings != "" \
             else None
 
-        train_dir = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags"  # TODO language as parameter
+        train_dir = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags"
         dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.basic_features_with_tags"
 
-        train_feature_vectors, train_tgt_sentences, train_labels, train_label_dict, train_src_embeddings, train_tgt_embeddings = \
-            load_data(train_dir, src_embeddings, tgt_embeddings, max_sent = FLAGS.max_train_data_size, train=True, labeled=True)
+        train_feature_vectors, train_tgt_sentences, train_labels, train_label_dict, \
+        train_src_embeddings, train_tgt_embeddings = load_data(train_dir, src_embeddings,
+                                                               tgt_embeddings,
+                                                               max_sent=FLAGS.max_train_data_size,
+                                                               train=True, labeled=True)
         dev_feature_vectors, dev_tgt_sentences, dev_labels, dev_label_dict = \
             load_data(dev_dir, train_src_embeddings, train_tgt_embeddings, train=False, labeled=True)  # use training vocab for dev
 
         if FLAGS.src_embeddings == "":
-            src_embeddings = embedding.embedding(None, train_src_embeddings.word2id, train_src_embeddings.id2word, train_src_embeddings.UNK_id, train_src_embeddings.PAD_id, train_src_embeddings.end_id, train_src_embeddings.start_id)
+            src_embeddings = embedding.embedding(None, train_src_embeddings.word2id,
+                                                 train_src_embeddings.id2word,
+                                                 train_src_embeddings.UNK_id,
+                                                 train_src_embeddings.PAD_id,
+                                                 train_src_embeddings.end_id,
+                                                 train_src_embeddings.start_id)
         if FLAGS.tgt_embeddings == "":
-            tgt_embeddings = embedding.embedding(None, train_tgt_embeddings.word2id, train_tgt_embeddings.id2word, train_tgt_embeddings.UNK_id, train_tgt_embeddings.PAD_id, train_tgt_embeddings.end_id, train_tgt_embeddings.start_id)
+            tgt_embeddings = embedding.embedding(None, train_tgt_embeddings.word2id,
+                                                 train_tgt_embeddings.id2word,
+                                                 train_tgt_embeddings.UNK_id,
+                                                 train_tgt_embeddings.PAD_id,
+                                                 train_tgt_embeddings.end_id,
+                                                 train_tgt_embeddings.start_id)
 
         src_vocab_size = len(train_src_embeddings.word2id)
         tgt_vocab_size = len(train_tgt_embeddings.word2id)
@@ -660,22 +719,26 @@ def train():
         print "Weights for classes:", class_weights
 
         # bucketing training data
-        train_buckets, reordering_indexes, bucket_edges = buckets_by_length(np.asarray(train_feature_vectors),
-                                                          np.asarray(train_labels), buckets=FLAGS.buckets, max_len=FLAGS.L, mode="pad")
+        train_buckets, reordering_indexes, bucket_edges = buckets_by_length(
+            np.asarray(train_feature_vectors), np.asarray(train_labels), buckets=FLAGS.buckets,
+            max_len=FLAGS.L, mode="pad")
 
         model = create_model(sess, bucket_edges[1:], False, src_embeddings, tgt_embeddings, class_weights)
 
-        # train_buckets is dictionary, each train bucket contains X_train_padded, Y_train_padded, train_masks, train_seq_lens
         train_buckets_sizes = {i : len(indx) for i, indx in reordering_indexes.items()}
         print "Creating buckets for training data:"
         for i in train_buckets.keys():
             X_train_padded, Y_train_padded, train_masks, train_seq_lens = train_buckets[i]
             total_number_of_pads = sum([bucket_edges[i+1]-l for l in train_seq_lens])
-            print "Bucket no %d with max length %d: %d instances, avg length %f,  %d number of PADS in total" % (i, bucket_edges[i+1], train_buckets_sizes[i], np.average(train_seq_lens), total_number_of_pads)
+            print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
+                  "%d number of PADS in total" % (i, bucket_edges[i+1], train_buckets_sizes[i],
+                                                  np.average(train_seq_lens), total_number_of_pads)
 
 
         # bucketing dev data
-        dev_buckets, dev_reordering_indexes = put_in_buckets(np.asarray(dev_feature_vectors), np.asarray(dev_labels), buckets=bucket_edges)
+        dev_buckets, dev_reordering_indexes = put_in_buckets(np.asarray(dev_feature_vectors),
+                                                             np.asarray(dev_labels),
+                                                             buckets=bucket_edges)
         dev_buckets_sizes = {i : len(indx) for i, indx in dev_reordering_indexes.items()}
         print dev_buckets_sizes
 
@@ -683,7 +746,9 @@ def train():
         for i in dev_buckets.keys():
             X_dev_padded, Y_dev_padded, dev_masks, dev_seq_lens = dev_buckets[i]
             total_number_of_pads = sum([bucket_edges[i+1]-l for l in dev_seq_lens])
-            print "Bucket no %d with max length %d: %d instances, avg length %f,  %d number of PADS in total" % (i, bucket_edges[i+1], dev_buckets_sizes[i], np.average(dev_seq_lens), total_number_of_pads)
+            print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
+                  "%d number of PADS in total" % (i, bucket_edges[i+1], dev_buckets_sizes[i],
+                                                  np.average(dev_seq_lens), total_number_of_pads)
 
         # training in epochs
         for epoch in xrange(FLAGS.epochs):
@@ -710,20 +775,23 @@ def train():
                 # make update on each batch
                 for i, batch_samples in enumerate(batch_ids):
                     x_batch = bucket_xs[batch_samples]
-                    #print "x_batch", x_batch
                     y_batch = bucket_ys[batch_samples]
                     mask_batch = bucket_masks[batch_samples]
                     seq_lens_batch = bucket_seq_lens[batch_samples]
-                    step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id, x_batch, y_batch, mask_batch, seq_lens_batch, False)  # loss for each instance in batch
+                    step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
+                                                                               x_batch, y_batch,
+                                                                               mask_batch,
+                                                                               seq_lens_batch, False)  # loss for each instance in batch
                     loss_reg += np.sum(step_loss_reg)
                     loss += np.sum(step_loss)  # sum over batch
                     bucket_loss += np.sum(step_loss)
                     bucket_loss_reg += np.sum(step_loss_reg)
-                    #print i, x_i, _, y_i, predictions, step_loss, embeddings
                     train_predictions.extend(predictions)
                     train_true.extend(y_batch)  # needs to be stored because of random order
                     current_sample += len(x_batch)
-                print "bucket %d - loss %0.2f - loss+reg %0.2f" % (bucket_id, bucket_loss/len(bucket_xs), bucket_loss_reg/len(bucket_xs))
+                print "bucket %d - loss %0.2f - loss+reg %0.2f" % (bucket_id,
+                                                                   bucket_loss/len(bucket_xs),
+                                                                   bucket_loss_reg/len(bucket_xs))
 
             train_accuracy = accuracy(train_true, train_predictions)
             train_f1_1, train_f1_2 = f1s_binary(train_true, train_predictions)
@@ -743,7 +811,11 @@ def train():
                 dev_true = []
                 for bucket_id in dev_buckets.keys():
                     bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = dev_buckets[bucket_id]
-                    step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id, bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens, True)  # loss for whole bucket
+                    step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
+                                                                               bucket_xs, bucket_ys,
+                                                                               bucket_masks,
+                                                                               bucket_seq_lens,
+                                                                               True)  # loss for whole bucket
                     dev_predictions.extend(predictions)
                     dev_true.extend(bucket_ys)
                     dev_loss += np.sum(step_loss)
@@ -790,20 +862,25 @@ def test():
             load_data(test_dir, src_embeddings, tgt_embeddings, train=False, labeled=False)
 
         # load model
-        class_weights = [1-FLAGS.bad_weight, FLAGS.bad_weight]  # TODO QE specific
-        model = create_model(sess, buckets=None, forward_only=True, src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings, class_weights=class_weights)
+        class_weights = [1-FLAGS.bad_weight, FLAGS.bad_weight]  #QE-specific
+        model = create_model(sess, buckets=None, forward_only=True, src_embeddings=src_embeddings,
+                             tgt_embeddings=tgt_embeddings, class_weights=class_weights)
 
         # bucketing test data
         bucket_edges = [0]
         bucket_edges.extend(model.buckets)
-        test_buckets, test_reordering_indexes = put_in_buckets(np.asarray(test_feature_vectors), np.asarray(test_labels), buckets=bucket_edges)  # TODO fix
+        test_buckets, test_reordering_indexes = put_in_buckets(np.asarray(test_feature_vectors),
+                                                               np.asarray(test_labels),
+                                                               buckets=bucket_edges)
         test_buckets_sizes = {i: len(indx) for i, indx in test_reordering_indexes.items()}
 
         print "Creating buckets for test data:"
         for i in test_buckets.keys():
             X_test_padded, Y_test_padded, test_masks, test_seq_lens = test_buckets[i]
             total_number_of_pads = sum([bucket_edges[i+1]-l for l in test_seq_lens])
-            print "Bucket no %d with max length %d: %d instances, avg length %f,  %d number of PADS in total" % (i, bucket_edges[i+1], test_buckets_sizes[i], np.average(test_seq_lens), total_number_of_pads)
+            print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
+                  "%d number of PADS in total" % (i, bucket_edges[i+1], test_buckets_sizes[i],
+                                                  np.average(test_seq_lens), total_number_of_pads)
 
         # eval on test
         start_time_valid = time.time()
@@ -812,7 +889,9 @@ def test():
         test_true = []
         for bucket_id in test_buckets.keys():
             bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = test_buckets[bucket_id]
-            step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id, bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens, True)  # loss for whole bucket
+            step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id, bucket_xs,
+                                                                       bucket_ys, bucket_masks,
+                                                                       bucket_seq_lens, True)  # loss for whole bucket
             test_predictions.extend(predictions)
             test_true.extend(bucket_ys)
             test_loss += np.sum(step_loss)
@@ -853,8 +932,9 @@ def demo():
             tgt_embeddings = embedding.embedding(None, tgt_word2id, tgt_id2word, 0, 1, 2, 3)
 
         # load model
-        class_weights = [1-FLAGS.bad_weight, FLAGS.bad_weight]  # TODO QE specific
-        model = create_model(sess, buckets=None, forward_only=True, src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings, class_weights=class_weights)
+        class_weights = [1-FLAGS.bad_weight, FLAGS.bad_weight]  # QE-specific
+        model = create_model(sess, buckets=None, forward_only=True, src_embeddings=src_embeddings,
+                             tgt_embeddings=tgt_embeddings, class_weights=class_weights)
 
         # bucketing test data
         bucket_edges = model.buckets
@@ -909,7 +989,9 @@ def demo():
             Y_padded = np.zeros_like(mask)  # dummy labels
 
             # get predictions
-            step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id, X_padded, Y_padded, mask, [seq_len], True)
+            step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id, X_padded,
+                                                                       Y_padded, mask, [seq_len],
+                                                                       True)
             outputs = predictions[0]
 
             while len(outputs) < len(words_tgt):  # can happen because of sentence length limit
@@ -940,6 +1022,6 @@ if __name__ == "__main__":
 
 # TODO
 # - sent. F1 as loss?
-# - QUETCH
+# - language als parameter
 # - modularization
 # - nicer way of storing model parameters (word2id, buckets, params)
