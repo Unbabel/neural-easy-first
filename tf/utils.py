@@ -206,7 +206,7 @@ def buckets_by_length(data_array, labels, buckets=20, max_len=0, mode='pad'):
                                         float(max_len - buckets[0]))
     bin_edges = np.append([int(b) for b in bin_edges], [max_len])
     print "bin edges:", bin_edges
-    input_bucket_index = np.digitize(input_lengths, bin_edges, right=False)
+    input_bucket_index = [i if i<len(buckets) else len(buckets)-1 for i in np.digitize(input_lengths, buckets, right=False)]  # truncate too long sentences
 
     if mode == 'truncate':
         input_bucket_index -= 1
