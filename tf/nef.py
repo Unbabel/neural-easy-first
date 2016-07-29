@@ -18,19 +18,19 @@ Tensorflow issues:
 """
 
 # Flags
-tf.app.flags.DEFINE_float("learning_rate", 0.5, "Learning rate.")
-tf.app.flags.DEFINE_string("optimizer", "sgd", "Optimizer [sgd, adam, adagrad, adadelta, "
+tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
+tf.app.flags.DEFINE_string("optimizer", "adam", "Optimizer [sgd, adam, adagrad, adadelta, "
                                                     "momentum]")
 tf.app.flags.DEFINE_integer("batch_size", 100,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("vocab_size", 20000, "Vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
-tf.app.flags.DEFINE_integer("max_train_data_size", 0,
+tf.app.flags.DEFINE_integer("max_train_data_size", 1000,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
-tf.app.flags.DEFINE_integer("L", 51, "maximum length of sequences")
-tf.app.flags.DEFINE_integer("buckets", 5, "number of buckets")
+tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
+tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
 tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
 tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
 #tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
@@ -430,6 +430,10 @@ def quetch(x, y, masks, seq_lens, vocab_size, K, D, N, J, L, r, lstm_units, conc
         pred_labels = masks*tf.argmax(logits, 2)  # batch_size x L
         y_full = tf.one_hot(y, depth=K, on_value=1.0, off_value=0.0)
         cross_entropy = tf.cast(masks, dtype=tf.float32)*tf.reduce_mean(tf.log(logits*y_full), 2)  # batch_size x L
+        accuracy_sent = tf.reduce_mean(tf.cast(tf.equal(pred_labels, y_full), tf.float32), 2)  # accuracy per sentence
+
+        # http://stackoverflow.com/questions/35756710/how-do-i-create-confusion-matrix-of-predicted-and-ground-truth-labels-with-tenso/35876136#35876136
+        # TODO other eval metric
         losses = cross_entropy
         if l2_scale > 0:
             weights_list = [M_src, M_tgt, W_1, W_2]
@@ -767,9 +771,11 @@ def train():
                 # random order of samples in batch
                 order = np.random.permutation(len(bucket_xs))
                 # split data in bucket into random batches of at most batch_size
-                assert train_buckets_sizes[bucket_id] > FLAGS.batch_size
-                samples_per_batch = train_buckets_sizes[bucket_id]/float(FLAGS.batch_size)
-                batch_ids = np.array_split(order, samples_per_batch)
+                if train_buckets_sizes[bucket_id] > FLAGS.batch_size:
+                    samples_per_batch = train_buckets_sizes[bucket_id]/float(FLAGS.batch_size)
+                    batch_ids = np.array_split(order, samples_per_batch)
+                else:
+                    batch_ids = order  # only one batch
                 bucket_loss = 0
                 bucket_loss_reg = 0
                 # make update on each batch
