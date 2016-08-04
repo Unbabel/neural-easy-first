@@ -20,6 +20,8 @@
 #include "feedforward_layer.h"
 #include "softmax_layer.h"
 #include "neural_network.h"
+#include "updater.h"
+#include "parameters.h"
 
 class SentencePair {
  public:
@@ -82,6 +84,13 @@ template<typename Real> class AttentiveQualityEstimator :
     output_size_ = output_size;
     embedding_size_ = embedding_dimension;
 
+    parameters_ = new Parameters<Real>();
+    if (use_ADAM_) {
+      updater_ = new ADAMUpdater<Real>(parameters_);
+    } else {
+      updater_ = new SGDUpdater<Real>(parameters_);
+    }
+
     CreateNetwork();
   }
 
@@ -97,6 +106,8 @@ template<typename Real> class AttentiveQualityEstimator :
     delete concatenator_layer_;
     delete feedforward_layer_;
     delete output_layer_;
+    delete parameters_;
+    delete updater_;
   }
 
   void CreateNetwork() {
@@ -106,6 +117,17 @@ template<typename Real> class AttentiveQualityEstimator :
     NeuralNetwork<Real>::AddLayer(source_lookup_layer_);
     source_linear_layer_ = new LinearLayer<Real>(embedding_size_, input_size_);
     NeuralNetwork<Real>::AddLayer(source_linear_layer_);
+
+    /* EXAMPLE:
+    Matrix<Real> *Wxy, *dWxy;
+    parameters_->CreateMatrixParameter("Wxy", input_size_, embedding_size_,
+                                       &Wxy, &dWxy);
+    Vector<Real> *by, *dby;
+    parameters_->CreateVectorParameter("by", input_size_, &by, &dby);
+    source_linear_layer_->SetParameters(Wxy, by);
+    source_linear_layer_->SetParameterDerivatives(dWxy, dby);
+    END OF EXAMPLE. */
+
 
     // Add target lookup and linear layers.
     target_lookup_layer_ = new LookupLayer<Real>(target_dictionary_->GetNumWords(),
@@ -738,6 +760,8 @@ template<typename Real> class AttentiveQualityEstimator :
   Dictionary *source_dictionary_;
   Dictionary *target_dictionary_;
   LabelAlphabet *label_alphabet_;
+  Updater<Real> *updater_;
+  Parameters<Real> *parameters_;
   LookupLayer<Real> *source_lookup_layer_;
   LinearLayer<Real> *source_linear_layer_;
   LookupLayer<Real> *target_lookup_layer_;
