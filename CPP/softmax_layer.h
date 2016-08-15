@@ -17,17 +17,40 @@ template<typename Real> class SoftmaxOutputLayer : public Layer<Real> {
   int input_size() const { return input_size_; }
   int output_size() const { return output_size_; }
 
+  virtual void CreateParameters(Parameters<Real> *parameters) {
+    Matrix<Real> *Why, *dWhy;
+    parameters->CreateMatrixParameter("Why", output_size_, input_size_,
+                                      &Why, &dWhy);
+    Vector<Real> *by, *dby;
+    parameters->CreateVectorParameter("by", output_size_, &by, &dby);
+
+    SetParameters(Why, by, dWhy, dby);
+  }
+
+  void SetParameters(Matrix<Real> *Why,
+                     Vector<Real> *by,
+                     Matrix<Real> *dWhy,
+                     Vector<Real> *dby) {
+    Why_ = Why;
+    by_ = by;
+    dWhy_ = dWhy;
+    dby_ = dby;
+  }
+
   void ResetParameters() {
+    // Remove this.
+#if 0
     Why_ = Matrix<Real>::Zero(output_size_, input_size_);
     by_ = Vector<Real>::Zero(output_size_);
+#endif
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
                             std::vector<Vector<Real>*> *biases,
                             std::vector<std::string> *weight_names,
                             std::vector<std::string> *bias_names) {
-    weights->push_back(&Why_);
-    biases->push_back(&by_);
+    weights->push_back(Why_);
+    biases->push_back(by_);
 
     weight_names->push_back("Why");
     bias_names->push_back("by");
@@ -36,8 +59,8 @@ template<typename Real> class SoftmaxOutputLayer : public Layer<Real> {
   void CollectAllParameterDerivatives(
       std::vector<Matrix<Real>*> *weight_derivatives,
       std::vector<Vector<Real>*> *bias_derivatives) {
-    weight_derivatives->push_back(&dWhy_);
-    bias_derivatives->push_back(&dby_);
+    weight_derivatives->push_back(dWhy_);
+    bias_derivatives->push_back(dby_);
   }
 
   double GetUniformInitializationLimit(Matrix<Real> *W) {
@@ -48,16 +71,20 @@ template<typename Real> class SoftmaxOutputLayer : public Layer<Real> {
   }
 
   void ResetGradients() {
-    dWhy_.setZero(output_size_, input_size_);
-    dby_.setZero(output_size_);
+    // Remove this?
+#if 0
+    dWhy_->setZero(output_size_, input_size_);
+    dby_->setZero(output_size_);
+#endif
   }
 
   void RunForward() {
     const Matrix<Real> &h = this->GetInput();
     assert(h.cols() == 1);
-    Vector<Real> y = Why_ * h + by_;
+    Vector<Real> y = *Why_ * h + *by_;
     Real logsum = LogSumExp(y);
-    this->SetOutput((y.array() - logsum).exp()); // This is the probability vector.
+    // This is the probability vector.
+    this->SetOutput((y.array() - logsum).exp());
   }
 
   void RunBackward() {
@@ -68,9 +95,9 @@ template<typename Real> class SoftmaxOutputLayer : public Layer<Real> {
 
     Vector<Real> dy = *(this->GetMutableOutput());
     dy[output_label_] -= 1.0; // Backprop into y (softmax grad).
-    dWhy_.noalias() += dy * h.transpose();
-    dby_.noalias() += dy;
-    (*dh).noalias() += Why_.transpose() * dy; // Backprop into h.
+    dWhy_->noalias() += dy * h.transpose();
+    dby_->noalias() += dy;
+    (*dh).noalias() += Why_->transpose() * dy; // Backprop into h.
   }
 
   int output_label() { return output_label_; }
@@ -82,11 +109,11 @@ template<typename Real> class SoftmaxOutputLayer : public Layer<Real> {
   int input_size_;
   int output_size_;
 
-  Matrix<Real> Why_;
-  Vector<Real> by_;
+  Matrix<Real> *Why_;
+  Vector<Real> *by_;
 
-  Matrix<Real> dWhy_;
-  Vector<Real> dby_;
+  Matrix<Real> *dWhy_;
+  Vector<Real> *dby_;
 
   int output_label_; // Output.
 };
@@ -106,17 +133,40 @@ template<typename Real> class SoftmaxLayer : public Layer<Real> {
   int input_size() const { return input_size_; }
   int output_size() const { return output_size_; }
 
+  virtual void CreateParameters(Parameters<Real> *parameters) {
+    Matrix<Real> *Why, *dWhy;
+    parameters->CreateMatrixParameter("Why", output_size_, input_size_,
+                                      &Why, &dWhy);
+    Vector<Real> *by, *dby;
+    parameters->CreateVectorParameter("by", output_size_, &by, &dby);
+
+    SetParameters(Why, by, dWhy, dby);
+  }
+
+  void SetParameters(Matrix<Real> *Why,
+                     Vector<Real> *by,
+                     Matrix<Real> *dWhy,
+                     Vector<Real> *dby) {
+    Why_ = Why;
+    by_ = by;
+    dWhy_ = dWhy;
+    dby_ = dby;
+  }
+
   void ResetParameters() {
+    // Remove this?
+#if 0
     Why_ = Matrix<Real>::Zero(output_size_, input_size_);
     by_ = Vector<Real>::Zero(output_size_);
+#endif
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
                             std::vector<Vector<Real>*> *biases,
                             std::vector<std::string> *weight_names,
                             std::vector<std::string> *bias_names) {
-    weights->push_back(&Why_);
-    biases->push_back(&by_);
+    weights->push_back(Why_);
+    biases->push_back(by_);
 
     weight_names->push_back("Why");
     bias_names->push_back("by");
@@ -125,8 +175,8 @@ template<typename Real> class SoftmaxLayer : public Layer<Real> {
   void CollectAllParameterDerivatives(
       std::vector<Matrix<Real>*> *weight_derivatives,
       std::vector<Vector<Real>*> *bias_derivatives) {
-    weight_derivatives->push_back(&dWhy_);
-    bias_derivatives->push_back(&dby_);
+    weight_derivatives->push_back(dWhy_);
+    bias_derivatives->push_back(dby_);
   }
 
   double GetUniformInitializationLimit(Matrix<Real> *W) {
@@ -137,14 +187,17 @@ template<typename Real> class SoftmaxLayer : public Layer<Real> {
   }
 
   void ResetGradients() {
+    // Remove this?
+#if 0
     dWhy_.setZero(output_size_, input_size_);
     dby_.setZero(output_size_);
+#endif
   }
 
   void RunForward() {
     const Matrix<Real> &H = this->GetInput();
     int batch_size = H.cols();
-    Matrix<Real> Y = (Why_ * H).colwise() + by_;
+    Matrix<Real> Y = (*Why_ * H).colwise() + *by_;
     // If doing cost-augmented decoding (training time),
     // sum the costs to the log-potentials.
     Vector<Real> logsum;
@@ -173,9 +226,9 @@ template<typename Real> class SoftmaxLayer : public Layer<Real> {
       dY(output_labels_[m], m) -= 1.0; // Backprop into y (softmax grad).
     }
     Vector<Real> dy_sum = dY.rowwise().sum();
-    dWhy_.noalias() += dY * H.transpose();
-    dby_.noalias() += dy_sum;
-    (*dH).noalias() += Why_.transpose() * dY; // Backprop into h.
+    dWhy_->noalias() += dY * H.transpose();
+    dby_->noalias() += dy_sum;
+    (*dH).noalias() += Why_->transpose() * dY; // Backprop into h.
   }
 
   const std::vector<int> &output_labels() { return output_labels_; }
@@ -196,11 +249,11 @@ template<typename Real> class SoftmaxLayer : public Layer<Real> {
   int input_size_;
   int output_size_;
 
-  Matrix<Real> Why_;
-  Vector<Real> by_;
+  Matrix<Real> *Why_;
+  Vector<Real> *by_;
 
-  Matrix<Real> dWhy_;
-  Vector<Real> dby_;
+  Matrix<Real> *dWhy_;
+  Vector<Real> *dby_;
 
   std::vector<int> output_labels_; // Output.
   bool cost_augmented_; // True for cost-augmented decoding.

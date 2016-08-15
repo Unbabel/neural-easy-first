@@ -112,42 +112,39 @@ template<typename Real> class AttentiveQualityEstimator :
 
   void CreateNetwork() {
     // Add source lookup and linear layers.
-    source_lookup_layer_ = new LookupLayer<Real>(source_dictionary_->GetNumWords(),
-                                                 embedding_size_);
+    source_lookup_layer_ =
+      new LookupLayer<Real>(source_dictionary_->GetNumWords(), embedding_size_);
+    source_lookup_layer_->CreateParameters(parameters_);
     NeuralNetwork<Real>::AddLayer(source_lookup_layer_);
     source_linear_layer_ = new LinearLayer<Real>(embedding_size_, input_size_);
+    source_linear_layer_->CreateParameters(parameters_);
     NeuralNetwork<Real>::AddLayer(source_linear_layer_);
 
-    /* EXAMPLE:
-    Matrix<Real> *Wxy, *dWxy;
-    parameters_->CreateMatrixParameter("Wxy", input_size_, embedding_size_,
-                                       &Wxy, &dWxy);
-    Vector<Real> *by, *dby;
-    parameters_->CreateVectorParameter("by", input_size_, &by, &dby);
-    source_linear_layer_->SetParameters(Wxy, by);
-    source_linear_layer_->SetParameterDerivatives(dWxy, dby);
-    END OF EXAMPLE. */
-
-
     // Add target lookup and linear layers.
-    target_lookup_layer_ = new LookupLayer<Real>(target_dictionary_->GetNumWords(),
-                                                 embedding_size_);
+    target_lookup_layer_ =
+      new LookupLayer<Real>(target_dictionary_->GetNumWords(), embedding_size_);
+    target_lookup_layer_->CreateParameters(parameters_);
     NeuralNetwork<Real>::AddLayer(target_lookup_layer_);
     target_linear_layer_ = new LinearLayer<Real>(embedding_size_, input_size_);
+    target_linear_layer_->CreateParameters(parameters_);
     NeuralNetwork<Real>::AddLayer(target_linear_layer_);
 
     // Add source and target RNNs.
     int state_size;
     if (use_bidirectional_rnns_) {
       source_rnn_layer_ = new BiGRULayer<Real>(input_size_, hidden_size_);
+      source_rnn_layer_->CreateParameters(parameters_);
       NeuralNetwork<Real>::AddLayer(source_rnn_layer_);
       target_rnn_layer_ = new BiGRULayer<Real>(input_size_, hidden_size_);
+      target_rnn_layer_->CreateParameters(parameters_);
       NeuralNetwork<Real>::AddLayer(target_rnn_layer_);
       state_size = 2*hidden_size_;
     } else {
       source_rnn_layer_ = new GRULayer<Real>(input_size_, hidden_size_);
+      source_rnn_layer_->CreateParameters(parameters_);
       NeuralNetwork<Real>::AddLayer(source_rnn_layer_);
       target_rnn_layer_ = new GRULayer<Real>(input_size_, hidden_size_);
+      target_rnn_layer_->CreateParameters(parameters_);
       NeuralNetwork<Real>::AddLayer(target_rnn_layer_);
       state_size = hidden_size_;
     }
@@ -157,10 +154,12 @@ template<typename Real> class AttentiveQualityEstimator :
       attention_layer_ = new AttentionLayer<Real>(state_size, state_size,
                                                   hidden_size_,
                                                   attention_type_);
+      attention_layer_->CreateParameters(parameters_);
       NeuralNetwork<Real>::AddLayer(attention_layer_);
       alignment_layer_ = NULL;
     } else {
       // Add an alignment layer using pre-computed word alignments.
+      // This layer has no parameters.
       alignment_layer_ = new AlignmentLayer<Real>();
       NeuralNetwork<Real>::AddLayer(alignment_layer_);
       attention_layer_ = NULL;
@@ -168,17 +167,20 @@ template<typename Real> class AttentiveQualityEstimator :
 
     // Add a concatenator layer that concatenates the target states with the
     // source representation coming from the attention layer.
+    // This layer has no parameters.
     concatenator_layer_ = new ConcatenatorLayer<Real>;
     NeuralNetwork<Real>::AddLayer(concatenator_layer_);
 
     // Add a feedforward layer.
     feedforward_layer_ = new FeedforwardLayer<Real>(2*state_size,
                                                     hidden_size_);
+    feedforward_layer_->CreateParameters(parameters_);
     NeuralNetwork<Real>::AddLayer(feedforward_layer_);
 
     // Add a softmax layer that performs a softmax transformation for each
     // target position.
     output_layer_ = new SoftmaxLayer<Real>(hidden_size_, output_size_);
+    output_layer_->CreateParameters(parameters_);
     NeuralNetwork<Real>::AddLayer(output_layer_);
 
     // Connect the layers.
@@ -298,8 +300,8 @@ template<typename Real> class AttentiveQualityEstimator :
 
   void SetFixedEmbeddings(const Matrix<Real> &source_fixed_embeddings,
                           const Matrix<Real> &target_fixed_embeddings) {
-    source_lookup_layer_->SetFixedEmbeddings(source_fixed_embeddings);
-    target_lookup_layer_->SetFixedEmbeddings(target_fixed_embeddings);
+    source_lookup_layer_->SetFixedEmbeddings(&source_fixed_embeddings);
+    target_lookup_layer_->SetFixedEmbeddings(&target_fixed_embeddings);
   }
 
   void Evaluate(const std::vector<std::vector<int> > &all_gold_labels,

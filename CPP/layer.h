@@ -7,6 +7,7 @@
 #include <cmath>
 #include "utils.h"
 #include "nn_utils.h"
+#include "parameters.h"
 
 template<typename Real> class Layer {
  public:

@@ -32,25 +32,55 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     control_size_ = control_size;
     hidden_size_ = hidden_size;
     attention_type_ = attention_type;
-    Wxz_ = NULL;
-    Wyz_ = NULL;
-    wzp_ = NULL;
-    bz_ = NULL;
   }
-  virtual ~AttentionLayer() { DeleteParameters(); }
+  virtual ~AttentionLayer() {}
 
   int input_size() const { return input_size_; }
   int control_size() const { return control_size_; }
   int hidden_size() const { return hidden_size_; }
 
+  virtual void CreateParameters(Parameters<Real> *parameters) {
+    Matrix<Real> *Wxz, *dWxz;
+    parameters->CreateMatrixParameter("Wxz", hidden_size_, input_size_,
+                                      &Wxz, &dWxz);
+    Matrix<Real> *Wyz, *dWyz;
+    parameters->CreateMatrixParameter("Wyz", hidden_size_, control_size_,
+                                      &Wyz, &dWyz);
+    Matrix<Real> *wzp, *dwzp;
+    parameters->CreateMatrixParameter("wzp", hidden_size_, 1,
+                                      &wzp, &dwzp);
+    Vector<Real> *bz, *dbz;
+    parameters->CreateVectorParameter("bz", hidden_size_, &bz, &dbz);
+
+    SetParameters(Wxz, Wyz, wzp, bz, dWxz, dWyz, dwzp, dbz);
+  }
+
+  void SetParameters(Matrix<Real> *Wxz, Matrix<Real> *Wyz,
+                     Matrix<Real> *wzp, Vector<Real> *bz,
+                     Matrix<Real> *dWxz, Matrix<Real> *dWyz,
+                     Matrix<Real> *dwzp, Vector<Real> *dbz) {
+    Wxz_ = Wxz;
+    Wyz_ = Wyz;
+    wzp_ = wzp;
+    bz_ = bz;
+    dWxz_ = dWxz;
+    dWyz_ = dWyz;
+    dwzp_ = dwzp;
+    dbz_ = dbz;
+  }
+
+#if 0
   void DeleteParameters() {
     delete Wxz_;
     delete Wyz_;
     delete wzp_;
     delete bz_;
   }
+#endif
 
   void ResetParameters() {
+    // Remove this.
+#if 0
     DeleteParameters();
     Wxz_ = new Matrix<Real>;
     Wxz_->setZero(hidden_size_, input_size_);
@@ -60,6 +90,7 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     wzp_->setZero(hidden_size_, 1);
     bz_ = new Vector<Real>;
     bz_->setZero(hidden_size_);
+#endif
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -82,10 +113,10 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
   void CollectAllParameterDerivatives(
       std::vector<Matrix<Real>*> *weight_derivatives,
       std::vector<Vector<Real>*> *bias_derivatives) {
-    weight_derivatives->push_back(&dWxz_);
-    weight_derivatives->push_back(&dWyz_);
-    weight_derivatives->push_back(&dwzp_);
-    bias_derivatives->push_back(&dbz_);
+    weight_derivatives->push_back(dWxz_);
+    weight_derivatives->push_back(dWyz_);
+    weight_derivatives->push_back(dwzp_);
+    bias_derivatives->push_back(dbz_);
   }
 
   double GetUniformInitializationLimit(Matrix<Real> *W) {
@@ -101,10 +132,13 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
   }
 
   void ResetGradients() {
+    // Remove this?
+#if 0
     dWxz_.setZero(hidden_size_, input_size_);
     dWyz_.setZero(hidden_size_, control_size_);
     dwzp_.setZero(hidden_size_, 1);
     dbz_.setZero(hidden_size_);
+#endif
   }
 
   void RunForward() {
@@ -225,10 +259,10 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
       *dX += this->GetOutputDerivative().col(m) * P_.col(m).transpose();
       dY->col(m) += Wyz_->transpose() * dzraw_sum;
 
-      dwzp_ += z_[m] * Jdp;
-      dWxz_.noalias() += dzraw * X.transpose();
-      dWyz_.noalias() += dzraw_sum * Y.col(m).transpose();
-      dbz_.noalias() += dzraw_sum;
+      *dwzp_ += z_[m] * Jdp;
+      dWxz_->noalias() += dzraw * X.transpose();
+      dWyz_->noalias() += dzraw_sum * Y.col(m).transpose();
+      dbz_->noalias() += dzraw_sum;
     }
   }
 
@@ -248,10 +282,10 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
   Matrix<Real> *wzp_; // Column vector.
   Vector<Real> *bz_;
 
-  Matrix<Real> dWxz_;
-  Matrix<Real> dWyz_;
-  Matrix<Real> dwzp_;
-  Vector<Real> dbz_;
+  Matrix<Real> *dWxz_;
+  Matrix<Real> *dWyz_;
+  Matrix<Real> *dwzp_;
+  Vector<Real> *dbz_;
 
   std::vector<Matrix<Real> > z_;
   Matrix<Real> P_;
