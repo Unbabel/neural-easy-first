@@ -19,7 +19,9 @@ template<typename Real> class SoftmaxOutputLayer : public Layer<Real> {
 
   virtual void CreateParameters(Parameters<Real> *parameters) {
     Matrix<Real> *Why, *dWhy;
+    ParameterGlorotInitializer<Real> initializer(ActivationFunctions::LOGISTIC);
     parameters->CreateMatrixParameter("Why", output_size_, input_size_,
+                                      &initializer,
                                       &Why, &dWhy);
     Vector<Real> *by, *dby;
     parameters->CreateVectorParameter("by", output_size_, &by, &dby);
@@ -35,14 +37,6 @@ template<typename Real> class SoftmaxOutputLayer : public Layer<Real> {
     by_ = by;
     dWhy_ = dWhy;
     dby_ = dby;
-  }
-
-  void ResetParameters() {
-    // Remove this.
-#if 0
-    Why_ = Matrix<Real>::Zero(output_size_, input_size_);
-    by_ = Vector<Real>::Zero(output_size_);
-#endif
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -61,21 +55,6 @@ template<typename Real> class SoftmaxOutputLayer : public Layer<Real> {
       std::vector<Vector<Real>*> *bias_derivatives) {
     weight_derivatives->push_back(dWhy_);
     bias_derivatives->push_back(dby_);
-  }
-
-  double GetUniformInitializationLimit(Matrix<Real> *W) {
-    int num_outputs = W->rows();
-    int num_inputs = W->cols();
-    double coeff = 4.0; // Like in LOGISTIC.
-    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
-  }
-
-  void ResetGradients() {
-    // Remove this?
-#if 0
-    dWhy_->setZero(output_size_, input_size_);
-    dby_->setZero(output_size_);
-#endif
   }
 
   void RunForward() {
@@ -135,7 +114,9 @@ template<typename Real> class SoftmaxLayer : public Layer<Real> {
 
   virtual void CreateParameters(Parameters<Real> *parameters) {
     Matrix<Real> *Why, *dWhy;
+    ParameterGlorotInitializer<Real> initializer(ActivationFunctions::LOGISTIC);
     parameters->CreateMatrixParameter("Why", output_size_, input_size_,
+                                      &initializer,
                                       &Why, &dWhy);
     Vector<Real> *by, *dby;
     parameters->CreateVectorParameter("by", output_size_, &by, &dby);
@@ -151,14 +132,6 @@ template<typename Real> class SoftmaxLayer : public Layer<Real> {
     by_ = by;
     dWhy_ = dWhy;
     dby_ = dby;
-  }
-
-  void ResetParameters() {
-    // Remove this?
-#if 0
-    Why_ = Matrix<Real>::Zero(output_size_, input_size_);
-    by_ = Vector<Real>::Zero(output_size_);
-#endif
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -177,21 +150,6 @@ template<typename Real> class SoftmaxLayer : public Layer<Real> {
       std::vector<Vector<Real>*> *bias_derivatives) {
     weight_derivatives->push_back(dWhy_);
     bias_derivatives->push_back(dby_);
-  }
-
-  double GetUniformInitializationLimit(Matrix<Real> *W) {
-    int num_outputs = W->rows();
-    int num_inputs = W->cols();
-    double coeff = 4.0; // Like in LOGISTIC.
-    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
-  }
-
-  void ResetGradients() {
-    // Remove this?
-#if 0
-    dWhy_.setZero(output_size_, input_size_);
-    dby_.setZero(output_size_);
-#endif
   }
 
   void RunForward() {

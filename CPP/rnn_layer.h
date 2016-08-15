@@ -23,10 +23,13 @@ template<typename Real> class RNNLayer : public Layer<Real> {
 
   virtual void CreateParameters(Parameters<Real> *parameters) {
     Matrix<Real> *Wxh, *dWxh;
+    ParameterGlorotInitializer<Real> initializer(activation_function_);
     parameters->CreateMatrixParameter("Wxh", hidden_size_, input_size_,
+                                      &initializer,
                                       &Wxh, &dWxh);
     Matrix<Real> *Whh, *dWhh;
     parameters->CreateMatrixParameter("Whh", hidden_size_, hidden_size_,
+                                      &initializer,
                                       &Whh, &dWhh);
     Vector<Real> *bh, *dbh;
     parameters->CreateVectorParameter("bh", hidden_size_, &bh, &dbh);
@@ -52,18 +55,6 @@ template<typename Real> class RNNLayer : public Layer<Real> {
     dWhh_ = dWhh;
     dbh_ = dbh;
     dh0_ = dh0;
-  }
-
-  virtual void ResetParameters() {
-    // Remove this.
-#if 0
-    Wxh_ = Matrix<Real>::Zero(hidden_size_, input_size_);
-    Whh_ = Matrix<Real>::Zero(hidden_size_, hidden_size_);
-    bh_ = Vector<Real>::Zero(hidden_size_);
-    if (use_hidden_start_ && !use_control_) {
-      h0_ = Vector<Real>::Zero(hidden_size_);
-    }
-#endif
   }
 
   virtual void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -96,30 +87,6 @@ template<typename Real> class RNNLayer : public Layer<Real> {
     if (use_hidden_start_ && !use_control_) {
       bias_derivatives->push_back(dh0_); // Not really a bias, but goes here.
     }
-  }
-
-  virtual double GetUniformInitializationLimit(Matrix<Real> *W) {
-    int num_outputs = W->rows();
-    int num_inputs = W->cols();
-    double coeff;
-    if (activation_function_ == ActivationFunctions::LOGISTIC) {
-      coeff = 4.0;
-    } else {
-      coeff = 1.0;
-    }
-    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
-  }
-
-  virtual void ResetGradients() {
-    // Remove this?
-#if 0
-    dWxh_->setZero(hidden_size_, input_size_);
-    dbh_->setZero(hidden_size_);
-    dWhh_->setZero(hidden_size_, hidden_size_);
-    if (use_hidden_start_ && !use_control_) {
-      dh0_->setZero(hidden_size_);
-    }
-#endif
   }
 
   virtual void RunForward() {
@@ -215,8 +182,10 @@ template<typename Real> class BiRNNLayer : public RNNLayer<Real> {
     RNNLayer<Real>::CreateParameters();
 
     Matrix<Real> *Wxl, *dWxl;
+    ParameterGlorotInitializer<Real> initializer(this->activation_function_);
     parameters->CreateMatrixParameter("Wxl", this->hidden_size_,
                                       this->input_size_,
+                                      &initializer,
                                       &Wxl, &dWxl);
     Matrix<Real> *Wll, *dWll;
     parameters->CreateMatrixParameter("Wll", this->hidden_size_,
@@ -247,20 +216,6 @@ template<typename Real> class BiRNNLayer : public RNNLayer<Real> {
     dWll_ = dWll;
     dbl_ = dbl;
     dl0_ = dl0;
-  }
-
-  void ResetParameters() {
-    // Remove this.
-#if 0
-    RNNLayer<Real>::ResetParameters();
-
-    Wxl_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
-    Wll_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
-    bl_ = Vector<Real>::Zero(this->hidden_size_);
-    if (this->use_hidden_start_) {
-      l0_ = Vector<Real>::Zero(this->hidden_size_);
-    }
-#endif
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -298,19 +253,6 @@ template<typename Real> class BiRNNLayer : public RNNLayer<Real> {
     if (this->use_hidden_start_) {
       bias_derivatives->push_back(dl0_); // Not really a bias, but goes here.
     }
-  }
-
-  void ResetGradients() {
-    // Remove this?
-#if 0
-    RNNLayer<Real>::ResetGradients();
-    dWxl_->setZero(this->hidden_size_, this->input_size_);
-    dbl_->setZero(this->hidden_size_);
-    dWll_->setZero(this->hidden_size_, this->hidden_size_);
-    if (this->use_hidden_start_) {
-      dl0_->setZero(this->hidden_size_);
-    }
-#endif
   }
 
   void RunForward() {
@@ -422,20 +364,26 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     RNNLayer<Real>::CreateParameters(parameters);
 
     Matrix<Real> *Wxz, *dWxz;
+    ParameterGlorotInitializer<Real>
+      gate_initializer(ActivationFunctions::LOGISTIC);
     parameters->CreateMatrixParameter("Wxz", this->hidden_size_,
                                       this->input_size_,
+                                      &gate_initializer,
                                       &Wxz, &dWxz);
     Matrix<Real> *Whz, *dWhz;
     parameters->CreateMatrixParameter("Whz", this->hidden_size_,
                                       this->hidden_size_,
+                                      &gate_initializer,
                                       &Whz, &dWhz);
     Matrix<Real> *Wxr, *dWxr;
     parameters->CreateMatrixParameter("Wxr", this->hidden_size_,
                                       this->input_size_,
+                                      &gate_initializer,
                                       &Wxr, &dWxr);
     Matrix<Real> *Whr, *dWhr;
     parameters->CreateMatrixParameter("Whr", this->hidden_size_,
                                       this->hidden_size_,
+                                      &gate_initializer,
                                       &Whr, &dWhr);
     Vector<Real> *bz, *dbz;
     parameters->CreateVectorParameter("bz", this->hidden_size_, &bz, &dbz);
@@ -463,20 +411,6 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     dWhr_ = dWhr;
     dbz_ = dbz;
     dbr_ = dbr;
-  }
-
-  virtual void ResetParameters() {
-    // Remove this.
-#if 0
-    RNNLayer<Real>::ResetParameters();
-
-    Wxz_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
-    Whz_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
-    Wxr_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
-    Whr_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
-    bz_ = Vector<Real>::Zero(this->hidden_size_);
-    br_ = Vector<Real>::Zero(this->hidden_size_);
-#endif
   }
 
   virtual void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -514,33 +448,6 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
     weight_derivatives->push_back(dWhr_);
     bias_derivatives->push_back(dbz_);
     bias_derivatives->push_back(dbr_);
-  }
-
-  virtual double GetUniformInitializationLimit(Matrix<Real> *W) {
-    int num_outputs = W->rows();
-    int num_inputs = W->cols();
-    double coeff;
-    // Weights controlling gates have logistic activations.
-    if (this->activation_function_ == ActivationFunctions::LOGISTIC ||
-        W == Wxz_ || W == Whz_ || W == Wxr_ || W == Whr_) {
-      coeff = 4.0;
-    } else {
-      coeff = 1.0;
-    }
-    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
-  }
-
-  virtual void ResetGradients() {
-    // Remove this?
-#if 0
-    RNNLayer<Real>::ResetGradients();
-    dWxz_.setZero(this->hidden_size_, this->input_size_);
-    dWhz_.setZero(this->hidden_size_, this->hidden_size_);
-    dWxr_.setZero(this->hidden_size_, this->input_size_);
-    dWhr_.setZero(this->hidden_size_, this->hidden_size_);
-    dbz_.setZero(this->hidden_size_);
-    dbr_.setZero(this->hidden_size_);
-#endif
   }
 
   virtual void RunForward() {
@@ -703,28 +610,36 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     RNNLayer<Real>::CreateParameters(parameters);
 
     Matrix<Real> *Wxi, *dWxi;
+    ParameterGlorotInitializer<Real>
+      gate_initializer(ActivationFunctions::LOGISTIC);
     parameters->CreateMatrixParameter("Wxi", this->hidden_size_,
                                       this->input_size_,
+                                      &gate_initializer,
                                       &Wxi, &dWxi);
     Matrix<Real> *Whi, *dWhi;
     parameters->CreateMatrixParameter("Whi", this->hidden_size_,
                                       this->hidden_size_,
+                                      &gate_initializer,
                                       &Whi, &dWhi);
     Matrix<Real> *Wxf, *dWxf;
     parameters->CreateMatrixParameter("Wxf", this->hidden_size_,
                                       this->input_size_,
+                                      &gate_initializer,
                                       &Wxf, &dWxf);
     Matrix<Real> *Whf, *dWhf;
     parameters->CreateMatrixParameter("Whf", this->hidden_size_,
                                       this->hidden_size_,
+                                      &gate_initializer,
                                       &Whf, &dWhf);
     Matrix<Real> *Wxo, *dWxo;
     parameters->CreateMatrixParameter("Wxo", this->hidden_size_,
                                       this->input_size_,
+                                      &gate_initializer,
                                       &Wxo, &dWxo);
     Matrix<Real> *Who, *dWho;
     parameters->CreateMatrixParameter("Who", this->hidden_size_,
                                       this->hidden_size_,
+                                      &gate_initializer,
                                       &Who, &dWho);
     Vector<Real> *bi, *dbi;
     parameters->CreateVectorParameter("bi", this->hidden_size_, &bi, &dbi);
@@ -774,26 +689,6 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     dbf_ = dbf;
     dbo_ = dbo;
     dc0_ = dc0;
-  }
-
-  virtual void ResetParameters() {
-    // Remove this.
-#if 0
-    RNNLayer<Real>::ResetParameters();
-
-    Wxi_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
-    Whi_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
-    Wxf_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
-    Whf_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
-    Wxo_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
-    Who_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
-    bi_ = Vector<Real>::Zero(this->hidden_size_);
-    bf_ = Vector<Real>::Zero(this->hidden_size_);
-    bo_ = Vector<Real>::Zero(this->hidden_size_);
-    if (this->use_hidden_start_ && !this->use_control_) {
-      c0_ = Vector<Real>::Zero(this->hidden_size_);
-    }
-#endif
   }
 
   virtual void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -848,40 +743,6 @@ template<typename Real> class LSTMLayer : public RNNLayer<Real> {
     if (this->use_hidden_start_ && !this->use_control_) {
       bias_derivatives->push_back(dc0_); // Not really a bias, but it goes here.
     }
-  }
-
-  virtual double GetUniformInitializationLimit(Matrix<Real> *W) {
-    int num_outputs = W->rows();
-    int num_inputs = W->cols();
-    double coeff;
-    // Weights controlling gates have logistic activations.
-    if (this->activation_function_ == ActivationFunctions::LOGISTIC ||
-        W == Wxi_ || W == Whi_ || W == Wxf_ || W == Whf_ ||
-        W == Wxo_ || W == Who_) {
-      coeff = 4.0;
-    } else {
-      coeff = 1.0;
-    }
-    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
-  }
-
-  virtual void ResetGradients() {
-    // Remove this?
-#if 0
-    RNNLayer<Real>::ResetGradients();
-    dWxi_.setZero(this->hidden_size_, this->input_size_);
-    dWhi_.setZero(this->hidden_size_, this->hidden_size_);
-    dWxf_.setZero(this->hidden_size_, this->input_size_);
-    dWhf_.setZero(this->hidden_size_, this->hidden_size_);
-    dWxo_.setZero(this->hidden_size_, this->input_size_);
-    dWho_.setZero(this->hidden_size_, this->hidden_size_);
-    dbi_.setZero(this->hidden_size_);
-    dbf_.setZero(this->hidden_size_);
-    dbo_.setZero(this->hidden_size_);
-    if (this->use_hidden_start_ && !this->use_control_) {
-      dc0_.setZero(this->hidden_size_);
-    }
-#endif
   }
 
   virtual void RunForward() {
@@ -1096,31 +957,40 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
   virtual ~BiGRULayer() {}
 
   void CreateParameters(Parameters<Real> *parameters) {
-    RNNLayer<Real>::CreateParameters(parameters);
+    GRULayer<Real>::CreateParameters(parameters);
 
     Matrix<Real> *Wxl, *dWxl;
+    ParameterGlorotInitializer<Real> initializer(this->activation_function_);
     parameters->CreateMatrixParameter("Wxl", this->hidden_size_,
                                       this->input_size_,
+                                      &initializer,
                                       &Wxl, &dWxl);
     Matrix<Real> *Wll, *dWll;
     parameters->CreateMatrixParameter("Wll", this->hidden_size_,
                                       this->hidden_size_,
+                                      &initializer,
                                       &Wll, &dWll);
     Matrix<Real> *Wxz_r, *dWxz_r;
+    ParameterGlorotInitializer<Real>
+      gate_initializer(ActivationFunctions::LOGISTIC);
     parameters->CreateMatrixParameter("Wxz_r", this->hidden_size_,
                                       this->input_size_,
+                                      &gate_initializer,
                                       &Wxz_r, &dWxz_r);
     Matrix<Real> *Wlz_r, *dWlz_r;
     parameters->CreateMatrixParameter("Wlz_r", this->hidden_size_,
                                       this->hidden_size_,
+                                      &gate_initializer,
                                       &Wlz_r, &dWlz_r);
     Matrix<Real> *Wxr_r, *dWxr_r;
     parameters->CreateMatrixParameter("Wxr_r", this->hidden_size_,
                                       this->input_size_,
+                                      &gate_initializer,
                                       &Wxr_r, &dWxr_r);
     Matrix<Real> *Wlr_r, *dWlr_r;
     parameters->CreateMatrixParameter("Wlr_r", this->hidden_size_,
                                       this->hidden_size_,
+                                      &gate_initializer,
                                       &Wlr_r, &dWlr_r);
     Vector<Real> *bl, *dbl;
     parameters->CreateVectorParameter("bl", this->hidden_size_, &bl, &dbl);
@@ -1173,26 +1043,6 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
     dbz_r_ = dbz_r;
     dbr_r_ = dbr_r;
     dl0_ = dl0;
-  }
-
-  void ResetParameters() {
-    // Remove this.
-#if 0
-    GRULayer<Real>::ResetParameters();
-
-    Wxl_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
-    Wll_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
-    Wxz_r_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
-    Wlz_r_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
-    Wxr_r_ = Matrix<Real>::Zero(this->hidden_size_, this->input_size_);
-    Wlr_r_ = Matrix<Real>::Zero(this->hidden_size_, this->hidden_size_);
-    bl_ = Vector<Real>::Zero(this->hidden_size_);
-    bz_r_ = Vector<Real>::Zero(this->hidden_size_);
-    br_r_ = Vector<Real>::Zero(this->hidden_size_);
-    if (this->use_hidden_start_) {
-      l0_ = Vector<Real>::Zero(this->hidden_size_);
-    }
-#endif
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -1248,42 +1098,6 @@ template<typename Real> class BiGRULayer : public GRULayer<Real> {
     if (this->use_hidden_start_) {
       bias_derivatives->push_back(dl0_);
     }
-  }
-
-  double GetUniformInitializationLimit(Matrix<Real> *W) {
-    int num_outputs = W->rows();
-    int num_inputs = W->cols();
-    double coeff;
-    // Weights controlling gates have logistic activations.
-    if (this->activation_function_ == ActivationFunctions::LOGISTIC ||
-        W == this->Wxz_ || W == this->Whz_ || W == this->Wxr_ ||
-        W == this->Whr_ ||
-        W == this->Wxz_r_ || W == this->Wlz_r_ || W == this->Wxr_r_ ||
-        W == this->Wlr_r_) {
-      coeff = 4.0;
-    } else {
-      coeff = 1.0;
-    }
-    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
-  }
-
-  void ResetGradients() {
-    // Remove this?
-#if 0
-    GRULayer<Real>::ResetGradients();
-    dWxl_.setZero(this->hidden_size_, this->input_size_);
-    dWll_.setZero(this->hidden_size_, this->hidden_size_);
-    dWxz_r_.setZero(this->hidden_size_, this->input_size_);
-    dWlz_r_.setZero(this->hidden_size_, this->hidden_size_);
-    dWxr_r_.setZero(this->hidden_size_, this->input_size_);
-    dWlr_r_.setZero(this->hidden_size_, this->hidden_size_);
-    dbl_.setZero(this->hidden_size_);
-    dbz_r_.setZero(this->hidden_size_);
-    dbr_r_.setZero(this->hidden_size_);
-    if (this->use_hidden_start_) {
-      dl0_.setZero(this->hidden_size_);
-    }
-#endif
   }
 
   void RunForward() {

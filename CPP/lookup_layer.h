@@ -19,8 +19,10 @@ template<typename Real> class LookupLayer : public Layer<Real> {
   virtual void CreateParameters(Parameters<Real> *parameters) {
     // Only consider as parameters those embeddings that are not fixed.
     Matrix<Real> *E, *dE;
+    ParameterUniformInitializer<Real> initializer(-0.05, 0.05);
     parameters->CreateMatrixParameter("embeddings", embedding_dimension_,
                                       num_words_ - num_words_fixed_,
+                                      &initializer,
                                       &E, &dE);
     SetParameters(E, dE);
   }
@@ -29,15 +31,6 @@ template<typename Real> class LookupLayer : public Layer<Real> {
                      Matrix<Real> *dE) {
     E_ = E;
     dE_ = dE;
-  }
-
-  void ResetParameters() {
-    // Remove this.
-#if 0
-    // Only consider as parameters those embeddings that are not fixed.
-    E_ = Matrix<Real>::Zero(embedding_dimension_,
-                            num_words_ - num_words_fixed_);
-#endif
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -63,13 +56,6 @@ template<typename Real> class LookupLayer : public Layer<Real> {
     // starting in zero up to num_words_fixed_.
     E_fixed_ = fixed_embeddings;
     num_words_fixed_ = E_fixed_->cols();
-  }
-
-  void ResetGradients() {
-    // Remove this.
-#if 0
-    dE_.setZero(embedding_dimension_, num_words_ - num_words_fixed_);
-#endif
   }
 
   void RunForward() {

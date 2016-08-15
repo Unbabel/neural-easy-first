@@ -20,7 +20,9 @@ template<typename Real> class FeedforwardLayer : public Layer<Real> {
 
   virtual void CreateParameters(Parameters<Real> *parameters) {
     Matrix<Real> *Wxh, *dWxh;
+    ParameterGlorotInitializer<Real> initializer(activation_function_);
     parameters->CreateMatrixParameter("Wxh", output_size_, input_size_,
+                                      &initializer,
                                       &Wxh, &dWxh);
     Vector<Real> *bh, *dbh;
     parameters->CreateVectorParameter("bh", output_size_, &bh, &dbh);
@@ -36,14 +38,6 @@ template<typename Real> class FeedforwardLayer : public Layer<Real> {
     bh_ = bh;
     dWxh_ = dWxh;
     dbh_ = dbh;
-  }
-
-  void ResetParameters() {
-    // Remove this.
-#if 0
-    Wxh_ = Matrix<Real>::Zero(output_size_, input_size_);
-    bh_ = Vector<Real>::Zero(output_size_);
-#endif
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -62,26 +56,6 @@ template<typename Real> class FeedforwardLayer : public Layer<Real> {
       std::vector<Vector<Real>*> *bias_derivatives) {
     weight_derivatives->push_back(dWxh_);
     bias_derivatives->push_back(dbh_);
-  }
-
-  double GetUniformInitializationLimit(Matrix<Real> *W) {
-    int num_outputs = W->rows();
-    int num_inputs = W->cols();
-    double coeff;
-    if (activation_function_ == ActivationFunctions::LOGISTIC) {
-      coeff = 4.0;
-    } else {
-      coeff = 1.0;
-    }
-    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
-  }
-
-  void ResetGradients() {
-    // Remove this?
-#if 0
-    dWxh_.setZero(output_size_, input_size_);
-    dbh_.setZero(output_size_);
-#endif
   }
 
   void RunForward() {

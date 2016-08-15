@@ -25,8 +25,6 @@ template<typename Real> class Layer {
 
   const std::string &name() { return name_; }
 
-  virtual void ResetParameters() = 0;
-
   virtual void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
                                     std::vector<Vector<Real>*> *biases,
                                     std::vector<std::string> *weight_names,
@@ -35,8 +33,6 @@ template<typename Real> class Layer {
   virtual void CollectAllParameterDerivatives(
       std::vector<Matrix<Real>*> *weight_derivatives,
       std::vector<Vector<Real>*> *bias_derivatives) = 0;
-
-  virtual double GetUniformInitializationLimit(Matrix<Real> *W) = 0;
 
   virtual void UpdateParameters(int batch_size,
                                 double learning_rate,
@@ -81,39 +77,6 @@ template<typename Real> class Layer {
     }
 
     return squared_norm;
-  }
-
-  void InitializeADAM(double beta1, double beta2, double epsilon) {
-    beta1_ = beta1;
-    beta2_ = beta2;
-    epsilon_ = epsilon;
-    iteration_number_ = 0;
-
-    std::vector<Matrix<Real>*> weights;
-    std::vector<Vector<Real>*> biases;
-    std::vector<std::string> weight_names;
-    std::vector<std::string> bias_names;
-    CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
-
-    first_bias_moments_.resize(biases.size());
-    second_bias_moments_.resize(biases.size());
-    for (int i = 0; i < biases.size(); ++i) {
-      auto b = biases[i];
-      first_bias_moments_[i] = new Vector<Real>;
-      first_bias_moments_[i]->setZero(b->size());
-      second_bias_moments_[i] = new Vector<Real>;
-      second_bias_moments_[i]->setZero(b->size());
-    }
-
-    first_weight_moments_.resize(weights.size());
-    second_weight_moments_.resize(weights.size());
-    for (int i = 0; i < weights.size(); ++i) {
-      auto W = weights[i];
-      first_weight_moments_[i] = new Matrix<Real>;
-      first_weight_moments_[i]->setZero(W->rows(), W->cols());
-      second_weight_moments_[i] = new Matrix<Real>;
-      second_weight_moments_[i]->setZero(W->rows(), W->cols());
-    }
   }
 
   void UpdateParametersADAM(int batch_size,
@@ -179,30 +142,6 @@ template<typename Real> class Layer {
     }
 
     ++iteration_number_;
-  }
-
-  void InitializeParameters() {
-    std::vector<Matrix<Real>*> weights;
-    std::vector<Vector<Real>*> biases;
-    std::vector<std::string> weight_names;
-    std::vector<std::string> bias_names;
-    ResetParameters();
-    CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
-
-    for (auto b: biases) {
-      b->setZero();
-    }
-    for (auto W: weights) {
-      double max = GetUniformInitializationLimit(W);
-      for (int i = 0; i < W->rows(); ++i) {
-        for (int j = 0; j < W->cols(); ++j) {
-          double t = max *
-            (2.0*static_cast<double>(rand()) / RAND_MAX - 1.0);
-          (*W)(i, j) = t;
-          //std::cout << t/max << std::endl;
-        }
-      }
-    }
   }
 
   void LoadParameters(const std::string &prefix, bool binary_mode) {
@@ -343,7 +282,7 @@ template<typename Real> class Layer {
     CollectAllParameters(&weights, &biases, &weight_names, &bias_names);
     CollectAllParameterDerivatives(&weight_derivatives, &bias_derivatives);
 
-    ResetGradients();
+    //ResetGradients(); NOTE: this needs to be called by the test function!!!
     RunForward();
     RunBackward();
 
@@ -432,7 +371,6 @@ template<typename Real> class Layer {
     }
   }
 
-  virtual void ResetGradients() = 0; // TODO: make this automatic.
   virtual void RunForward() = 0;
   virtual void RunBackward() = 0;
   //virtual void UpdateParameters(double learning_rate) = 0;

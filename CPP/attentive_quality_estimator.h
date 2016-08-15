@@ -111,6 +111,9 @@ template<typename Real> class AttentiveQualityEstimator :
   }
 
   void CreateNetwork() {
+    // Random seed for parameter initialization.
+    srand(1234);
+
     // Add source lookup and linear layers.
     source_lookup_layer_ =
       new LookupLayer<Real>(source_dictionary_->GetNumWords(), embedding_size_);
@@ -256,6 +259,7 @@ template<typename Real> class AttentiveQualityEstimator :
     model_prefix_ = model_prefix;
   }
 
+#if 0
   void InitializeParameters() {
     srand(1234);
 
@@ -273,6 +277,7 @@ template<typename Real> class AttentiveQualityEstimator :
       }
     }
   }
+#endif
 
   void LoadModel(const std::string &prefix) {
     const std::vector<Layer<Real>*> &layers = NeuralNetwork<Real>::GetLayers();
@@ -734,10 +739,13 @@ template<typename Real> class AttentiveQualityEstimator :
 
   void ResetParameterGradients() {
     // Reset parameter gradients.
+    parameters_->ResetGradients();
+#if 0
     const std::vector<Layer<Real>*> &layers = NeuralNetwork<Real>::GetLayers();
     for (int k = 0; k < layers.size(); ++k) {
       layers[k]->ResetGradients();
     }
+#endif
   }
 
   void UpdateParameters(int batch_size,

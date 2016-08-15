@@ -18,8 +18,10 @@ template<typename Real> class LinearLayer : public Layer<Real> {
 
   void CreateParameters(Parameters<Real> *parameters) {
     Matrix<Real> *Wxy, *dWxy;
+    ParameterGlorotInitializer<Real> initializer(ActivationFunctions::TANH);
     parameters->CreateMatrixParameter("Wxy", output_size_, input_size_,
-                                       &Wxy, &dWxy);
+                                      &initializer,
+                                      &Wxy, &dWxy);
     Vector<Real> *by, *dby;
     parameters->CreateVectorParameter("by", output_size_, &by, &dby);
     SetParameters(Wxy, by, dWxy, dby);
@@ -31,14 +33,6 @@ template<typename Real> class LinearLayer : public Layer<Real> {
     by_ = by;
     dWxy_ = dWxy;
     dby_ = dby;
-  }
-
-  void ResetParameters() {
-    // Remove this function.
-#if 0
-    Wxy_ = Matrix<Real>::Zero(output_size_, input_size_);
-    by_ = Vector<Real>::Zero(output_size_);
-#endif
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -66,13 +60,6 @@ template<typename Real> class LinearLayer : public Layer<Real> {
     int num_inputs = W->cols();
     double coeff = 1.0; // Like in TANH.
     return coeff * sqrt(6.0 / (num_inputs + num_outputs));
-  }
-
-  void ResetGradients() {
-#if 0
-    dWxy_->setZero(output_size_, input_size_);
-    dby_->setZero(output_size_);
-#endif
   }
 
   void RunForward() {

@@ -41,13 +41,17 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
 
   virtual void CreateParameters(Parameters<Real> *parameters) {
     Matrix<Real> *Wxz, *dWxz;
+    ParameterGlorotInitializer<Real> initializer(activation_function_);
     parameters->CreateMatrixParameter("Wxz", hidden_size_, input_size_,
+                                      &initializer,
                                       &Wxz, &dWxz);
     Matrix<Real> *Wyz, *dWyz;
     parameters->CreateMatrixParameter("Wyz", hidden_size_, control_size_,
+                                      &initializer,
                                       &Wyz, &dWyz);
     Matrix<Real> *wzp, *dwzp;
     parameters->CreateMatrixParameter("wzp", hidden_size_, 1,
+                                      &initializer,
                                       &wzp, &dwzp);
     Vector<Real> *bz, *dbz;
     parameters->CreateVectorParameter("bz", hidden_size_, &bz, &dbz);
@@ -67,30 +71,6 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     dWyz_ = dWyz;
     dwzp_ = dwzp;
     dbz_ = dbz;
-  }
-
-#if 0
-  void DeleteParameters() {
-    delete Wxz_;
-    delete Wyz_;
-    delete wzp_;
-    delete bz_;
-  }
-#endif
-
-  void ResetParameters() {
-    // Remove this.
-#if 0
-    DeleteParameters();
-    Wxz_ = new Matrix<Real>;
-    Wxz_->setZero(hidden_size_, input_size_);
-    Wyz_ = new Matrix<Real>;
-    Wyz_->setZero(hidden_size_, control_size_);
-    wzp_ = new Matrix<Real>;
-    wzp_->setZero(hidden_size_, 1);
-    bz_ = new Vector<Real>;
-    bz_->setZero(hidden_size_);
-#endif
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -117,28 +97,6 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     weight_derivatives->push_back(dWyz_);
     weight_derivatives->push_back(dwzp_);
     bias_derivatives->push_back(dbz_);
-  }
-
-  double GetUniformInitializationLimit(Matrix<Real> *W) {
-    int num_outputs = W->rows();
-    int num_inputs = W->cols();
-    double coeff;
-    if (activation_function_ == ActivationFunctions::LOGISTIC) {
-      coeff = 4.0;
-    } else {
-      coeff = 1.0;
-    }
-    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
-  }
-
-  void ResetGradients() {
-    // Remove this?
-#if 0
-    dWxz_.setZero(hidden_size_, input_size_);
-    dWyz_.setZero(hidden_size_, control_size_);
-    dwzp_.setZero(hidden_size_, 1);
-    dbz_.setZero(hidden_size_);
-#endif
   }
 
   void RunForward() {

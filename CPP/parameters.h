@@ -8,6 +8,83 @@
 #include "utils.h"
 #include "nn_utils.h"
 
+struct ParameterInitializationTypes {
+  enum types {
+    UNIFORM = 0,
+    GLOROT,
+    NUM_TYPES
+  };
+};
+
+template<typename Real> class ParameterInitializer {
+ public:
+  virtual int type() = 0;
+  virtual void Initialize(Matrix<Real> *W) = 0;
+};
+
+template<typename Real>
+class ParameterUniformInitializer : public ParameterInitializer<Real> {
+ public:
+  ParameterUniformInitializer() {}
+  ParameterUniformInitializer(double lower, double upper) {
+    SetBounds(lower, upper);
+  }
+  virtual ~ParameterUniformInitializer() {}
+  virtual int type() { return ParameterInitializationTypes::UNIFORM; }
+  void SetBounds(double lower, double upper) {
+    lower_ = lower;
+    upper_ = upper;
+  }
+
+  virtual void Initialize(Matrix<Real> *W) {
+    for (int i = 0; i < W->rows(); ++i) {
+      for (int j = 0; j < W->cols(); ++j) {
+        double t = lower_ + (upper_ - lower_) *
+          (static_cast<double>(rand()) / RAND_MAX);
+        (*W)(i, j) = t;
+      }
+    }
+  }
+
+ protected:
+  double lower_;
+  double upper_;
+};
+
+template<typename Real>
+class ParameterGlorotInitializer : public ParameterUniformInitializer<Real> {
+ public:
+  ParameterGlorotInitializer() {}
+  ParameterGlorotInitializer(int activation_function) {
+    activation_function_ = activation_function;
+  }
+  virtual ~ParameterGlorotInitializer() {}
+  virtual int type() { return ParameterInitializationTypes::GLOROT; }
+
+  void Initialize(Matrix<Real> *W) {
+    // Do Glorot initialization.
+    SetGlorotBounds(W);
+    ParameterUniformInitializer<Real>::Initialize(W);
+  }
+
+  void SetGlorotBounds(Matrix<Real> *W) {
+    // Do Glorot initialization.
+    int num_outputs = W->rows();
+    int num_inputs = W->cols();
+    double coeff;
+    if (activation_function_ == ActivationFunctions::LOGISTIC) {
+      coeff = 4.0;
+    } else {
+      coeff = 1.0;
+    }
+    this->upper_ = coeff * sqrt(6.0 / (num_inputs + num_outputs));
+    this->lower_ = -this->upper_;
+  }
+
+ protected:
+  int activation_function_;
+};
+
 template<typename Real> class Parameters {
  public:
   Parameters() {}
@@ -48,6 +125,7 @@ template<typename Real> class Parameters {
   void CreateMatrixParameter(const std::string &name,
                              int num_rows,
                              int num_columns,
+                             ParameterInitializer<Real> *initializer,
                              Matrix<Real> **W,
                              Matrix<Real> **dW) {
     // Create a matrix of weights and another one for derivatives of those
@@ -59,6 +137,7 @@ template<typename Real> class Parameters {
     gradient->setZero();
     weight_derivatives_.push_back(gradient);
     weight_names_.push_back(name);
+    initializer->Initialize(parameter); // Check if we need this!!!
     *W = parameter;
     *dW = gradient;
   }
@@ -80,26 +159,12 @@ template<typename Real> class Parameters {
     *db = gradient;
   }
 
-  double GetUniformInitializationLimit(Matrix<Real> *W,
-                                       int activation_function) {
-    // Do Glorot initialization.
-    int num_outputs = W->rows();
-    int num_inputs = W->cols();
-    double coeff;
-    if (activation_function == ActivationFunctions::LOGISTIC) {
-      coeff = 4.0;
-    } else {
-      coeff = 1.0;
-    }
-    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
-  }
-
   void ResetGradients() {
     for (int i = 0; i < weights_.size(); ++i) {
-      weight_derivatives_.setZero(weights_.rows(), weights_.cols());
+      weight_derivatives_[i]->setZero(weights_[i]->rows(), weights_[i]->cols());
     }
     for (int i = 0; i < biases_.size(); ++i) {
-      bias_derivatives_.setZero(biases_.rows(), biases_.cols());
+      bias_derivatives_[i]->setZero(biases_[i]->rows(), biases_[i]->cols());
     }
   }
 
@@ -112,23 +177,6 @@ template<typename Real> class Parameters {
     }
 
     return squared_norm;
-  }
-
-  void InitializeParameters() {
-    for (auto b: biases_) {
-      b->setZero();
-    }
-    for (auto W: weights_) {
-      double max = GetUniformInitializationLimit(W);
-      for (int i = 0; i < W->rows(); ++i) {
-        for (int j = 0; j < W->cols(); ++j) {
-          double t = max *
-            (2.0*static_cast<double>(rand()) / RAND_MAX - 1.0);
-          (*W)(i, j) = t;
-          //std::cout << t/max << std::endl;
-        }
-      }
-    }
   }
 
   void LoadParameters(const std::string &prefix, bool binary_mode) {
@@ -182,9 +230,9 @@ template<typename Real> class Parameters {
  protected:
   std::vector<Matrix<Real>*> weights_;
   std::vector<Matrix<Real>*> weight_derivatives_;
+  std::vector<std::string> weight_names_;
   std::vector<Vector<Real>*> biases_;
   std::vector<Vector<Real>*> bias_derivatives_;
-  std::vector<std::string> weight_names_;
   std::vector<std::string> bias_names_;
 };
 
