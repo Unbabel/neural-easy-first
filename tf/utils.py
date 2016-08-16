@@ -195,6 +195,7 @@ def buckets_by_length(data_list, label_list, buckets=20, max_len=0, mode='pad'):
     :return: a dictionary of grouped data and a dictionary of the data original indexes, both keyed by bucket, and the bin edges
     """
     train_data = data_list[0]
+    print train_data.shape, len(train_data)
     train_labels = label_list[0]
     dev_data = None
     dev_labels = None
@@ -208,19 +209,20 @@ def buckets_by_length(data_list, label_list, buckets=20, max_len=0, mode='pad'):
     else:
         raise NotImplementedError("Bucketing for more than two datasets not implemented")
     input_lengths = np.array([len(s) for s in data], dtype='int')  # for dev and train (if dev given)
+    print input_lengths.shape, input_lengths[:len(train_data)].shape, input_lengths[len(train_data):].shape
     if isinstance(buckets, (list, tuple, np.ndarray)):
         buckets = np.array(buckets, dtype='int')
     else:
         maxlen = max_len if max_len > 0 else max(input_lengths) + 1
-        buckets = np.linspace(min(input_lengths) - 1, maxlen, buckets,
-                              endpoint=False, dtype='int')
-    print "buckets: ", buckets
+        buckets = np.linspace(min(input_lengths)-1, maxlen, buckets, dtype='int')
     bin_edges = stats.mstats.mquantiles(input_lengths, (buckets - buckets[0]) /
                                         float(max_len - buckets[0]))
     bin_edges = np.append([int(b) for b in bin_edges], [max_len])
     print "bin edges:", bin_edges
-    train_input_bucket_index = [i if i<len(buckets) else len(buckets)-1 for i in np.digitize(input_lengths[:len(train_data)], buckets, right=False)]  # truncate too long sentences
-    dev_input_bucket_index = [i if i<len(buckets) else len(buckets)-1 for i in np.digitize(input_lengths[len(train_data):], buckets, right=False)]
+    train_input_bucket_index = [i if i < len(buckets) else len(buckets)-1 for i in
+                                np.digitize(input_lengths[:len(train_data)], buckets, right=False)]  # truncate too long sentences
+    dev_input_bucket_index = [i if i < len(buckets) else len(buckets)-1 for i in
+                              np.digitize(input_lengths[len(train_data):], buckets, right=False)]
     if mode == 'truncate':
         train_input_bucket_index -= 1
         dev_input_bucket_index -= 1
