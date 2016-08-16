@@ -195,7 +195,6 @@ def buckets_by_length(data_list, label_list, buckets=20, max_len=0, mode='pad'):
     :return: a dictionary of grouped data and a dictionary of the data original indexes, both keyed by bucket, and the bin edges
     """
     train_data = data_list[0]
-    print train_data.shape, len(train_data)
     train_labels = label_list[0]
     dev_data = None
     dev_labels = None
@@ -209,7 +208,6 @@ def buckets_by_length(data_list, label_list, buckets=20, max_len=0, mode='pad'):
     else:
         raise NotImplementedError("Bucketing for more than two datasets not implemented")
     input_lengths = np.array([len(s) for s in data], dtype='int')  # for dev and train (if dev given)
-    print input_lengths.shape, input_lengths[:len(train_data)].shape, input_lengths[len(train_data):].shape
     if isinstance(buckets, (list, tuple, np.ndarray)):
         buckets = np.array(buckets, dtype='int')
     else:

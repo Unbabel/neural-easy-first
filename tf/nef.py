@@ -412,7 +412,7 @@ def quetch(x, y, masks, seq_lens, vocab_size, K, D, N, J, L, r, lstm_units, conc
         x = tf.reshape(emb, [-1, window_size*emb_size])
         W_1 = tf.get_variable(shape=[window_size*emb_size, J],
                               initializer=tf.contrib.layers.xavier_initializer(
-                                  uniform=True, dtype=tf.float32), name="W_1")
+                                  uniform=True, dtype=tf.float32, ), name="W_1")
         W_2 = tf.get_variable(shape=[J, K],
                               initializer=tf.contrib.layers.xavier_initializer(
                                   uniform=True, dtype=tf.float32), name="W_2")
@@ -420,14 +420,16 @@ def quetch(x, y, masks, seq_lens, vocab_size, K, D, N, J, L, r, lstm_units, conc
             dtype=tf.float32), name="b_1")
         b_2 = tf.get_variable(shape=[K], initializer=tf.random_uniform_initializer(
             dtype=tf.float32), name="b_2")
-        hidden = tf.tanh(tf.matmul(x, W_1) + b_1)  # batch_size*emb_size, J
+        hidden = tf.nn.tanh(tf.matmul(x, W_1) + b_1)  # batch_size*emb_size, J
         if keep_prob < 1:
             hidden = tf.nn.dropout(hidden, keep_prob)
         out = tf.matmul(hidden, W_2) + b_2  # batch_size*emb_size, K
         logits = tf.reshape(out, [batch_size, L, K])
+        softmax = tf.nn.softmax(out)  # batch_size*L, K
         pred_labels = masks*tf.argmax(logits, 2)  # batch_size x L
         y_full = tf.one_hot(y, depth=K, on_value=1.0, off_value=0.0)  # batch_size x L x K
-        xent = tf.log(logits*y_full) # batch_size x L x K
+        xent = -y_full*tf.log(tf.reshape(softmax, [batch_size, L, K]) + 1e-10)  # batch_size x L x K
+
         if class_weights is not None:
             class_weights = tf.constant(class_weights, name="class_weights")
             label_weights = tf.mul(y_full, class_weights)  # batch_size x L x K
@@ -436,8 +438,27 @@ def quetch(x, y, masks, seq_lens, vocab_size, K, D, N, J, L, r, lstm_units, conc
         cross_entropy = tf.cast(masks, dtype=tf.float32)*tf.reduce_mean(xent, 2)  # batch_size x L
         accuracy_sent = tf.reduce_mean(tf.cast(tf.equal(pred_labels, tf.cast(y, tf.int64)), tf.float32), 1)  # accuracy per sentence
 
-        # http://stackoverflow.com/questions/35756710/how-do-i-create-confusion-matrix-of-predicted-and-ground-truth-labels-with-tenso/35876136#35876136
-        # TODO other eval metric
+        #TODO make sure that masking has correct impact on f1s
+
+        is_label_one = tf.cast(y, dtype=tf.bool, name="is_one")  # batch_size x L
+        is_label_zero = tf.logical_not(is_label_one, name="is_zero")
+
+        correct_prediction = tf.logical_and(tf.cast(masks, dtype=tf.bool), tf.equal(pred_labels, tf.cast(y, tf.int64), name="correct_answers"))  # batch_size x L
+        false_prediction = tf.logical_and(tf.cast(masks, dtype=tf.bool), tf.logical_not(correct_prediction))
+
+        true_positives = tf.to_float(tf.reduce_sum(tf.to_int32(tf.logical_and(correct_prediction, is_label_one)), 1))  # batch_size scalar
+        false_positives = tf.to_float(tf.reduce_sum(tf.to_int32(tf.logical_and(false_prediction, is_label_zero)), 1))
+        true_negatives = tf.to_float(tf.reduce_sum(tf.to_int32(tf.logical_and(correct_prediction, is_label_zero)), 1))
+        false_negatives = tf.to_float(tf.reduce_sum(tf.to_int32(tf.logical_and(false_prediction, is_label_one)), 1))
+
+        precision_ok = true_positives / (true_positives + false_positives + 1e-10)
+        precision_bad = true_negatives / (true_negatives + false_negatives + 1e-10)
+        recall_ok = true_positives / (true_positives + false_negatives + 1e-10)
+        recall_bad = true_negatives / (true_negatives + false_positives + 1e-10)
+        f1_ok = 2 * (precision_ok*recall_ok) / (precision_ok + recall_ok+ 1e-10)
+        f1_bad = 2 * (precision_bad*recall_bad) / (precision_bad + recall_bad + 1e-10)
+        f1_mult = f1_ok*f1_bad
+
         losses = cross_entropy
         if l2_scale > 0:
             weights_list = [M_src, M_tgt, W_1, W_2]
@@ -446,6 +467,7 @@ def quetch(x, y, masks, seq_lens, vocab_size, K, D, N, J, L, r, lstm_units, conc
             losses_reg = losses + l2_loss
         else:
             losses_reg = losses
+
 
     return losses, losses_reg, pred_labels
 
@@ -570,7 +592,7 @@ class EasyFirstModel():
                                                 shape=[None], name="seq_lens{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 print "Initializing parameters for bucket with max len", max_len
-                bucket_losses, bucket_losses_reg, bucket_predictions = ef_single_state(
+                bucket_losses, bucket_losses_reg, bucket_predictions = quetch(  # ef_single_state
                     self.inputs[j], self.labels[j], self.masks[j], self.seq_lens[j],
                     vocab_size=vocab_size, K=self.K, D=self.D, N=self.N,
                     J=self.J, L=max_len, r=self.r, lstm_units=lstm_units, concat=self.concat,
@@ -1038,8 +1060,7 @@ if __name__ == "__main__":
 
 
 # TODO
-# - sent. F1 as loss?
 # - language als parameter
 # - modularization
 # - nicer way of storing model parameters (word2id, buckets, params)
-# - bucketing on train and dev
+# - why has quetch nan values?
