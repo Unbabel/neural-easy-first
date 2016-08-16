@@ -183,10 +183,10 @@ def pad_data(X, Y, max_len, PAD_symbol=0):
     #print "padded", X_padded[0], seq_lens[0]
     return X_padded, Y_padded, masks, np.asarray(seq_lens)
 
-
-def buckets_by_length(data_array, labels, buckets=20, max_len=0, mode='pad'):
+def buckets_by_length(data_list, label_list, buckets=20, max_len=0, mode='pad'):
     """
-    :param data_array: a numpy array of samples.
+    :param data_list: a list of numpy arrays of data
+    :param label_list: a list of numpy arrays of labels
     :param buckets: list of buckets (lengths) into which to group samples according to their length.
     :param mode: either 'truncate' or 'pad':
                 * When truncation, remove the final part of a sample that does not match a bucket length;
@@ -194,7 +194,20 @@ def buckets_by_length(data_array, labels, buckets=20, max_len=0, mode='pad'):
                 The obvious consequence of truncating is that no sample will be padded.
     :return: a dictionary of grouped data and a dictionary of the data original indexes, both keyed by bucket, and the bin edges
     """
-    input_lengths = np.array([len(s) for s in data_array], dtype='int')
+    train_data = data_list[0]
+    train_labels = label_list[0]
+    dev_data = None
+    dev_labels = None
+    if len(data_list) == 2:
+        print "bucketing according to train AND dev sentence lengths"
+        dev_data = data_list[1]
+        dev_labels = label_list[1]
+        data = np.concatenate((train_data, dev_data))
+    elif len(data_list) == 1:
+        data = train_data
+    else:
+        raise NotImplementedError("Bucketing for more than two datasets not implemented")
+    input_lengths = np.array([len(s) for s in data], dtype='int')  # for dev and train (if dev given)
     if isinstance(buckets, (list, tuple, np.ndarray)):
         buckets = np.array(buckets, dtype='int')
     else:
@@ -206,20 +219,35 @@ def buckets_by_length(data_array, labels, buckets=20, max_len=0, mode='pad'):
                                         float(max_len - buckets[0]))
     bin_edges = np.append([int(b) for b in bin_edges], [max_len])
     print "bin edges:", bin_edges
-    input_bucket_index = [i if i<len(buckets) else len(buckets)-1 for i in np.digitize(input_lengths, buckets, right=False)]  # truncate too long sentences
-
+    train_input_bucket_index = [i if i<len(buckets) else len(buckets)-1 for i in np.digitize(input_lengths[:len(train_data)], buckets, right=False)]  # truncate too long sentences
+    dev_input_bucket_index = [i if i<len(buckets) else len(buckets)-1 for i in np.digitize(input_lengths[len(train_data):], buckets, right=False)]
     if mode == 'truncate':
-        input_bucket_index -= 1
-    bucketed_data = {}
-    reordering_indexes = {}
-    for bucket in list(np.unique(input_bucket_index)):
-        length_indexes = np.where(input_bucket_index == bucket)[0]
-        reordering_indexes[bucket-1] = length_indexes
-        maxlen = int(np.floor(bin_edges[bucket]))
-        padded = pad_data(data_array[length_indexes], labels[length_indexes], max_len=maxlen)
-        bucketed_data[bucket-1] = padded  # in final dict, start counting by zero
+        train_input_bucket_index -= 1
+        dev_input_bucket_index -= 1
+    bucketed_train_data = {}
+    bucketed_dev_data = {}
+    reordering_indexes_train = {}
+    reordering_indexes_dev = {}
 
-    return bucketed_data, reordering_indexes, bin_edges
+    # pad and bucket train data
+    for bucket in list(np.unique(train_input_bucket_index)):
+        length_indexes = np.where(train_input_bucket_index == bucket)[0]
+        reordering_indexes_train[bucket-1] = length_indexes
+        maxlen = int(np.floor(bin_edges[bucket]))
+        padded_train = pad_data(train_data[length_indexes], train_labels[length_indexes], max_len=maxlen)
+        bucketed_train_data[bucket-1] = padded_train  # in final dict, start counting by zero
+
+    # pad and bucket dev data
+    if dev_data is not None:
+        for bucket in list(np.unique(dev_input_bucket_index)):
+            length_indexes = np.where(dev_input_bucket_index == bucket)[0]
+            reordering_indexes_dev[bucket-1] = length_indexes
+            maxlen = int(np.floor(bin_edges[bucket]))
+            padded_dev = pad_data(dev_data[length_indexes], dev_labels[length_indexes], max_len=maxlen)
+            bucketed_dev_data[bucket-1] = padded_dev  # in final dict, start counting by zero
+
+    return [bucketed_train_data, bucketed_dev_data], \
+           [reordering_indexes_train, reordering_indexes_dev], bin_edges
 
 
 def put_in_buckets(data_array, labels, buckets, mode='pad'):

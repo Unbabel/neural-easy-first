@@ -26,7 +26,7 @@ tf.app.flags.DEFINE_integer("batch_size", 100,
 tf.app.flags.DEFINE_integer("vocab_size", 20000, "Vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
-tf.app.flags.DEFINE_integer("max_train_data_size", 0,
+tf.app.flags.DEFINE_integer("max_train_data_size", 100,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
@@ -727,13 +727,18 @@ def train():
         print "Weights for classes:", class_weights
 
         # bucketing training data
-        train_buckets, reordering_indexes, bucket_edges = buckets_by_length(
-            np.asarray(train_feature_vectors), np.asarray(train_labels), buckets=FLAGS.buckets,
+        data_buckets, reordering_indexes, bucket_edges = buckets_by_length(
+            [np.asarray(train_feature_vectors), np.asarray(dev_feature_vectors)],
+            [np.asarray(train_labels), np.asarray(dev_labels)], buckets=FLAGS.buckets,
             max_len=FLAGS.L, mode="pad")
+        train_buckets = data_buckets[0]
+        dev_buckets = data_buckets[1]
+        train_reordering_indexes = reordering_indexes[0]
+        dev_reordering_indexes = reordering_indexes[1]
 
         model = create_model(sess, bucket_edges[1:], False, src_embeddings, tgt_embeddings, class_weights)
 
-        train_buckets_sizes = {i : len(indx) for i, indx in reordering_indexes.items()}
+        train_buckets_sizes = {i : len(indx) for i, indx in train_reordering_indexes.items()}
         print "Creating buckets for training data:"
         for i in train_buckets.keys():
             X_train_padded, Y_train_padded, train_masks, train_seq_lens = train_buckets[i]
@@ -744,11 +749,11 @@ def train():
 
 
         # bucketing dev data
-        dev_buckets, dev_reordering_indexes = put_in_buckets(np.asarray(dev_feature_vectors),
-                                                             np.asarray(dev_labels),
-                                                             buckets=bucket_edges)
+        #dev_buckets, dev_reordering_indexes = put_in_buckets(np.asarray(dev_feature_vectors),
+        #                                                     np.asarray(dev_labels),
+        #                                                     buckets=bucket_edges)
         dev_buckets_sizes = {i : len(indx) for i, indx in dev_reordering_indexes.items()}
-        print dev_buckets_sizes
+        #print dev_buckets_sizes
 
         print "Creating buckets for dev data:"
         for i in dev_buckets.keys():
@@ -791,7 +796,8 @@ def train():
                     step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
                                                                                x_batch, y_batch,
                                                                                mask_batch,
-                                                                               seq_lens_batch, False)  # loss for each instance in batch
+                                                                               seq_lens_batch,
+                                                                               False)  # loss for each instance in batch
                     loss_reg += np.sum(step_loss_reg)
                     loss += np.sum(step_loss)  # sum over batch
                     bucket_loss += np.sum(step_loss)
@@ -1035,3 +1041,4 @@ if __name__ == "__main__":
 # - language als parameter
 # - modularization
 # - nicer way of storing model parameters (word2id, buckets, params)
+# - bucketing on train and dev
