@@ -32,34 +32,45 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     control_size_ = control_size;
     hidden_size_ = hidden_size;
     attention_type_ = attention_type;
-    Wxz_ = NULL;
-    Wyz_ = NULL;
-    wzp_ = NULL;
-    bz_ = NULL;
   }
-  virtual ~AttentionLayer() { DeleteParameters(); }
+  virtual ~AttentionLayer() {}
 
   int input_size() const { return input_size_; }
   int control_size() const { return control_size_; }
   int hidden_size() const { return hidden_size_; }
 
-  void DeleteParameters() {
-    delete Wxz_;
-    delete Wyz_;
-    delete wzp_;
-    delete bz_;
+  virtual void CreateParameters(Parameters<Real> *parameters) {
+    Matrix<Real> *Wxz, *dWxz;
+    ParameterGlorotInitializer<Real> initializer(activation_function_);
+    parameters->CreateMatrixParameter("Wxz", hidden_size_, input_size_,
+                                      &initializer,
+                                      &Wxz, &dWxz);
+    Matrix<Real> *Wyz, *dWyz;
+    parameters->CreateMatrixParameter("Wyz", hidden_size_, control_size_,
+                                      &initializer,
+                                      &Wyz, &dWyz);
+    Matrix<Real> *wzp, *dwzp;
+    parameters->CreateMatrixParameter("wzp", hidden_size_, 1,
+                                      &initializer,
+                                      &wzp, &dwzp);
+    Vector<Real> *bz, *dbz;
+    parameters->CreateVectorParameter("bz", hidden_size_, &bz, &dbz);
+
+    SetParameters(Wxz, Wyz, wzp, bz, dWxz, dWyz, dwzp, dbz);
   }
 
-  void ResetParameters() {
-    DeleteParameters();
-    Wxz_ = new Matrix<Real>;
-    Wxz_->setZero(hidden_size_, input_size_);
-    Wyz_ = new Matrix<Real>;
-    Wyz_->setZero(hidden_size_, control_size_);
-    wzp_ = new Matrix<Real>;
-    wzp_->setZero(hidden_size_, 1);
-    bz_ = new Vector<Real>;
-    bz_->setZero(hidden_size_);
+  void SetParameters(Matrix<Real> *Wxz, Matrix<Real> *Wyz,
+                     Matrix<Real> *wzp, Vector<Real> *bz,
+                     Matrix<Real> *dWxz, Matrix<Real> *dWyz,
+                     Matrix<Real> *dwzp, Vector<Real> *dbz) {
+    Wxz_ = Wxz;
+    Wyz_ = Wyz;
+    wzp_ = wzp;
+    bz_ = bz;
+    dWxz_ = dWxz;
+    dWyz_ = dWyz;
+    dwzp_ = dwzp;
+    dbz_ = dbz;
   }
 
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
@@ -82,29 +93,10 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
   void CollectAllParameterDerivatives(
       std::vector<Matrix<Real>*> *weight_derivatives,
       std::vector<Vector<Real>*> *bias_derivatives) {
-    weight_derivatives->push_back(&dWxz_);
-    weight_derivatives->push_back(&dWyz_);
-    weight_derivatives->push_back(&dwzp_);
-    bias_derivatives->push_back(&dbz_);
-  }
-
-  double GetUniformInitializationLimit(Matrix<Real> *W) {
-    int num_outputs = W->rows();
-    int num_inputs = W->cols();
-    double coeff;
-    if (activation_function_ == ActivationFunctions::LOGISTIC) {
-      coeff = 4.0;
-    } else {
-      coeff = 1.0;
-    }
-    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
-  }
-
-  void ResetGradients() {
-    dWxz_.setZero(hidden_size_, input_size_);
-    dWyz_.setZero(hidden_size_, control_size_);
-    dwzp_.setZero(hidden_size_, 1);
-    dbz_.setZero(hidden_size_);
+    weight_derivatives->push_back(dWxz_);
+    weight_derivatives->push_back(dWyz_);
+    weight_derivatives->push_back(dwzp_);
+    bias_derivatives->push_back(dbz_);
   }
 
   void RunForward() {
@@ -225,10 +217,10 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
       *dX += this->GetOutputDerivative().col(m) * P_.col(m).transpose();
       dY->col(m) += Wyz_->transpose() * dzraw_sum;
 
-      dwzp_ += z_[m] * Jdp;
-      dWxz_.noalias() += dzraw * X.transpose();
-      dWyz_.noalias() += dzraw_sum * Y.col(m).transpose();
-      dbz_.noalias() += dzraw_sum;
+      *dwzp_ += z_[m] * Jdp;
+      dWxz_->noalias() += dzraw * X.transpose();
+      dWyz_->noalias() += dzraw_sum * Y.col(m).transpose();
+      dbz_->noalias() += dzraw_sum;
     }
   }
 
@@ -248,10 +240,10 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
   Matrix<Real> *wzp_; // Column vector.
   Vector<Real> *bz_;
 
-  Matrix<Real> dWxz_;
-  Matrix<Real> dWyz_;
-  Matrix<Real> dwzp_;
-  Vector<Real> dbz_;
+  Matrix<Real> *dWxz_;
+  Matrix<Real> *dWyz_;
+  Matrix<Real> *dwzp_;
+  Vector<Real> *dbz_;
 
   std::vector<Matrix<Real> > z_;
   Matrix<Real> P_;

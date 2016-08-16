@@ -17,6 +17,8 @@ int main(int argc, char** argv) {
   FeedforwardLayer<double> feedforward_layer(5, 5);
   SoftmaxOutputLayer<double> output_layer(5, 3);
 
+  Parameters<double> parameters;
+
   double delta = 1e-8; //1e-7;
   int num_checks = 50;
   int num_tokens = 4;
@@ -27,8 +29,9 @@ int main(int argc, char** argv) {
 
   srand(1234);
 
-  linear_layer.InitializeParameters();
-  linear_layer.ResetGradients();
+  parameters.DeleteAllParameters();
+  linear_layer.CreateParameters(&parameters);
+  parameters.ResetGradients();
   x = DoubleMatrix::Random(linear_layer.input_size(), num_tokens);
   dx = DoubleMatrix::Zero(linear_layer.input_size(), num_tokens);
   linear_layer.SetNumInputs(1);
@@ -39,8 +42,9 @@ int main(int argc, char** argv) {
   dy->setRandom(linear_layer.output_size(), num_tokens);
   linear_layer.CheckGradient(num_checks, delta);
 
-  feedforward_layer.InitializeParameters();
-  feedforward_layer.ResetGradients();
+  parameters.DeleteAllParameters();
+  feedforward_layer.CreateParameters(&parameters);
+  parameters.ResetGradients();
   x = DoubleMatrix::Random(feedforward_layer.input_size(), num_tokens);
   dx = DoubleMatrix::Zero(feedforward_layer.input_size(), num_tokens);
   feedforward_layer.SetNumInputs(1);
@@ -51,8 +55,9 @@ int main(int argc, char** argv) {
   dy->setRandom(feedforward_layer.output_size(), num_tokens);
   feedforward_layer.CheckGradient(num_checks, delta);
 
-  rnn_layer.InitializeParameters();
-  rnn_layer.ResetGradients();
+  parameters.DeleteAllParameters();
+  rnn_layer.CreateParameters(&parameters);
+  parameters.ResetGradients();
   x = DoubleMatrix::Random(rnn_layer.input_size(), num_tokens);
   dx = DoubleMatrix::Zero(rnn_layer.input_size(), num_tokens);
   rnn_layer.SetNumInputs(1);
@@ -64,8 +69,9 @@ int main(int argc, char** argv) {
   rnn_layer.CheckGradient(num_checks, delta);
 
   bool use_control = true;
-  lstm_layer.InitializeParameters();
-  lstm_layer.ResetGradients();
+  parameters.DeleteAllParameters();
+  lstm_layer.CreateParameters(&parameters);
+  parameters.ResetGradients();
   x = DoubleMatrix::Random(lstm_layer.input_size(), num_tokens);
   dx = DoubleMatrix::Zero(lstm_layer.input_size(), num_tokens);
   if (use_control) {
@@ -91,8 +97,9 @@ int main(int argc, char** argv) {
   lstm_layer.CheckGradient(num_checks, delta);
 
 #if 0
-  birnn_layer.InitializeParameters();
-  birnn_layer.ResetGradients();
+  parameters.DeleteAllParameters();
+  birnn_layer.CreateParameters(&parameters);
+  parameters.ResetGradients();
   x = DoubleMatrix::Random(birnn_layer.input_size(), num_tokens);
   dx = DoubleMatrix::Zero(birnn_layer.input_size(), num_tokens);
   birnn_layer.SetNumInputs(1);
@@ -104,8 +111,9 @@ int main(int argc, char** argv) {
   birnn_layer.CheckGradient(num_checks, delta);
 #endif
 
-  attention_layer.InitializeParameters();
-  attention_layer.ResetGradients();
+  parameters.DeleteAllParameters();
+  attention_layer.CreateParameters(&parameters);
+  parameters.ResetGradients();
   DoubleMatrix x1 = DoubleMatrix::Random(attention_layer.input_size(),
                                          num_tokens);
   DoubleMatrix x2 = DoubleMatrix::Random(attention_layer.control_size(), 1);
@@ -122,8 +130,9 @@ int main(int argc, char** argv) {
   dy->setRandom(attention_layer.hidden_size(), 1);
   attention_layer.CheckGradient(num_checks, delta);
 
-  output_layer.InitializeParameters();
-  output_layer.ResetGradients();
+  parameters.DeleteAllParameters();
+  output_layer.CreateParameters(&parameters);
+  parameters.ResetGradients();
   x = DoubleMatrix::Random(output_layer.input_size(), 1);
   dx = DoubleMatrix::Zero(output_layer.input_size(), 1);
   output_layer.SetNumInputs(1);

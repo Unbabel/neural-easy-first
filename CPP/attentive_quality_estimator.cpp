@@ -278,7 +278,7 @@ int main(int argc, char** argv) {
                                        fixed_target_embeddings);
 
   if (mode == "train") {
-    quality_estimator.InitializeParameters();
+    //quality_estimator.InitializeParameters();
     quality_estimator.Train(sentence_pairs, output_labels,
                             sentence_pairs_dev, output_labels_dev,
                             sentence_pairs_test, output_labels_test,
@@ -287,7 +287,7 @@ int main(int argc, char** argv) {
                             regularization_constant);
   } else {
     // mode == "test".
-    quality_estimator.InitializeParameters();
+    //quality_estimator.InitializeParameters();
     quality_estimator.LoadModel(model_prefix);
     quality_estimator.Test(sentence_pairs_dev, output_labels_dev,
                            sentence_pairs_test, output_labels_test);
