@@ -31,10 +31,10 @@ tf.app.flags.DEFINE_integer("max_train_data_size", 100,
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
-tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
-tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
-#tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
-#tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
+#tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
+#tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
+tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
+tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
 tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
@@ -313,11 +313,6 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
             pred_labels = []
             losses = []
 
-            # need weight matrix to multiply losses with:  weights = class_weights[y_words]
-            # for whole batch
-            # tf.equal
-            # tf.select
-            # tf.where
             if class_weights is not None:
                 class_weights = tf.constant(class_weights, name="class_weights")
 
@@ -358,7 +353,7 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
 def quetch(x, y, masks, seq_lens, vocab_size, K, D, N, J, L, r, lstm_units, concat, window_size,
            src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob):
     """
-    QUETCH model for word-level QE predictions witho MLP based on embeddings
+    QUETCH model for word-level QE predictions  (MLP based on embeddings)
     :param x:
     :param y:
     :param masks:
@@ -431,9 +426,15 @@ def quetch(x, y, masks, seq_lens, vocab_size, K, D, N, J, L, r, lstm_units, conc
         out = tf.matmul(hidden, W_2) + b_2  # batch_size*emb_size, K
         logits = tf.reshape(out, [batch_size, L, K])
         pred_labels = masks*tf.argmax(logits, 2)  # batch_size x L
-        y_full = tf.one_hot(y, depth=K, on_value=1.0, off_value=0.0)
-        cross_entropy = tf.cast(masks, dtype=tf.float32)*tf.reduce_mean(tf.log(logits*y_full), 2)  # batch_size x L
-        accuracy_sent = tf.reduce_mean(tf.cast(tf.equal(pred_labels, y_full), tf.float32), 2)  # accuracy per sentence
+        y_full = tf.one_hot(y, depth=K, on_value=1.0, off_value=0.0)  # batch_size x L x K
+        xent = tf.log(logits*y_full) # batch_size x L x K
+        if class_weights is not None:
+            class_weights = tf.constant(class_weights, name="class_weights")
+            label_weights = tf.mul(y_full, class_weights)  # batch_size x L x K
+            xent = tf.mul(xent, label_weights)
+
+        cross_entropy = tf.cast(masks, dtype=tf.float32)*tf.reduce_mean(xent, 2)  # batch_size x L
+        accuracy_sent = tf.reduce_mean(tf.cast(tf.equal(pred_labels, tf.cast(y, tf.int64)), tf.float32), 1)  # accuracy per sentence
 
         # http://stackoverflow.com/questions/35756710/how-do-i-create-confusion-matrix-of-predicted-and-ground-truth-labels-with-tenso/35876136#35876136
         # TODO other eval metric
@@ -569,7 +570,7 @@ class EasyFirstModel():
                                                 shape=[None], name="seq_lens{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 print "Initializing parameters for bucket with max len", max_len
-                bucket_losses, bucket_losses_reg, bucket_predictions = ef_single_state(
+                bucket_losses, bucket_losses_reg, bucket_predictions = quetch(
                     self.inputs[j], self.labels[j], self.masks[j], self.seq_lens[j],
                     vocab_size=vocab_size, K=self.K, D=self.D, N=self.N,
                     J=self.J, L=max_len, r=self.r, lstm_units=lstm_units, concat=self.concat,
@@ -726,7 +727,7 @@ def train():
         class_weights = [1-FLAGS.bad_weight, FLAGS.bad_weight]  # TODO QE specific
         print "Weights for classes:", class_weights
 
-        # bucketing training data
+        # bucketing training and dev data
         data_buckets, reordering_indexes, bucket_edges = buckets_by_length(
             [np.asarray(train_feature_vectors), np.asarray(dev_feature_vectors)],
             [np.asarray(train_labels), np.asarray(dev_labels)], buckets=FLAGS.buckets,
