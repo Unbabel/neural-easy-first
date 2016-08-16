@@ -26,7 +26,7 @@ tf.app.flags.DEFINE_integer("batch_size", 100,
 tf.app.flags.DEFINE_integer("vocab_size", 20000, "Vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
-tf.app.flags.DEFINE_integer("max_train_data_size", 1000,
+tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
@@ -38,16 +38,16 @@ tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglo
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
 tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
-tf.app.flags.DEFINE_integer("J", 100, "dimensionality of hidden layer")
+tf.app.flags.DEFINE_integer("J", 50, "dimensionality of hidden layer")
 tf.app.flags.DEFINE_integer("r", 2, "context size")
 tf.app.flags.DEFINE_integer("bad_weight", 0.9, "weight for BAD instances" )
-tf.app.flags.DEFINE_boolean("concat", False, "concatenating s_i and h_i for prediction")
+tf.app.flags.DEFINE_boolean("concat", True, "concatenating s_i and h_i for prediction")
 tf.app.flags.DEFINE_boolean("train", True, "training model")
 tf.app.flags.DEFINE_integer("epochs", 100, "training epochs")
-tf.app.flags.DEFINE_integer("checkpoint_freq", 1, "save model every x epochs")
-tf.app.flags.DEFINE_integer("lstm_units", 100, "number of LSTM-RNN encoder units")
-tf.app.flags.DEFINE_float("l2_scale", 0.001, "L2 regularization constant")
-tf.app.flags.DEFINE_float("keep_prob", 0.9, "keep probability for dropout during training (1: no dropout)")
+tf.app.flags.DEFINE_integer("checkpoint_freq", 3, "save model every x epochs")
+tf.app.flags.DEFINE_integer("lstm_units", 50, "number of LSTM-RNN encoder units")
+tf.app.flags.DEFINE_float("l2_scale", 0.0001, "L2 regularization constant")
+tf.app.flags.DEFINE_float("keep_prob", 1, "keep probability for dropout during training (1: no dropout)")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
 tf.app.flags.DEFINE_integer("threads", 8, "number of threads")
@@ -284,11 +284,16 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
 
         with tf.name_scope("sketching"):
 
-            (final_n, final_b, final_S) = tf.while_loop(
-                cond=lambda n, _1, _2: n <= N,
-                body=sketch_step,
-                loop_vars=(n, b, S)
-            )
+            if N > 0:
+                (final_n, final_b, final_S) = tf.while_loop(
+                    cond=lambda n, _1, _2: n <= N,
+                    body=sketch_step,
+                    loop_vars=(n, b, S)
+                )
+            else:
+                final_S = S  # no sketching -> empty sketch
+
+        with tf.name_scope("scoring"):
 
             def score(i):
                 """
@@ -303,8 +308,6 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                     s_i = tf.concat(1, [s_i, tf.transpose(h_i, [0,2,1])])
                 l = tf.matmul(tf.reshape(s_i, [batch_size, -1]), W_sp) + w_p
                 return l  # batch_size x K
-
-        with tf.name_scope("scoring"):
 
             # avg word-level xent
             pred_labels = []
@@ -521,6 +524,7 @@ class EasyFirstModel():
             print "Model with %d sketches" % self.N
         else:
             print "No sketches"
+            self.concat = True
 
         if self.concat or self.N == 0:
             print "Concatenating H and S for predictions"
