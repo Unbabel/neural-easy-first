@@ -567,7 +567,7 @@ class EasyFirstModel():
                 print "Initializing parameters for bucket with max len", max_len
                 bucket_losses, bucket_losses_reg, bucket_predictions = ef_single_state(
                     self.inputs[j], self.labels[j], self.masks[j], self.seq_lens[j],
-                    vocab_size=vocab_size, K=self.K, D=self.D, N=max_len,  # number of sketches is fixed to sequence length
+                    vocab_size=vocab_size, K=self.K, D=self.D, N=self.N,
                     J=self.J, L=max_len, r=self.r, lstm_units=lstm_units, concat=self.concat,
                     window_size=window_size, src_embeddings=src_embeddings,
                     tgt_embeddings=tgt_embeddings, class_weights=class_weights,
@@ -775,7 +775,7 @@ def train():
                     samples_per_batch = train_buckets_sizes[bucket_id]/float(FLAGS.batch_size)
                     batch_ids = np.array_split(order, samples_per_batch)
                 else:
-                    batch_ids = order  # only one batch
+                    batch_ids = [order]  # only one batch
                 bucket_loss = 0
                 bucket_loss_reg = 0
                 # make update on each batch
