@@ -356,7 +356,7 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
             losses = tf.reduce_mean(tf.cast(mask, tf.float32)*tf.transpose(tf.pack(losses), [1, 0]),
                                     1)  # masked, batch_size x 1
             if l2_scale > 0:
-                weights_list = [M_src, M_tgt, W_sz, W_hs, W_ss, W_bz, W_sp, W_hz]
+                weights_list = [W_sz, W_hs, W_ss, W_bz, W_sp, W_hz]  # M_src, M_tgt word embeddings not included
                 l2_loss = tf.contrib.layers.apply_regularization(
                     tf.contrib.layers.l2_regularizer(l2_scale), weights_list=weights_list)
                 losses_reg = losses + l2_loss
