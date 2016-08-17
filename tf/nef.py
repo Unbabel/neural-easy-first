@@ -1,11 +1,13 @@
 # coding=utf-8
 
 import tensorflow as tf
+from tensorflow.python.ops import rnn
 import numpy as np
 import time
 import sys
 from utils import *
 import math
+
 
 """
 Tensorflow implementation of the neural easy-first model
@@ -21,12 +23,12 @@ Tensorflow issues:
 tf.app.flags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
 tf.app.flags.DEFINE_string("optimizer", "adam", "Optimizer [sgd, adam, adagrad, adadelta, "
                                                     "momentum]")
-tf.app.flags.DEFINE_integer("batch_size", 500,
+tf.app.flags.DEFINE_integer("batch_size", 100,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("vocab_size", 20000, "Vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
-tf.app.flags.DEFINE_integer("max_train_data_size", 0,
+tf.app.flags.DEFINE_integer("max_train_data_size", 1000,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
@@ -46,6 +48,7 @@ tf.app.flags.DEFINE_boolean("train", True, "training model")
 tf.app.flags.DEFINE_integer("epochs", 100, "training epochs")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 3, "save model every x epochs")
 tf.app.flags.DEFINE_integer("lstm_units", 50, "number of LSTM-RNN encoder units")
+tf.app.flags.DEFINE_boolean("bi-lstm", True, "bi-directional LSTM-RNN encoder")
 tf.app.flags.DEFINE_float("l2_scale", 0.0001, "L2 regularization constant")
 tf.app.flags.DEFINE_float("keep_prob", 1, "keep probability for dropout during training (1: no dropout)")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
@@ -56,7 +59,7 @@ FLAGS = tf.app.flags.FLAGS
 
 def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r,
                     lstm_units, concat, window_size, keep_prob, l2_scale,
-                    src_embeddings=None, tgt_embeddings=None, class_weights=None):
+                    src_embeddings=None, tgt_embeddings=None, class_weights=None, bilstm=True):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
     :param inputs:
@@ -118,27 +121,43 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                 emb = tf.reshape(emb_comb, [batch_size, -1, window_size*emb_size], name="emb") # batch_size x L x window_size*emb_size
 
             if lstm_units > 0:
-                with tf.name_scope("lstm"):
-                    # alternatively use LSTMCell supporting peep-holes and output projection
-                    cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=lstm_units, state_is_tuple=True)
-                    if keep_prob < 1:
-                        #print "Dropping out LSTM input and output"
-                        cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
-                    # see: https://github.com/aymericdamien/TensorFlow-Examples/blob/master/examples/3_NeuralNetworks/dynamic_rnn.py
-                    # Permuting batch_size and n_steps
-                    remb = tf.transpose(emb, [1, 0, 2])  # L x batch_size x window_size*emb_size
-                    # Reshaping to (n_steps*batch_size, n_input)
-                    remb = tf.reshape(remb, [-1, window_size*emb_size])  # L*batch_size x window_size*emb_size
-                    # Split to get a list of 'n_steps=L' tensors of shape (batch_size, window_size*emb_size)
-                    remb = tf.split(0, L, remb)
 
-                    rnn_outputs, rnn_states = tf.nn.rnn(cell, remb,
-                                    sequence_length=seq_lens, dtype=tf.float32)
-                    # 'outputs' is a list of output at every timestep (until L)
-                    rnn_outputs = tf.pack(rnn_outputs)
-                    rnn_outputs = tf.transpose(rnn_outputs, [1, 0, 2])  # batch_size x L x lstm_units
-                    H = rnn_outputs
-                    state_size = lstm_units
+                # Permuting batch_size and n_steps
+                remb = tf.transpose(emb, [1, 0, 2])  # L x batch_size x window_size*emb_size
+                # Reshaping to (n_steps*batch_size, n_input)
+                remb = tf.reshape(remb, [-1, window_size*emb_size])  # L*batch_size x window_size*emb_size
+                # Split to get a list of 'n_steps=L' tensors of shape (batch_size, window_size*emb_size)
+                remb = tf.split(0, L, remb)
+
+                # alternatively use LSTMCell supporting peep-holes and output projection
+                fw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=lstm_units, state_is_tuple=True)
+
+                if bilstm:
+                    with tf.name_scope("bi-lstm"):
+                        bw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=lstm_units, state_is_tuple=True)
+
+                        if keep_prob < 1:
+                            #print "Dropping out LSTM input and output"
+                            fw_cell = tf.nn.rnn_cell.DropoutWrapper(fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
+                            bw_cell = tf.nn.rnn_cell.DropoutWrapper(bw_cell, input_keep_prob=1, output_keep_prob=keep_prob)
+
+                        outputs, _, _ = rnn.bidirectional_rnn(fw_cell, bw_cell, remb, sequence_length=seq_lens, dtype=tf.float32)
+                        state_size = 2*lstm_units  # concat of fw and bw lstm output
+                else:
+                    with tf.name_scope("lstm"):
+
+                        if keep_prob < 1:
+                            #print "Dropping out LSTM input and output"
+                            fw_cell = tf.nn.rnn_cell.DropoutWrapper(fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
+
+                        outputs, _, = rnn.rnn(fw_cell, remb, sequence_length=seq_lens, dtype=tf.float32)
+                        state_size = lstm_units  # concat of fw and bw lstm output
+
+                # 'outputs' is a list of output at every timestep (until L)
+                rnn_outputs = tf.pack(outputs)
+                rnn_outputs = tf.transpose(rnn_outputs, [1, 0, 2])  # batch_size x L x state_size
+                H = rnn_outputs
+
             else:
                 H = emb
                 state_size = 2*window_size*emb_size
@@ -350,8 +369,9 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
     return losses, losses_reg, predictions
 
 
-def quetch(x, y, masks, seq_lens, vocab_size, K, D, N, J, L, r, lstm_units, concat, window_size,
-           src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob):
+def quetch(x, y, masks, vocab_size, K, D, J, L, window_size,
+           src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob,
+           lstm_units=0, bilstm=False, concat=False, r=0, N=0, seq_lens=None):
     """
     QUETCH model for word-level QE predictions  (MLP based on embeddings)
     :param x:
@@ -366,6 +386,7 @@ def quetch(x, y, masks, seq_lens, vocab_size, K, D, N, J, L, r, lstm_units, conc
     :param L:
     :param r:
     :param lstm_units:
+    :param bilstm:
     :param concat:
     :param window_size:
     :param src_embeddings:
@@ -480,7 +501,7 @@ class EasyFirstModel():
     def __init__(self, K, D, N, J, r, vocab_size, batch_size, optimizer, learning_rate,
                  max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
                  tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0.1,
-                 keep_prob=0.5, model_dir="models/"):
+                 keep_prob=0.5, model_dir="models/", bilstm=True):
         """
         Initialize the model
         :param K:
@@ -500,6 +521,7 @@ class EasyFirstModel():
         :param tgt_embeddings
         :param l2_scale
         :param keep_prob
+        :param bilstm
         :return:
         """
         self.K = K
@@ -523,6 +545,7 @@ class EasyFirstModel():
         self.tgt_embeddings = tgt_embeddings
         self.l2_scale = l2_scale
         self.keep_prob = keep_prob
+        self.bilstm = bilstm
 
         self.class_weights = class_weights if class_weights is not None else [1./K]*K
 
@@ -534,7 +557,10 @@ class EasyFirstModel():
         print "Model path:", self.path
 
         if self.lstm_units > 0:
-            print "Model with LSTM RNN encoder of %d units" % self.lstm_units
+            if self.bilstm:
+                print "Model with bi-directional LSTM RNN encoder of %d units" % self.lstm_units
+            else:
+                print "Model with uni-directional LSTM RNN encoder of %d units" % self.lstm_units
         else:
             if self.src_embeddings.table is None and self.tgt_embeddings.table is None:
                 print "Model with simple embeddings of size %d" % self.D
@@ -592,13 +618,13 @@ class EasyFirstModel():
                                                 shape=[None], name="seq_lens{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 print "Initializing parameters for bucket with max len", max_len
-                bucket_losses, bucket_losses_reg, bucket_predictions = quetch(  # ef_single_state
+                bucket_losses, bucket_losses_reg, bucket_predictions = ef_single_state(  # or: quetch
                     self.inputs[j], self.labels[j], self.masks[j], self.seq_lens[j],
-                    vocab_size=vocab_size, K=self.K, D=self.D, N=self.N,
-                    J=self.J, L=max_len, r=self.r, lstm_units=lstm_units, concat=self.concat,
-                    window_size=window_size, src_embeddings=src_embeddings,
-                    tgt_embeddings=tgt_embeddings, class_weights=class_weights,
-                    keep_prob=keep_prob, l2_scale=l2_scale)
+                    vocab_size=self.vocab_size, K=self.K, D=self.D, N=self.N,
+                    J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units, concat=self.concat,
+                    window_size=self.window_size, src_embeddings=self.src_embeddings,
+                    tgt_embeddings=self.tgt_embeddings, class_weights=self.class_weights,
+                    keep_prob=self.keep_prob, l2_scale=self.l2_scale, bilstm=self.bilstm)
 
                 self.losses_reg.append(bucket_losses_reg)
                 self.losses.append(bucket_losses) # list of tensors, one for each bucket
@@ -678,7 +704,7 @@ def create_model(session, buckets, forward_only=False, src_embeddings=None, tgt_
                            concat=FLAGS.concat, forward_only=forward_only, buckets=buckets,
                            src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
                            window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale,
-                           keep_prob=FLAGS.keep_prob, model_dir=FLAGS.model_dir)
+                           keep_prob=FLAGS.keep_prob, model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm)
     checkpoint = tf.train.get_checkpoint_state("models")
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
         print "Reading model parameters from %s" % checkpoint.model_checkpoint_path
