@@ -1,4 +1,6 @@
 import numpy as np
+import operator
+import cPickle as pkl
 
 class embedding:
     def __init__(self, table, word2id, id2word, UNK_id, PAD_id, end_id, start_id):
@@ -49,6 +51,19 @@ class embedding:
         else:
             new_id = self.word2id[word]
         return new_id
+
+    def store(self, file):
+        """
+        dump embeddings with pickle
+        :param file:
+        :return:
+        """
+        sorted_entries = sorted(self.word2id.items(), key=operator.itemgetter(1))  # sort entries by id
+        sorted_words = [k for k, v in sorted_entries]
+        vectors = self.table
+        assert len(sorted_words) == len(vectors)
+        pkl.dump((sorted_words, vectors), open(file, "wb"))
+        print "Dumped embedding to file %s" % file
 
     def __str__(self):
         return "Embeddings with vocab_size=%d" % (len(self.word2id))

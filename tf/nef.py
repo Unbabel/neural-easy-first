@@ -35,6 +35,7 @@ tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
 tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
 tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
+tf.app.flags.DEFINE_bool("extend", False, "whether to extend the pre-trained embeddings with the training vocabulary")
 #tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
 #tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
@@ -730,21 +731,46 @@ def train():
     with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
         # load data and embeddings
-        src_embeddings = load_embedding(FLAGS.src_embeddings) if FLAGS.src_embeddings != "" \
-            else None
-        tgt_embeddings = load_embedding(FLAGS.tgt_embeddings) if FLAGS.tgt_embeddings != "" \
-            else None
-
         train_dir = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags"
         dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.basic_features_with_tags"
+
+        if FLAGS.src_embeddings != "":
+            src_embeddings = None
+        else:
+            src_embeddings = FLAGS.src_embedding
+        if FLAGS.tgt_embeddings != "":
+            tgt_embeddings = None
+        else:
+            tgt_embeddings = FLAGS.tgt_embedding
+
+        extend = False
+        if tgt_embeddings is not None and src_embeddings is not None:
+            extended_src = FLAGS.src_embedding.split("pkl")[0]+"extended-train_src.pkl"
+            extended_tgt = FLAGS.src_embedding.split("pkl")[0]+"extended-train_tgt.pkl"
+
+            if FLAGS.extend:  # extend embeddings now (do only once)
+                extend = True
+                src_embeddings = load_embedding(FLAGS.src_embeddings)
+                tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
+            else :  # load already extended
+                src_embeddings = load_embedding(extended_src)
+                tgt_embeddings = load_embedding(extended_tgt)
+
 
         train_feature_vectors, train_tgt_sentences, train_labels, train_label_dict, \
         train_src_embeddings, train_tgt_embeddings = load_data(train_dir, src_embeddings,
                                                                tgt_embeddings,
                                                                max_sent=FLAGS.max_train_data_size,
-                                                               train=True, labeled=True)
+                                                               train=True, labeled=True,
+                                                               extend_embeddings=extend)
+
+        if extend:  # store embeddings for next run
+            train_src_embeddings.store(extended_src)
+            train_tgt_embeddings.store(extended_tgt)
+
         dev_feature_vectors, dev_tgt_sentences, dev_labels, dev_label_dict = \
-            load_data(dev_dir, train_src_embeddings, train_tgt_embeddings, train=False, labeled=True)  # use training vocab for dev
+            load_data(dev_dir, train_src_embeddings, train_tgt_embeddings, train=False,
+                      labeled=True, extend_embeddings=False)  # use training vocab for dev
 
         if FLAGS.src_embeddings == "":
             src_embeddings = embedding.embedding(None, train_src_embeddings.word2id,
@@ -902,8 +928,10 @@ def test():
     with tf.Session() as sess:
          # load data and embeddings
 
-        if FLAGS.src_embeddings != "":
-            src_embeddings = load_embedding(FLAGS.src_embeddings)
+        if FLAGS.src_embeddings != "":  # always load extended embeddings
+            extended_src = FLAGS.src_embedding.split("pkl")[0]+"-extended-train_src.pkl"
+            src_embeddings = load_embedding(extended_src)
+
         else:
             src_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.src.pkl"
             print "Reading src vocabulary from %s" % src_train_vocab_file
@@ -913,7 +941,8 @@ def test():
             src_embeddings = embedding.embedding(None, src_word2id, src_id2word, 0, 1, 2, 3)
 
         if FLAGS.tgt_embeddings != "":
-            tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
+            extended_tgt = FLAGS.tgt_embedding.split("pkl")[0]+"-extended-train_tgt.pkl"
+            tgt_embeddings = load_embedding(extended_tgt)
         else:
             tgt_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.tgt.pkl"
             print "Reading tgt vocabulary from %s" % tgt_train_vocab_file
@@ -924,7 +953,8 @@ def test():
 
         test_dir = FLAGS.data_dir+"/task2_en-de_test/test.features"
         test_feature_vectors, test_tgt_sentences, test_labels, test_label_dict = \
-            load_data(test_dir, src_embeddings, tgt_embeddings, train=False, labeled=False)
+            load_data(test_dir, src_embeddings, tgt_embeddings, train=False,
+                      labeled=False, extend_embeddings=False)
 
         # load model
         class_weights = [1-FLAGS.bad_weight, FLAGS.bad_weight]  #QE-specific
@@ -977,7 +1007,8 @@ def demo():
     with tf.Session() as sess:
         # load embeddings
         if FLAGS.src_embeddings != "":
-            src_embeddings = load_embedding(FLAGS.src_embeddings)
+            extended_src= FLAGS.src_embedding.split("pkl")[0]+"-extended-train_src.pkl"
+            src_embeddings = load_embedding(extended_src)
         else:
             src_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.src.pkl"
             print "Reading src vocabulary from %s" % src_train_vocab_file
@@ -987,7 +1018,8 @@ def demo():
             src_embeddings = embedding.embedding(None, src_word2id, src_id2word, 0, 1, 2, 3)
 
         if FLAGS.tgt_embeddings != "":
-            tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
+            extended_tgt = FLAGS.tgt_embedding.split("pkl")[0]+"-extended-train_tgt.pkl"
+            tgt_embeddings = load_embedding(extended_tgt)
         else:
             tgt_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.tgt.pkl"
             print "Reading tgt vocabulary from %s" % tgt_train_vocab_file

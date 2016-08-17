@@ -52,7 +52,8 @@ def build_vocab(feature_file, origin, store=False):
     return vocab, 0, 1, 2, 3
 
 
-def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task="bin", train=False, labeled=True):
+def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task="bin", train=False,
+              labeled=True, extend_embeddings=False):
     """
     Given a dataset file with features and labels, and word embeddings, read them to lists and dictionaries
     :param feature_label_file:
@@ -127,7 +128,7 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                 # lookup features
 
                 #if train: add missing ids and expand embedding table, else just get ids
-                if train:
+                if train and extend_embeddings:
                     token_id = embedding_tgt.add_word(token)
                     left_context_id = embedding_tgt.add_word(left_context)
                     right_context_id = embedding_tgt.add_word(right_context)
@@ -143,7 +144,8 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                     src_right_context_id = embedding_src.get_id(src_right_context)
                     aligned_token_id = embedding_src.get_id(aligned_token)
 
-                feature_vector.append([left_context_id, token_id, right_context_id, src_left_context_id, aligned_token_id, src_right_context_id])
+                feature_vector.append([left_context_id, token_id, right_context_id,
+                                       src_left_context_id, aligned_token_id, src_right_context_id])
                 tgt_sentence.append(token)
 
                 if labeled:
@@ -156,8 +158,11 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
 
     print "Loaded %d sentences" % len(feature_vectors)
     if train:
-        print "%d words were added to pre-trained src embeddings, %d tokens are multiple aligned words" % (embedding_src.added_words, embedding_src.multiple_aligned_words)
-        print "%d words were added to pre-trained tgt embeddings, %d tokens are multiple aligned words" % (embedding_tgt.added_words, embedding_tgt.multiple_aligned_words)
+        if extend_embeddings:
+            print "%d words were added to pre-trained src embeddings, %d tokens are multiple aligned" \
+                  " words" % (embedding_src.added_words, embedding_src.multiple_aligned_words)
+            print "%d words were added to pre-trained tgt embeddings, %d tokens are multiple aligned" \
+                  " words" % (embedding_tgt.added_words, embedding_tgt.multiple_aligned_words)
         return feature_vectors, tgt_sentences, labels, label_dict, embedding_src, embedding_tgt
     else:
         return feature_vectors, tgt_sentences, labels, label_dict
