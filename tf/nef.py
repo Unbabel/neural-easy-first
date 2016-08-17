@@ -23,20 +23,20 @@ Tensorflow issues:
 tf.app.flags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
 tf.app.flags.DEFINE_string("optimizer", "adam", "Optimizer [sgd, adam, adagrad, adadelta, "
                                                     "momentum]")
-tf.app.flags.DEFINE_integer("batch_size", 100,
+tf.app.flags.DEFINE_integer("batch_size", 500,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("vocab_size", 20000, "Vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
-tf.app.flags.DEFINE_integer("max_train_data_size", 1000,
+tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
-#tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
-#tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
-tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
-tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
+tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
+tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
+#tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
+#tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
 tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
@@ -48,7 +48,7 @@ tf.app.flags.DEFINE_boolean("train", True, "training model")
 tf.app.flags.DEFINE_integer("epochs", 100, "training epochs")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 3, "save model every x epochs")
 tf.app.flags.DEFINE_integer("lstm_units", 50, "number of LSTM-RNN encoder units")
-tf.app.flags.DEFINE_boolean("bilstm", True, "bi-directional LSTM-RNN encoder")
+tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
 tf.app.flags.DEFINE_float("l2_scale", 0.0001, "L2 regularization constant")
 tf.app.flags.DEFINE_float("keep_prob", 1, "keep probability for dropout during training (1: no dropout)")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
@@ -620,7 +620,7 @@ class EasyFirstModel():
                 print "Initializing parameters for bucket with max len", max_len
                 bucket_losses, bucket_losses_reg, bucket_predictions = ef_single_state(  # or: quetch
                     self.inputs[j], self.labels[j], self.masks[j], self.seq_lens[j],
-                    vocab_size=self.vocab_size, K=self.K, D=self.D, N=self.N,
+                    vocab_size=self.vocab_size, K=self.K, D=self.D, N=max_len,  # as much sketches as words in sequence
                     J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units, concat=self.concat,
                     window_size=self.window_size, src_embeddings=self.src_embeddings,
                     tgt_embeddings=self.tgt_embeddings, class_weights=self.class_weights,
@@ -1090,3 +1090,5 @@ if __name__ == "__main__":
 # - modularization
 # - nicer way of storing model parameters (word2id, buckets, params)
 # - why has quetch nan values?
+# - keep track of number of UNKS
+# - merge task vocab with embedding vocab
