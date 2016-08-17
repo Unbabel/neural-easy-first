@@ -743,7 +743,7 @@ def train():
         else:
             tgt_embeddings = FLAGS.tgt_embedding
 
-        extend = False
+        extend = FLAGS.extend
         if tgt_embeddings is not None and src_embeddings is not None:
             extended_src = FLAGS.src_embedding.split("pkl")[0]+"extended-train_src.pkl"
             extended_tgt = FLAGS.src_embedding.split("pkl")[0]+"extended-train_tgt.pkl"
