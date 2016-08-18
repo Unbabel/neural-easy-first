@@ -157,6 +157,8 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
     tgt_sentence = []
     labels = []
     label_sentence = []
+    tgt_unks = set()
+    src_unks = set()
     with codecs.open(feature_label_file, "r", "utf8") as qe_data:
         for line in qe_data:
             stripped = line.strip()
@@ -189,6 +191,20 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                 src_right_context_id = embedding_src.get_id(src_right_context)
                 aligned_token_id = embedding_src.get_id(aligned_token)
 
+                # keep track of unknown words
+                if token_id == embedding_tgt.UNK_id:
+                    tgt_unks.add(token)
+                if left_context_id == embedding_tgt.UNK_id:
+                    tgt_unks.add(left_context)
+                if right_context_id == embedding_tgt.UNK_id:
+                    tgt_unks.add(right_context)
+                if src_left_context_id == embedding_src.UNK_id:
+                    src_unks.add(src_left_context)
+                if src_right_context_id == embedding_src.UNK_id:
+                    src_unks.add(src_right_context)
+                if aligned_token_id == embedding_src.UNK_id:
+                    src_unks.add(aligned_token)
+
                 feature_vector.append([left_context_id, token_id, right_context_id,
                                        src_left_context_id, aligned_token_id, src_right_context_id])
                 tgt_sentence.append(token)
@@ -202,6 +218,8 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                 label_sentence.append(label_dict[label])
 
     print "Loaded %d sentences" % len(feature_vectors)
+    print "%d UNK words in src: %s, ..." % (len(src_unks), ", ".join(list(src_unks)[:10]))
+    print "%d UNK words in tgt: %s, ..." % (len(tgt_unks), ", ".join(list(tgt_unks)[:10]))
     if train:
         return feature_vectors, tgt_sentences, labels, label_dict, embedding_src, embedding_tgt
     else:
@@ -273,7 +291,10 @@ def buckets_by_length(data_list, label_list, buckets=20, max_len=0, mode='pad'):
         buckets = np.linspace(min(input_lengths)-1, maxlen, buckets, dtype='int')
     bin_edges = stats.mstats.mquantiles(input_lengths, (buckets - buckets[0]) /
                                         float(max_len - buckets[0]))
-    bin_edges = np.append([int(b) for b in bin_edges], [max_len])
+    if max_len > int(bin_edges[-1]):  # if specified maximum length is longer than all train and dev instances
+        bin_edges = np.append([int(b) for b in bin_edges], [max_len])
+    else:
+        bin_edges = np.array([int(b) for b in bin_edges])
     print "bin edges:", bin_edges
     train_input_bucket_index = [i if i < len(buckets) else len(buckets)-1 for i in
                                 np.digitize(input_lengths[:len(train_data)], buckets, right=False)]  # truncate too long sentences
