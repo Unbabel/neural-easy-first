@@ -5,6 +5,7 @@ import cPickle as pkl
 import codecs
 import embedding
 from scipy import stats
+import operator
 
 def load_embedding(pkl_file):
     word2id = {}
@@ -25,6 +26,61 @@ def load_embedding(pkl_file):
     print "Special tokens:", UNK_id, PAD_id, start_id, end_id
     emb = embedding.embedding(vectors, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
     return emb
+
+def load_vocabs(feature_file, src_limit=0, tgt_limit=0):
+    """
+    Load the vocabulary of a qe corpus (in "feature and tags file")
+    and limit it to a certain size (by frequency)
+    :param feature_file:
+    :param src_limit:
+    :param tgt_limit:
+    :return:
+    """
+    src_vocab = {}
+    tgt_vocab = {}
+    with codecs.open(feature_file, "r", "utf8") as qe_data:
+
+        # collect all tokens and count them
+        for line in qe_data:
+            stripped = line.strip()
+            if stripped == "":  # sentence end
+                continue
+            else:
+                split_line = stripped.split("\t")
+                tgt_tokens = split_line[3:6]
+                src_tokens = split_line[6:9]
+                for src_token in src_tokens:
+                    if src_token == " ":
+                        src_token = "</s>"  # FIXME because of data format (end of src sentence=space)
+                    freq = src_vocab.get(src_token, 0)
+                    src_vocab[src_token] = freq + 1
+                for tgt_token in tgt_tokens:
+                    freq = tgt_vocab.get(tgt_token, 0)
+                    tgt_vocab[tgt_token] = freq + 1
+
+    # sort by frequency (descending)
+    src_vocab_by_freq = sorted(src_vocab.items(), key=operator.itemgetter(1), reverse=True)
+    tgt_vocab_by_freq = sorted(tgt_vocab.items(), key=operator.itemgetter(1), reverse=True)
+
+    print "found %d tokens in train src vocabulary" % len(src_vocab_by_freq)
+    print "found %d tokens in train tgt vocabulary" % len(tgt_vocab_by_freq)
+
+    #cut off infrequent ones
+    if src_limit > 0:
+        src_vocab_by_freq = src_vocab_by_freq[:src_limit]
+        print "cutting down src vocab to %d tokens" % len(src_vocab_by_freq)
+    if tgt_limit > 0:
+        tgt_vocab_by_freq = tgt_vocab_by_freq[:tgt_limit]
+        print "cutting down tgt vocab to %d tokens" % len(tgt_vocab_by_freq)
+
+    vocab = {"<PAD>", "<UNK>", "<s>", "</s>"}
+    src_words = list(set(map(operator.itemgetter(0), src_vocab_by_freq)).union(vocab))
+    tgt_words = list(set(map(operator.itemgetter(0), tgt_vocab_by_freq)).union(vocab))
+
+    print "final %d tokens in src vocabulary" % len(src_words)
+    print "final %d tokens in tgt vocabulary" % len(tgt_words)
+
+    return src_words, tgt_words
 
 
 def build_vocab(feature_file, origin, store=False):
@@ -53,7 +109,7 @@ def build_vocab(feature_file, origin, store=False):
 
 
 def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task="bin", train=False,
-              labeled=True, extend_embeddings=False):
+              labeled=True):
     """
     Given a dataset file with features and labels, and word embeddings, read them to lists and dictionaries
     :param feature_label_file:
@@ -126,23 +182,12 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                 src_right_context = split_line[8]
 
                 # lookup features
-
-                #if train: add missing ids and expand embedding table, else just get ids
-                if train and extend_embeddings:
-                    token_id = embedding_tgt.add_word(token)
-                    left_context_id = embedding_tgt.add_word(left_context)
-                    right_context_id = embedding_tgt.add_word(right_context)
-                    src_left_context_id = embedding_src.add_word(src_left_context)
-                    src_right_context_id = embedding_src.add_word(src_right_context)
-                    aligned_token_id = embedding_src.add_word(aligned_token)
-
-                else:
-                    token_id = embedding_tgt.get_id(token)
-                    left_context_id = embedding_tgt.get_id(left_context)
-                    right_context_id = embedding_tgt.get_id(right_context)
-                    src_left_context_id = embedding_src.get_id(src_left_context)
-                    src_right_context_id = embedding_src.get_id(src_right_context)
-                    aligned_token_id = embedding_src.get_id(aligned_token)
+                token_id = embedding_tgt.get_id(token)
+                left_context_id = embedding_tgt.get_id(left_context)
+                right_context_id = embedding_tgt.get_id(right_context)
+                src_left_context_id = embedding_src.get_id(src_left_context)
+                src_right_context_id = embedding_src.get_id(src_right_context)
+                aligned_token_id = embedding_src.get_id(aligned_token)
 
                 feature_vector.append([left_context_id, token_id, right_context_id,
                                        src_left_context_id, aligned_token_id, src_right_context_id])
@@ -158,11 +203,6 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
 
     print "Loaded %d sentences" % len(feature_vectors)
     if train:
-        if extend_embeddings:
-            print "%d words were added to pre-trained src embeddings, %d tokens are multiple aligned" \
-                  " words" % (embedding_src.added_words, embedding_src.multiple_aligned_words)
-            print "%d words were added to pre-trained tgt embeddings, %d tokens are multiple aligned" \
-                  " words" % (embedding_tgt.added_words, embedding_tgt.multiple_aligned_words)
         return feature_vectors, tgt_sentences, labels, label_dict, embedding_src, embedding_tgt
     else:
         return feature_vectors, tgt_sentences, labels, label_dict
