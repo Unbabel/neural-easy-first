@@ -18,7 +18,6 @@ def main(args):
 
     # load the vocabulary (most frequent words)
     src_vocab, tgt_vocab = load_vocabs(args.train_data, args.src_limit, args.tgt_limit)
-    print src_vocab, tgt_vocab
 
     # update the embeddings
     # add zero vectors for new words and for multiple alignment

@@ -911,7 +911,7 @@ def test():
          # load data and embeddings
 
         if FLAGS.src_embeddings != "":
-            src_embeddings = load_embedding(FLAGS.src_embedding)
+            src_embeddings = load_embedding(FLAGS.src_embeddings)
 
         else:
             src_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.src.pkl"
@@ -922,7 +922,7 @@ def test():
             src_embeddings = embedding.embedding(None, src_word2id, src_id2word, 0, 1, 2, 3)
 
         if FLAGS.tgt_embeddings != "":
-            tgt_embeddings = load_embedding(FLAGS.tgt_embedding)
+            tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
         else:
             tgt_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.tgt.pkl"
             print "Reading tgt vocabulary from %s" % tgt_train_vocab_file
@@ -987,7 +987,7 @@ def demo():
     with tf.Session() as sess:
         # load embeddings
         if FLAGS.src_embeddings != "":
-            src_embeddings = load_embedding(FLAGS.src_embedding)
+            src_embeddings = load_embedding(FLAGS.src_embeddings)
         else:
             src_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.src.pkl"
             print "Reading src vocabulary from %s" % src_train_vocab_file
@@ -997,7 +997,7 @@ def demo():
             src_embeddings = embedding.embedding(None, src_word2id, src_id2word, 0, 1, 2, 3)
 
         if FLAGS.tgt_embeddings != "":
-            tgt_embeddings = load_embedding(FLAGS.tgt_embedding)
+            tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
         else:
             tgt_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.tgt.pkl"
             print "Reading tgt vocabulary from %s" % tgt_train_vocab_file
@@ -1098,7 +1098,7 @@ if __name__ == "__main__":
 # TODO
 # - language als parameter
 # - modularization
-# - nicer way of storing model parameters (word2id, buckets, params)
+# - nicer way of storing model parameters (params)
 # - why has quetch nan values?
-# - keep track of number of UNKS
-# - merge task vocab with embedding vocab
+# - replace numbers by <NUM>?
+# - validation also in batches for speedup
