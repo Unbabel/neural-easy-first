@@ -345,8 +345,7 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                 cross_entropy = tf.nn.softmax_cross_entropy_with_logits(word_label_score,
                                                                                 y_words_full)
                 if class_weights is not None:
-                    # see: https://github.com/lopuhin/skflow/blob/5c978498d24472bac44235964b6ab528ca952918/skflow/ops/losses_ops.py
-                    label_weights = tf.reduce_mean(tf.mul(y_words_full, class_weights), 1)
+                    label_weights = tf.reduce_sum(tf.mul(y_words_full, class_weights), 1)
                     cross_entropy = tf.mul(cross_entropy, label_weights)
 
                 loss = cross_entropy
