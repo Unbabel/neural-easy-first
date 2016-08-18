@@ -44,12 +44,13 @@ class embedding:
             # add new vocab item for this combination
             #print "Adding word %s to vocabulary" % word
             self.added_words += 1
-            new_id = len(self.word2id.keys())
+            new_id = self.table.shape[0]
             self.word2id[word] = new_id
             self.id2word[new_id] = word
-            self.table = np.append(self.table, new_v)
+            self.table = np.append(self.table, [new_v], axis=0)
         else:
             new_id = self.word2id[word]
+            #print "word exists", word, new_id
         return new_id
 
     def store(self, file):
@@ -58,9 +59,9 @@ class embedding:
         :param file:
         :return:
         """
-        sorted_entries = sorted(self.word2id.items(), key=operator.itemgetter(1))  # sort entries by id
-        sorted_words = [k for k, v in sorted_entries]
-        vectors = self.table
+        sorted_entries = sorted(self.word2id.items(), key=operator.itemgetter(1))  # sort entries by id, several words can have the same id (e.g. <s> and <S>)
+        sorted_words, sorted_ids = zip(*sorted_entries) 
+        vectors = self.table[np.array(sorted_ids)]
         assert len(sorted_words) == len(vectors)
         pkl.dump((sorted_words, vectors), open(file, "wb"))
         print "Dumped embedding to file %s" % file

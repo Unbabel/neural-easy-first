@@ -35,7 +35,7 @@ tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
 tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
 tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
-tf.app.flags.DEFINE_bool("extend", False, "whether to extend the pre-trained embeddings with the training vocabulary")
+tf.app.flags.DEFINE_bool("extend", True, "whether to extend the pre-trained embeddings with the training vocabulary")
 #tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
 #tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
@@ -734,19 +734,19 @@ def train():
         train_dir = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags"
         dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.basic_features_with_tags"
 
-        if FLAGS.src_embeddings != "":
+        if FLAGS.src_embeddings == "":
             src_embeddings = None
         else:
-            src_embeddings = FLAGS.src_embedding
-        if FLAGS.tgt_embeddings != "":
+            src_embeddings = FLAGS.src_embeddings
+        if FLAGS.tgt_embeddings == "":
             tgt_embeddings = None
         else:
-            tgt_embeddings = FLAGS.tgt_embedding
+            tgt_embeddings = FLAGS.tgt_embeddings
 
         extend = FLAGS.extend
         if tgt_embeddings is not None and src_embeddings is not None:
-            extended_src = FLAGS.src_embedding.split("pkl")[0]+"extended-train_src.pkl"
-            extended_tgt = FLAGS.src_embedding.split("pkl")[0]+"extended-train_tgt.pkl"
+            extended_src = FLAGS.src_embeddings.split("pkl")[0]+"extended-train_src.pkl"
+            extended_tgt = FLAGS.src_embeddings.split("pkl")[0]+"extended-train_tgt.pkl"
 
             if FLAGS.extend:  # extend embeddings now (do only once)
                 extend = True
