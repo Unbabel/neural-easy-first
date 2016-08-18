@@ -31,7 +31,7 @@ tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
-tf.app.flags.DEFINE_integer("L", 50, "maximum length of sequences")
+tf.app.flags.DEFINE_integer("L", 58, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
 tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
 tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
@@ -46,7 +46,7 @@ tf.app.flags.DEFINE_integer("bad_weight", 0.9, "weight for BAD instances" )
 tf.app.flags.DEFINE_boolean("concat", True, "concatenating s_i and h_i for prediction")
 tf.app.flags.DEFINE_boolean("train", True, "training model")
 tf.app.flags.DEFINE_integer("epochs", 100, "training epochs")
-tf.app.flags.DEFINE_integer("checkpoint_freq", 3, "save model every x epochs")
+tf.app.flags.DEFINE_integer("checkpoint_freq", 20, "save model every x epochs")
 tf.app.flags.DEFINE_integer("lstm_units", 50, "number of LSTM-RNN encoder units")
 tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
 tf.app.flags.DEFINE_float("l2_scale", 0.0001, "L2 regularization constant")
@@ -873,30 +873,31 @@ def train():
                   (epoch+1, time_epoch, loss/len(train_labels), train_accuracy,
                    train_f1_1*train_f1_2, train_f1_1, train_f1_2)
 
+            # eval on dev (every epoch)
+            start_time_valid = time.time()
+            dev_loss = 0.0
+            dev_predictions = []
+            dev_true = []
+            for bucket_id in dev_buckets.keys():
+                bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = dev_buckets[bucket_id]
+                step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
+                                                                           bucket_xs, bucket_ys,
+                                                                           bucket_masks,
+                                                                           bucket_seq_lens,
+                                                                           True)  # loss for whole bucket
+                dev_predictions.extend(predictions)
+                dev_true.extend(bucket_ys)
+                dev_loss += np.sum(step_loss)
+            time_valid = time.time() - start_time_valid
+            dev_accuracy = accuracy(dev_true, dev_predictions)
+            dev_f1_1, dev_f1_2 = f1s_binary(dev_true, dev_predictions)
+            print "EPOCH %d: validation time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
+                  (epoch+1, time_valid, dev_loss/len(dev_labels), dev_accuracy,
+                   dev_f1_1*dev_f1_2, dev_f1_1, dev_f1_2)
+
             if epoch % FLAGS.checkpoint_freq == 0:
                 # save checkpoint
                 model.saver.save(sess, model.path, global_step=model.global_step)
-                # eval on dev
-                start_time_valid = time.time()
-                dev_loss = 0.0
-                dev_predictions = []
-                dev_true = []
-                for bucket_id in dev_buckets.keys():
-                    bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = dev_buckets[bucket_id]
-                    step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
-                                                                               bucket_xs, bucket_ys,
-                                                                               bucket_masks,
-                                                                               bucket_seq_lens,
-                                                                               True)  # loss for whole bucket
-                    dev_predictions.extend(predictions)
-                    dev_true.extend(bucket_ys)
-                    dev_loss += np.sum(step_loss)
-                time_valid = time.time() - start_time_valid
-                dev_accuracy = accuracy(dev_true, dev_predictions)
-                dev_f1_1, dev_f1_2 = f1s_binary(dev_true, dev_predictions)
-                print "EPOCH %d: validation time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
-                      (epoch+1, time_valid, dev_loss/len(dev_labels), dev_accuracy,
-                       dev_f1_1*dev_f1_2, dev_f1_1, dev_f1_2)
 
 
 def test():
@@ -1101,3 +1102,4 @@ if __name__ == "__main__":
 # - why has quetch nan values?
 # - replace numbers by <NUM>?
 # - validation also in batches for speedup
+# - during testing: multiple aligned words are often unknown -> have a backoff
