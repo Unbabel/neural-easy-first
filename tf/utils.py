@@ -191,6 +191,8 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                 src_right_context_id = embedding_src.get_id(src_right_context)
                 aligned_token_id = embedding_src.get_id(aligned_token)
 
+                # TODO handle multiple alignments
+
                 # keep track of unknown words
                 if token_id == embedding_tgt.UNK_id:
                     tgt_unks.add(token)
@@ -284,31 +286,36 @@ def buckets_by_length(data_list, label_list, buckets=20, max_len=0, mode='pad'):
     else:
         raise NotImplementedError("Bucketing for more than two datasets not implemented")
     input_lengths = np.array([len(s) for s in data], dtype='int')  # for dev and train (if dev given)
-    if isinstance(buckets, (list, tuple, np.ndarray)):
-        buckets = np.array(buckets, dtype='int')
-    else:
+
+    if buckets > 1:
         maxlen = max_len if max_len > 0 else max(input_lengths) + 1
         buckets = np.linspace(min(input_lengths)-1, maxlen, buckets, dtype='int')
-    bin_edges = stats.mstats.mquantiles(input_lengths, (buckets - buckets[0]) /
-                                        float(max_len - buckets[0]))
-    if max_len > int(bin_edges[-1]):  # if specified maximum length is longer than all train and dev instances
-        bin_edges = np.append([int(b) for b in bin_edges], [max_len])
-    else:
-        bin_edges = np.array([int(b) for b in bin_edges])
-    print "bin edges:", bin_edges
-    train_input_bucket_index = [i if i < len(buckets) else len(buckets)-1 for i in
-                                np.digitize(input_lengths[:len(train_data)], buckets, right=False)]  # truncate too long sentences
-    dev_input_bucket_index = [i if i < len(buckets) else len(buckets)-1 for i in
-                              np.digitize(input_lengths[len(train_data):], buckets, right=False)]
-    if mode == 'truncate':
-        train_input_bucket_index -= 1
-        dev_input_bucket_index -= 1
+        bin_edges = stats.mstats.mquantiles(input_lengths, (buckets - buckets[0]) /
+                                            float(max_len - buckets[0]))
+        if max_len > int(bin_edges[-1]):  # if specified maximum length is longer than all train and dev instances
+            bin_edges = np.append([int(b) for b in bin_edges], [max_len])
+        else:
+            bin_edges = np.array([int(b) for b in bin_edges])
+        print "bin edges:", bin_edges
+        train_input_bucket_index = [i if i < len(buckets) else len(buckets)-1 for i in
+                                    np.digitize(input_lengths[:len(train_data)], buckets, right=False)]  # truncate too long sentences
+        dev_input_bucket_index = [i if i < len(buckets) else len(buckets)-1 for i in
+                                  np.digitize(input_lengths[len(train_data):], buckets, right=False)]
+        if mode == 'truncate':
+            train_input_bucket_index -= 1
+            dev_input_bucket_index -= 1
+
+    else:  # put data in one bucket of max_len length
+        buckets = [max_len]
+        bin_edges = [0, max_len]
+        train_input_bucket_index = [0 for i in input_lengths[:len(train_data)]]
+        dev_input_bucket_index = [0 for i in input_lengths[len(train_data):]]
+
+    # pad and bucket train data
     bucketed_train_data = {}
     bucketed_dev_data = {}
     reordering_indexes_train = {}
     reordering_indexes_dev = {}
-
-    # pad and bucket train data
     for bucket in list(np.unique(train_input_bucket_index)):
         length_indexes = np.where(train_input_bucket_index == bucket)[0]
         reordering_indexes_train[bucket-1] = length_indexes
@@ -406,8 +413,6 @@ def f1s_binary(y_i, predictions):
     f1_2 = 2 * (precision_2*recall_2) / (precision_2 + recall_2) if (precision_2 + recall_2) > 0 \
         else 0
     return f1_1, f1_2
-
-
 
 
 if __name__ == "__main__":
