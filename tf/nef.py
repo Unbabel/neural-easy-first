@@ -33,8 +33,10 @@ tf.app.flags.DEFINE_integer("max_train_data_size", 0,
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 58, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
-tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
-tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
+tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl.train.basic_features_with_tags.0.extended.pkl", "path to source language embeddings")
+tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl.train.basic_features_with_tags.0.extended.pkl", "path to target language embeddings")
+#tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
+#tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
 #tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
 #tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
@@ -42,10 +44,10 @@ tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
 tf.app.flags.DEFINE_integer("J", 50, "dimensionality of hidden layer")
 tf.app.flags.DEFINE_integer("r", 2, "context size")
-tf.app.flags.DEFINE_integer("bad_weight", 0.9, "weight for BAD instances" )
+tf.app.flags.DEFINE_integer("bad_weight", 3, "weight for BAD instances" )
 tf.app.flags.DEFINE_boolean("concat", True, "concatenating s_i and h_i for prediction")
 tf.app.flags.DEFINE_boolean("train", True, "training model")
-tf.app.flags.DEFINE_integer("epochs", 100, "training epochs")
+tf.app.flags.DEFINE_integer("epochs", 300, "training epochs")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 20, "save model every x epochs")
 tf.app.flags.DEFINE_integer("lstm_units", 50, "number of LSTM-RNN encoder units")
 tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
@@ -481,7 +483,7 @@ def quetch(x, y, masks, vocab_size, K, D, J, L, window_size,
 
         losses = cross_entropy
         if l2_scale > 0:
-            weights_list = [M_src, M_tgt, W_1, W_2]
+            weights_list = [W_1, W_2]  # M_src, M_tgt,
             l2_loss = tf.contrib.layers.apply_regularization(
                 tf.contrib.layers.l2_regularizer(l2_scale), weights_list=weights_list)
             losses_reg = losses + l2_loss
@@ -618,7 +620,7 @@ class EasyFirstModel():
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 print "Initializing parameters for bucket with max len", max_len
                 bucket_losses, bucket_losses_reg, bucket_predictions = ef_single_state(  # or: quetch
-                    self.inputs[j], self.labels[j], self.masks[j], self.seq_lens[j],
+                    inputs=self.inputs[j], labels=self.labels[j], mask=self.masks[j], seq_lens=self.seq_lens[j],
                     vocab_size=self.vocab_size, K=self.K, D=self.D, N=max_len,  # as much sketches as words in sequence
                     J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units, concat=self.concat,
                     window_size=self.window_size, src_embeddings=self.src_embeddings,
@@ -779,7 +781,7 @@ def train():
         print "Maximum sentence length (train):", max([len(y) for y in train_labels])
         print "Maximum sentence length (dev):", max([len(y) for y in dev_labels])
 
-        class_weights = [1-FLAGS.bad_weight, FLAGS.bad_weight]  # TODO QE specific
+        class_weights = [1, FLAGS.bad_weight]  # TODO QE specific
         print "Weights for classes:", class_weights
 
         # bucketing training and dev data
