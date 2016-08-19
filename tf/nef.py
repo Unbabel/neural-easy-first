@@ -21,7 +21,7 @@ Tensorflow issues:
 
 # Flags
 tf.app.flags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
-tf.app.flags.DEFINE_string("optimizer", "adam", "Optimizer [sgd, adam, adagrad, adadelta, "
+tf.app.flags.DEFINE_string("optimizer", "sgd", "Optimizer [sgd, adam, adagrad, adadelta, "
                                                     "momentum]")
 tf.app.flags.DEFINE_integer("batch_size", 500,
                             "Batch size to use during training.")
@@ -32,27 +32,27 @@ tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 58, "maximum length of sequences")
-tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
-tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl.train.basic_features_with_tags.0.extended.pkl", "path to source language embeddings")
-tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl.train.basic_features_with_tags.0.extended.pkl", "path to target language embeddings")
-#tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
-#tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
+tf.app.flags.DEFINE_integer("buckets", 3, "number of buckets")
+#tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl.train.basic_features_with_tags.0.extended.pkl", "path to source language embeddings")
+#tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl.train.basic_features_with_tags.0.extended.pkl", "path to target language embeddings")
+tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
+tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
 #tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
 #tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
 tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
-tf.app.flags.DEFINE_integer("J", 50, "dimensionality of hidden layer")
+tf.app.flags.DEFINE_integer("J", 20, "dimensionality of hidden layer")
 tf.app.flags.DEFINE_integer("r", 2, "context size")
-tf.app.flags.DEFINE_integer("bad_weight", 3, "weight for BAD instances" )
+tf.app.flags.DEFINE_integer("bad_weight", 3.0, "weight for BAD instances" )
 tf.app.flags.DEFINE_boolean("concat", True, "concatenating s_i and h_i for prediction")
 tf.app.flags.DEFINE_boolean("train", True, "training model")
-tf.app.flags.DEFINE_integer("epochs", 300, "training epochs")
+tf.app.flags.DEFINE_integer("epochs", 500, "training epochs")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 20, "save model every x epochs")
 tf.app.flags.DEFINE_integer("lstm_units", 50, "number of LSTM-RNN encoder units")
 tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
-tf.app.flags.DEFINE_float("l2_scale", 0.0001, "L2 regularization constant")
-tf.app.flags.DEFINE_float("keep_prob", 1, "keep probability for dropout during training (1: no dropout)")
+tf.app.flags.DEFINE_float("l2_scale", 0, "L2 regularization constant")
+tf.app.flags.DEFINE_float("keep_prob", 0.8 , "keep probability for dropout during training (1: no dropout)")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
 tf.app.flags.DEFINE_integer("threads", 8, "number of threads")
@@ -93,7 +93,11 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                                     initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
                     emb_size = D
                 else:
-                    M_src = tf.Variable(src_embeddings.table)
+                    M_src = tf.get_variable(name="M_src",
+                                    shape=[src_embeddings.table.shape[0],
+                                           src_embeddings.table.shape[1]],
+                                    initializer=tf.constant_initializer(src_embeddings.table),
+                                    trainable=True)
                     D_loaded = len(tgt_embeddings.table[0])
                     #print "Loading existing src embeddings of dimensionality %d" % D_loaded
                     emb_size = D_loaded
@@ -105,7 +109,11 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                                     initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
                     emb_size += D
                 else:
-                    M_tgt = tf.Variable(tgt_embeddings.table)  # TODO parameter if update embeddings or not
+                    M_tgt = tf.get_variable(name="M_tgt",
+                        shape=[tgt_embeddings.table.shape[0],
+                               tgt_embeddings.table.shape[1]],
+                        initializer=tf.constant_initializer(tgt_embeddings.table),
+                        trainable=True)
                     D_loaded = len(tgt_embeddings.table[0])
                     #print "Loading existing tgt embeddings of dimensionality %d" % D_loaded
                     emb_size += D_loaded
@@ -209,9 +217,9 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
                     # create mask
                     keep_prob_tensor = tf.convert_to_tensor(keep_prob, name="keep_prob")
                     # see https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/nn_ops.py#L1078
-                    W_hs_mask = tf.floor(keep_prob_tensor + tf.random_uniform(tf.shape(W_hs))) * tf.inv(keep_prob_tensor)  # binary mask * (1-keep_prob) for scaling
-                    W_ss_mask = tf.floor(keep_prob_tensor + tf.random_uniform(tf.shape(W_ss))) * tf.inv(keep_prob_tensor)
-                    S_n_mask = tf.floor(keep_prob_tensor + tf.random_uniform(tf.shape(S))) * tf.inv(keep_prob_tensor)
+                    W_hs_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(W_hs)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)  # binary mask * (1-keep_prob) for scaling
+                    W_ss_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(W_ss)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)
+                    S_n_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(S)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)
 
         def z_i(i):
             """
@@ -370,13 +378,13 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
     return losses, losses_reg, predictions
 
 
-def quetch(x, y, masks, vocab_size, K, D, J, L, window_size,
+def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
            src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob,
            lstm_units=0, bilstm=False, concat=False, r=0, N=0, seq_lens=None):
     """
     QUETCH model for word-level QE predictions  (MLP based on embeddings)
-    :param x:
-    :param y:
+    :param inputs:
+    :param labels:
     :param masks:
     :param seq_lens:
     :param vocab_size:
@@ -397,7 +405,7 @@ def quetch(x, y, masks, vocab_size, K, D, J, L, window_size,
     :param keep_prob:
     :return:
     """
-    batch_size = tf.shape(x)[0]
+    batch_size = tf.shape(inputs)[0]
     with tf.name_scope("embedding"):
         if src_embeddings.table is None:
             M_src = tf.get_variable(name="M_src", shape=[vocab_size, D],
@@ -405,7 +413,11 @@ def quetch(x, y, masks, vocab_size, K, D, J, L, window_size,
                                 uniform=True, dtype=tf.float32))
             emb_size = D
         else:
-            M_src = tf.Variable(src_embeddings.table)
+            M_src = tf.get_variable(name="M_src",
+                                    shape=[src_embeddings.table.shape[0],
+                                           src_embeddings.table.shape[1]],
+                                    initializer=tf.constant_initializer(src_embeddings.table),
+                                    trainable=True)
             D_loaded = len(tgt_embeddings.table[0])
             emb_size = D_loaded
 
@@ -416,7 +428,11 @@ def quetch(x, y, masks, vocab_size, K, D, J, L, window_size,
                                 uniform=True, dtype=tf.float32))
             emb_size += D
         else:
-            M_tgt = tf.Variable(tgt_embeddings.table)
+            M_tgt = tf.get_variable(name="M_tgt",
+                                    shape=[tgt_embeddings.table.shape[0],
+                                           tgt_embeddings.table.shape[1]],
+                                    initializer=tf.constant_initializer(tgt_embeddings.table),
+                                    trainable=True)
             D_loaded = len(tgt_embeddings.table[0])
             emb_size += D_loaded
 
@@ -424,14 +440,17 @@ def quetch(x, y, masks, vocab_size, K, D, J, L, window_size,
             M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
             M_src = tf.nn.dropout(M_src, keep_prob)
 
-        x_src, x_tgt = tf.split(2, 2, x)  # split src and tgt part of input
+        x_src, x_tgt = tf.split(2, 2, inputs)  # split src and tgt part of input
         emb_tgt = tf.nn.embedding_lookup(M_tgt, x_src, name="emg_tgt")  # batch_size x L x window_size x emb_size
         emb_src = tf.nn.embedding_lookup(M_src, x_tgt, name="emb_src")  # batch_size x L x window_size x emb_size
         emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
         emb = tf.reshape(emb_comb, [batch_size, -1, window_size*emb_size], name="emb") # batch_size x L x window_size*emb_size
 
+        if keep_prob < 1:
+            emb = tf.nn.dropout(emb, keep_prob=keep_prob, name="drop_emb")
+
     with tf.name_scope("mlp"):
-        x = tf.reshape(emb, [-1, window_size*emb_size])
+        inputs = tf.reshape(emb, [-1, window_size*emb_size])
         W_1 = tf.get_variable(shape=[window_size*emb_size, J],
                               initializer=tf.contrib.layers.xavier_initializer(
                                   uniform=True, dtype=tf.float32, ), name="W_1")
@@ -442,14 +461,14 @@ def quetch(x, y, masks, vocab_size, K, D, J, L, window_size,
             dtype=tf.float32), name="b_1")
         b_2 = tf.get_variable(shape=[K], initializer=tf.random_uniform_initializer(
             dtype=tf.float32), name="b_2")
-        hidden = tf.nn.tanh(tf.matmul(x, W_1) + b_1)  # batch_size*emb_size, J
+        hidden = tf.nn.tanh(tf.matmul(inputs, W_1) + b_1)  # batch_size*emb_size, J
         if keep_prob < 1:
             hidden = tf.nn.dropout(hidden, keep_prob)
         out = tf.matmul(hidden, W_2) + b_2  # batch_size*emb_size, K
         logits = tf.reshape(out, [batch_size, L, K])
         softmax = tf.nn.softmax(out)  # batch_size*L, K
         pred_labels = masks*tf.argmax(logits, 2)  # batch_size x L
-        y_full = tf.one_hot(y, depth=K, on_value=1.0, off_value=0.0)  # batch_size x L x K
+        y_full = tf.one_hot(labels, depth=K, on_value=1.0, off_value=0.0)  # batch_size x L x K
         xent = -y_full*tf.log(tf.reshape(softmax, [batch_size, L, K]) + 1e-10)  # batch_size x L x K
 
         if class_weights is not None:
@@ -458,14 +477,14 @@ def quetch(x, y, masks, vocab_size, K, D, J, L, window_size,
             xent = tf.mul(xent, label_weights)
 
         cross_entropy = tf.cast(masks, dtype=tf.float32)*tf.reduce_mean(xent, 2)  # batch_size x L
-        accuracy_sent = tf.reduce_mean(tf.cast(tf.equal(pred_labels, tf.cast(y, tf.int64)), tf.float32), 1)  # accuracy per sentence
+        accuracy_sent = tf.reduce_mean(tf.cast(tf.equal(pred_labels, tf.cast(labels, tf.int64)), tf.float32), 1)  # accuracy per sentence
 
         #TODO make sure that masking has correct impact on f1s
 
-        is_label_one = tf.cast(y, dtype=tf.bool, name="is_one")  # batch_size x L
+        is_label_one = tf.cast(labels, dtype=tf.bool, name="is_one")  # batch_size x L
         is_label_zero = tf.logical_not(is_label_one, name="is_zero")
 
-        correct_prediction = tf.logical_and(tf.cast(masks, dtype=tf.bool), tf.equal(pred_labels, tf.cast(y, tf.int64), name="correct_answers"))  # batch_size x L
+        correct_prediction = tf.logical_and(tf.cast(masks, dtype=tf.bool), tf.equal(pred_labels, tf.cast(labels, tf.int64), name="correct_answers"))  # batch_size x L
         false_prediction = tf.logical_and(tf.cast(masks, dtype=tf.bool), tf.logical_not(correct_prediction))
 
         true_positives = tf.to_float(tf.reduce_sum(tf.to_int32(tf.logical_and(correct_prediction, is_label_one)), 1))  # batch_size scalar
@@ -619,8 +638,8 @@ class EasyFirstModel():
                                                 shape=[None], name="seq_lens{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 print "Initializing parameters for bucket with max len", max_len
-                bucket_losses, bucket_losses_reg, bucket_predictions = ef_single_state(  # or: quetch
-                    inputs=self.inputs[j], labels=self.labels[j], mask=self.masks[j], seq_lens=self.seq_lens[j],
+                bucket_losses, bucket_losses_reg, bucket_predictions = quetch(  # or: quetch
+                    inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j], seq_lens=self.seq_lens[j],
                     vocab_size=self.vocab_size, K=self.K, D=self.D, N=max_len,  # as much sketches as words in sequence
                     J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units, concat=self.concat,
                     window_size=self.window_size, src_embeddings=self.src_embeddings,
