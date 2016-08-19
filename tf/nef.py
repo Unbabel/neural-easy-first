@@ -822,6 +822,8 @@ def train():
                                                   np.average(dev_seq_lens), total_number_of_pads)
 
         # training in epochs
+        best_valid = 0
+        best_valid_epoch = 0
         for epoch in xrange(FLAGS.epochs):
             current_sample = 0
             loss = 0.0
@@ -896,11 +898,19 @@ def train():
             print "EPOCH %d: validation time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
                   (epoch+1, time_valid, dev_loss/len(dev_labels), dev_accuracy,
                    dev_f1_1*dev_f1_2, dev_f1_1, dev_f1_2)
+            if dev_f1_1*dev_f1_2 > best_valid:
+                print "NEW BEST!"
+                best_valid = dev_f1_1*dev_f1_2
+                best_valid_epoch = epoch+1
+            else:
+                print "current best: %f at epoch %d" % (best_valid, best_valid_epoch)
 
             if epoch % FLAGS.checkpoint_freq == 0:
                 # save checkpoint
                 model.saver.save(sess, model.path, global_step=model.global_step)
 
+        print "Training finished after %d epochs. Best validation result: %f at epoch %d." \
+              % (epoch+1, best_valid, best_valid_epoch)
 
 def test():
     """
