@@ -59,7 +59,7 @@ tf.app.flags.DEFINE_integer("threads", 8, "number of threads")
 FLAGS = tf.app.flags.FLAGS
 
 
-def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r,
+def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, r,
                     lstm_units, concat, window_size, keep_prob, l2_scale,
                     src_embeddings=None, tgt_embeddings=None, class_weights=None, bilstm=True):
     """
@@ -374,7 +374,7 @@ def ef_single_state(inputs, labels, mask, seq_lens, vocab_size, K, D, N, J, L, r
 
         return losses, losses_reg, pred_labels
 
-    losses, losses_reg, predictions = forward(inputs, labels, mask, seq_lens, class_weights)
+    losses, losses_reg, predictions = forward(inputs, labels, masks, seq_lens, class_weights)
     return losses, losses_reg, predictions
 
 
@@ -638,7 +638,7 @@ class EasyFirstModel():
                                                 shape=[None], name="seq_lens{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 print "Initializing parameters for bucket with max len", max_len
-                bucket_losses, bucket_losses_reg, bucket_predictions = quetch(  # or: quetch
+                bucket_losses, bucket_losses_reg, bucket_predictions = ef_single_state(  # or: quetch
                     inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j], seq_lens=self.seq_lens[j],
                     vocab_size=self.vocab_size, K=self.K, D=self.D, N=max_len,  # as much sketches as words in sequence
                     J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units, concat=self.concat,
