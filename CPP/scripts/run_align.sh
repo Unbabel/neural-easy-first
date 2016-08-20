@@ -13,7 +13,7 @@ echo ${model_prefix}
 mkdir -p ${model_prefix}
 
 ../attentive_quality_estimator train \
-    ../data/training_align.txt ../data/dev_align.txt ../data/test_align.txt \
+    ../data/training_align_small.txt ../data/dev_align.txt ../data/test_align.txt \
     ../data/word_vectors_jesus_en.sg.512.txt \
     ../data/word_vectors_jesus_es.sg.512.txt \
     ${cost_false_positives} \

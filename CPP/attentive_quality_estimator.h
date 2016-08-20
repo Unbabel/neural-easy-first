@@ -85,11 +85,8 @@ template<typename Real> class AttentiveQualityEstimator :
     embedding_size_ = embedding_dimension;
 
     parameters_ = new Parameters<Real>();
-    if (use_ADAM_) {
-      updater_ = new ADAMUpdater<Real>(parameters_);
-    } else {
-      updater_ = new SGDUpdater<Real>(parameters_);
-    }
+    // This will be initialized after the parameters are created.
+    updater_ = NULL;
 
     CreateNetwork();
   }
@@ -259,47 +256,17 @@ template<typename Real> class AttentiveQualityEstimator :
     model_prefix_ = model_prefix;
   }
 
-#if 0
-  void InitializeParameters() {
-    srand(1234);
-
-    const std::vector<Layer<Real>*> &layers = NeuralNetwork<Real>::GetLayers();
-    for (int k = 0; k < layers.size(); ++k) {
-      layers[k]->InitializeParameters();
-    }
-
-    if (use_ADAM_) {
-      double beta1 = 0.9;
-      double beta2 = 0.999;
-      double epsilon = 1e-8;
-      for (int k = 0; k < layers.size(); ++k) {
-        layers[k]->InitializeADAM(beta1, beta2, epsilon);
-      }
-    }
-  }
-#endif
-
   void LoadModel(const std::string &prefix) {
-    const std::vector<Layer<Real>*> &layers = NeuralNetwork<Real>::GetLayers();
-    for (int k = 0; k < layers.size(); ++k) {
-      std::ostringstream ss;
-      ss << "Layer" << k << "_" << layers[k]->name() + "_";
-      layers[k]->LoadParameters(prefix + ss.str(), true);
-      if (use_ADAM_) {
-        layers[k]->LoadADAMParameters(prefix + ss.str());
-      }
+    parameters_->LoadParameters(prefix, true);
+    if (updater_->type() == UpdaterTypes::ADAM) {
+      static_cast<ADAMUpdater<Real>*>(updater_)->LoadADAMParameters(prefix);
     }
   }
 
   void SaveModel(const std::string &prefix) {
-    const std::vector<Layer<Real>*> &layers = NeuralNetwork<Real>::GetLayers();
-    for (int k = 0; k < layers.size(); ++k) {
-      std::ostringstream ss;
-      ss << "Layer" << k << "_" << layers[k]->name() + "_";
-      layers[k]->SaveParameters(prefix + ss.str(), true);
-      if (use_ADAM_) {
-        layers[k]->SaveADAMParameters(prefix + ss.str());
-      }
+    parameters_->SaveParameters(prefix, true);
+    if (updater_->type() == UpdaterTypes::ADAM) {
+      static_cast<ADAMUpdater<Real>*>(updater_)->SaveADAMParameters(prefix);
     }
   }
 
@@ -371,6 +338,21 @@ template<typename Real> class AttentiveQualityEstimator :
              int batch_size,
              double learning_rate,
              double regularization_constant) {
+    // Set updater properties.
+    delete updater_;
+    if (use_ADAM_) {
+      updater_ = new ADAMUpdater<Real>(parameters_);
+    } else {
+      updater_ = new SGDUpdater<Real>(parameters_);
+    }
+    updater_->set_l2_regularization_constant(regularization_constant);
+    if (updater_->type() == UpdaterTypes::SGD) {
+      static_cast<SGDUpdater<Real>*>(updater_)->
+        set_learning_rate(learning_rate);
+    } else if (updater_->type() == UpdaterTypes::ADAM) {
+      static_cast<ADAMUpdater<Real>*>(updater_)->
+        set_learning_rate(learning_rate);
+    }
 
     if (warm_start_on_epoch == 0) {
       // Initial performance.
@@ -407,7 +389,7 @@ template<typename Real> class AttentiveQualityEstimator :
       TrainEpoch(sentence_pairs, output_labels,
                  sentence_pairs_dev, output_labels_dev,
                  sentence_pairs_test, output_labels_test,
-                 epoch, batch_size, learning_rate, regularization_constant);
+                 epoch, batch_size,  regularization_constant);
       // Uncomment this to save temporary model.
       //ss << "Epoch" << epoch+1 << "_";
       //SaveModel(model_prefix_ + ss.str());
@@ -424,7 +406,7 @@ template<typename Real> class AttentiveQualityEstimator :
                   const std::vector<std::vector<int> > &output_labels_test,
                   int epoch,
                   int batch_size,
-                  double learning_rate,
+                  //double learning_rate,
                   double regularization_constant) {
     timeval start, end;
     gettimeofday(&start, NULL);
@@ -460,6 +442,7 @@ template<typename Real> class AttentiveQualityEstimator :
         }
         output_layer_->set_costs(costs);
       }
+
       RunForwardPass(sentence_pairs[i]);
       Matrix<Real> P = output_layer_->GetOutput(0);
       std::vector<int> prediction_labels;
@@ -482,22 +465,19 @@ template<typename Real> class AttentiveQualityEstimator :
       }
       all_predicted_labels.push_back(prediction_labels);
       num_words += length;
-      RunBackwardPass(sentence_pairs[i], output_labels[i], learning_rate,
-                      regularization_constant);
+
+      RunBackwardPass(sentence_pairs[i], output_labels[i]);
       ++actual_batch_size;
       if (((i+1) % batch_size == 0) || (i == num_sentences-1)) {
-        UpdateParameters(actual_batch_size, learning_rate,
-                         regularization_constant);
+        updater_->UpdateParameters(actual_batch_size); //, learning_rate,
+        //regularization_constant);
       }
     }
     //accuracy /= num_words;
     total_loss /= num_words;
-    double total_reg = 0.0;
-    const std::vector<Layer<Real>*> &layers = NeuralNetwork<Real>::GetLayers();
-    for (int k = 0; k < layers.size(); ++k) {
-      total_reg += 0.5 * regularization_constant *
-        layers[k]->ComputeSquaredNormOfParameters();
-    }
+    double total_reg = 0.5 * regularization_constant *
+      parameters_->ComputeSquaredNormOfParameters();
+
     double accuracy, f1_bad, f1_ok;
     Evaluate(output_labels, all_predicted_labels, &accuracy, &f1_bad, &f1_ok);
 
@@ -635,7 +615,7 @@ template<typename Real> class AttentiveQualityEstimator :
            std::vector<int> *predicted_labels) {
     bool apply_dropout = apply_dropout_;
     test_ = true;
-    apply_dropout_ = false; // TODO: Remove this line to have correct dropout at test time.
+    //apply_dropout_ = false; // TODO: Remove this line to have correct dropout at test time.
     RunForwardPass(sentence_pair);
     test_ = false;
     apply_dropout_ = apply_dropout;
@@ -720,9 +700,7 @@ template<typename Real> class AttentiveQualityEstimator :
   }
 
   void RunBackwardPass(const SentencePair &sentence_pair,
-                       const std::vector<int> &output_labels,
-                       double learning_rate,
-                       double regularization_constant) {
+                       const std::vector<int> &output_labels) {
     // Reset variable derivatives.
     const std::vector<Layer<Real>*> &layers = NeuralNetwork<Real>::GetLayers();
     for (int k = 0; k < layers.size(); ++k) {
@@ -740,30 +718,6 @@ template<typename Real> class AttentiveQualityEstimator :
   void ResetParameterGradients() {
     // Reset parameter gradients.
     parameters_->ResetGradients();
-#if 0
-    const std::vector<Layer<Real>*> &layers = NeuralNetwork<Real>::GetLayers();
-    for (int k = 0; k < layers.size(); ++k) {
-      layers[k]->ResetGradients();
-    }
-#endif
-  }
-
-  void UpdateParameters(int batch_size,
-                        double learning_rate,
-                        double regularization_constant) {
-    const std::vector<Layer<Real>*> &layers = NeuralNetwork<Real>::GetLayers();
-    for (int k = layers.size() - 1; k >= 0; --k) {
-      // Update parameters.
-      if (use_ADAM_) {
-        layers[k]->UpdateParametersADAM(batch_size,
-                                        learning_rate,
-                                        regularization_constant);
-      } else {
-        layers[k]->UpdateParameters(batch_size,
-                                    learning_rate,
-                                    regularization_constant);
-      }
-    }
   }
 
  protected:

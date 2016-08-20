@@ -183,21 +183,25 @@ template<typename Real> class Parameters {
     for (int i = 0; i < biases_.size(); ++i) {
       auto b = biases_[i];
       auto name = bias_names_[i];
+      std::ostringstream ss;
+      ss << "Bias" << i << "_";
       if (binary_mode) {
-        LoadVectorParameterFromFile(prefix, name, b);
+        LoadVectorParameterFromFile(prefix + ss.str(), name, b);
       } else {
         std::cout << "Loading " << name << "..." << std::endl;
-        ReadVectorParameter(prefix, name, b);
+        ReadVectorParameter(prefix + ss.str(), name, b);
       }
     }
     for (int i = 0; i < weights_.size(); ++i) {
       auto W = weights_[i];
       auto name = weight_names_[i];
+      std::ostringstream ss;
+      ss << "Weight" << i << "_";
       if (binary_mode) {
-        LoadMatrixParameterFromFile(prefix, name, W);
+        LoadMatrixParameterFromFile(prefix + ss.str(), name, W);
       } else {
         std::cout << "Loading " << name << "..." << std::endl;
-        ReadMatrixParameter(prefix, name, W);
+        ReadMatrixParameter(prefix + ss.str(), name, W);
       }
     }
   }
@@ -206,8 +210,10 @@ template<typename Real> class Parameters {
     for (int i = 0; i < biases_.size(); ++i) {
       auto b = biases_[i];
       auto name = bias_names_[i];
+      std::ostringstream ss;
+      ss << "Bias" << i << "_";
       if (binary_mode) {
-        SaveVectorParameterToFile(prefix, name, b);
+        SaveVectorParameterToFile(prefix + ss.str(), name, b);
       } else {
         // TODO: Implement this function.
         assert(false);
@@ -217,8 +223,10 @@ template<typename Real> class Parameters {
     for (int i = 0; i < weights_.size(); ++i) {
       auto W = weights_[i];
       auto name = weight_names_[i];
+      std::ostringstream ss;
+      ss << "Weight" << i << "_";
       if (binary_mode) {
-        SaveMatrixParameterToFile(prefix, name, W);
+        SaveMatrixParameterToFile(prefix + ss.str(), name, W);
       } else {
         // TODO: Implement this function.
         assert(false);

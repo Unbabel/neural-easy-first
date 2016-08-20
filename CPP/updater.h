@@ -7,6 +7,14 @@
 #include <cmath>
 #include "parameters.h"
 
+struct UpdaterTypes {
+  enum types {
+    SGD = 0,
+    ADAM,
+    NUM_TYPES
+  };
+};
+
 template<typename Real> class Updater {
  public:
   Updater() {
@@ -17,6 +25,8 @@ template<typename Real> class Updater {
     l2_regularization_constant_ = 0.0;
   }
   virtual ~Updater() {}
+
+  virtual int type() = 0;
 
   void set_l2_regularization_constant(double l2_regularization_constant) {
     l2_regularization_constant_ = l2_regularization_constant;
@@ -35,6 +45,8 @@ template<typename Real> class SGDUpdater : public Updater<Real> {
     this->parameters_ = parameters;
   }
   virtual ~SGDUpdater() {}
+
+  int type() { return UpdaterTypes::SGD; }
 
   void set_learning_rate(double learning_rate) {
     learning_rate_ = learning_rate;
@@ -69,7 +81,18 @@ template<typename Real> class ADAMUpdater : public Updater<Real> {
     this->parameters_ = parameters;
     Initialize(0.9, 0.999, 1e-8);
   }
-  virtual ~ADAMUpdater() {}
+  virtual ~ADAMUpdater() {
+    for (int i = 0; i < first_bias_moments_.size(); ++i) {
+      delete first_bias_moments_[i];
+      delete second_bias_moments_[i];
+    }
+    for (int i = 0; i < first_weight_moments_.size(); ++i) {
+      delete first_weight_moments_[i];
+      delete second_weight_moments_[i];
+    }
+  }
+
+  int type() { return UpdaterTypes::ADAM; }
 
   void Initialize(double beta1, double beta2, double epsilon) {
     beta1_ = beta1;

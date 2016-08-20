@@ -13,7 +13,7 @@ const int kMaxAffixSize = 4;
 
 void LoadWordVectors(const std::string &word_vector_file,
                      std::unordered_map<std::string,
-                                        std::vector<double> > *word_vectors) {
+                     std::vector<double> > *word_vectors) {
   // Read word vectors.
   std::cout << "Loading word vectors..." << std::endl;
   std::ifstream is;
