@@ -518,7 +518,6 @@ template<typename Real> class GRULayer : public RNNLayer<Real> {
       dhuraw.col(t) = dhuraw.col(t).cwiseProduct(dhu);
       Vector<Real> hprev;
       if (t == 0) {
-        // hprev = Vector<Real>::Zero(this->GetMutableOutput()->rows()); <- LOOKS LIKE A BUG.
         hprev = Vector<Real>::Zero(this->GetMutableOutput()->rows());
         if (this->use_hidden_start_) {
           if (!this->use_control_) {

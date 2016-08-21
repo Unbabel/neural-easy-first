@@ -2,6 +2,7 @@
 #define EASY_FIRST_LAYER_H_
 
 #include "layer.h"
+#include "neural_network.h"
 
 template<typename Real> class EasyFirstLayer : public Layer<Real> {
  public:
@@ -39,18 +40,24 @@ template<typename Real> class EasyFirstLayer : public Layer<Real> {
       convolutional_layer_->SetContextSize(context_size);
       convolutional_layer_->SetNumInputs(1);
       convolutional_layer_->SetNumOutputs(1);
-      convolutional_layer_->SetInput(0, concatenator_layer_->GetOutput(0));
+      network_.ConnectLayers(concatenator_layer_, convolutional_layer_,
+                             0, 0);
+      //convolutional_layer_->SetInput(0, concatenator_layer_->GetOutput(0));
 
       // The input is already the concatenation of the input with the current
       // sketch.
       attention_layer_->SetNumInputs(1);
       // The outputs are the attention probabilities and the weighted average.
       attention_layer_->SetNumOutputs(2);
-      attention_layer_->SetInput(0, convolutional_layer_->GetOutput(0));
+      network_.ConnectLayers(convolutional_layer_, attention_layer_,
+                             0, 0);
+      //attention_layer_->SetInput(0, convolutional_layer_->GetOutput(0));
 
       feedforward_layer_->SetNumInputs(1);
       feedforward_layer_->SetNumOutputs(1);
-      feedforward_layer_->SetInput(0, attention_layer_->GetOutput(1));
+      network_.ConnectLayers(attention_layer_, feedforward_layer_,
+                             1, 0);
+      //feedforward_layer_->SetInput(0, attention_layer_->GetOutput(1));
 
       const Vector<Real> &sketch_vector = feedforward_layer_->GetOutput(0);
       const Vector<Real> &attention_probabilities = attention_->GetOutput(0);
@@ -68,6 +75,7 @@ template<typename Real> class EasyFirstLayer : public Layer<Real> {
   int context_size_;
   int attention_type_;
   int num_steps_;
+  NeuralNetwork<Real> network_;
   AttentionLayer<Real> *attention_layer_;
   ConvolutionalLayer<Real> *convolutional_layer_;
   ConcatenatorLayer<Real> *concatenator_layer_;

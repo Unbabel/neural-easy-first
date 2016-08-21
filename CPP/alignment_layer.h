@@ -15,8 +15,6 @@ template<typename Real> class AlignmentLayer : public Layer<Real> {
   AlignmentLayer() { this->name_ = "Alignment"; }
   virtual ~AlignmentLayer() {}
 
-  void ResetParameters() {}
-
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
                             std::vector<Vector<Real>*> *biases,
                             std::vector<std::string> *weight_names,
@@ -26,9 +24,6 @@ template<typename Real> class AlignmentLayer : public Layer<Real> {
       std::vector<Matrix<Real>*> *weight_derivatives,
       std::vector<Vector<Real>*> *bias_derivatives) {}
 
-  double GetUniformInitializationLimit(Matrix<Real> *W) { return 0.0; }
-
-  void ResetGradients() {}
   void RunForward() {
     const Matrix<Real> &X = this->GetInput();
     this->SetOutput(X * A_);

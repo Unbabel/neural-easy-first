@@ -55,13 +55,6 @@ template<typename Real> class LinearLayer : public Layer<Real> {
     bias_derivatives->push_back(dby_);
   }
 
-  double GetUniformInitializationLimit(Matrix<Real> *W) {
-    int num_outputs = W->rows();
-    int num_inputs = W->cols();
-    double coeff = 1.0; // Like in TANH.
-    return coeff * sqrt(6.0 / (num_inputs + num_outputs));
-  }
-
   void RunForward() {
     const Matrix<Real> &x = this->GetInput();
     this->SetOutput((*Wxy_ * x).colwise() + *by_);

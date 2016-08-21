@@ -8,8 +8,6 @@ template<typename Real> class ConcatenatorLayer : public Layer<Real> {
   ConcatenatorLayer() { this->name_ = "Concatenator"; }
   virtual ~ConcatenatorLayer() {}
 
-  void ResetParameters() {}
-
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
                             std::vector<Vector<Real>*> *biases,
                             std::vector<std::string> *weight_names,
@@ -19,9 +17,6 @@ template<typename Real> class ConcatenatorLayer : public Layer<Real> {
       std::vector<Matrix<Real>*> *weight_derivatives,
       std::vector<Vector<Real>*> *bias_derivatives) {}
 
-  double GetUniformInitializationLimit(Matrix<Real> *W) { return 0.0; }
-
-  void ResetGradients() {}
   void RunForward() {
     int num_rows = 0;
     int num_columns = this->inputs_[0]->cols();

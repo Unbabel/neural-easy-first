@@ -8,8 +8,6 @@ template<typename Real> class SelectorLayer : public Layer<Real> {
   SelectorLayer() { this->name_ = "Selector"; }
   virtual ~SelectorLayer() {}
 
-  void ResetParameters() {}
-
   void CollectAllParameters(std::vector<Matrix<Real>*> *weights,
                             std::vector<Vector<Real>*> *biases,
                             std::vector<std::string> *weight_names,
@@ -19,9 +17,6 @@ template<typename Real> class SelectorLayer : public Layer<Real> {
       std::vector<Matrix<Real>*> *weight_derivatives,
       std::vector<Vector<Real>*> *bias_derivatives) {}
 
-  double GetUniformInitializationLimit(Matrix<Real> *W) { return 0.0; }
-
-  void ResetGradients() {}
   void RunForward() {
     const Matrix<Real> &x = this->GetInput();
     this->SetOutput(x.block(first_row_, first_column_, num_rows_, num_columns_));

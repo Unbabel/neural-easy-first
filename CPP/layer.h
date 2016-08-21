@@ -56,13 +56,15 @@ template<typename Real> class Layer {
         RunForward();
         double out0 = 0.0;
         for (int k = 0; k < GetNumOutputs(); ++k) {
-          out0 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
+          out0 += (GetOutput(k).array() *
+                   GetMutableOutputDerivative(k)->array()).sum();
         }
         (*b)(r) = value - delta;
         RunForward();
         double out1 = 0.0;
         for (int k = 0; k < GetNumOutputs(); ++k) {
-          out1 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
+          out1 += (GetOutput(k).array() *
+                   GetMutableOutputDerivative(k)->array()).sum();
         }
         (*b)(r) = value; // Put the value back.
         RunForward();
@@ -89,13 +91,15 @@ template<typename Real> class Layer {
         RunForward();
         double out0 = 0.0;
         for (int k = 0; k < GetNumOutputs(); ++k) {
-          out0 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
+          out0 += (GetOutput(k).array() *
+                   GetMutableOutputDerivative(k)->array()).sum();
         }
         (*W)(r) = value - delta;
         RunForward();
         double out1 = 0.0;
         for (int k = 0; k < GetNumOutputs(); ++k) {
-          out1 += (GetOutput(k).array() * GetMutableOutputDerivative(k)->array()).sum();
+          out1 += (GetOutput(k).array() *
+                   GetMutableOutputDerivative(k)->array()).sum();
         }
         (*W)(r) = value; // Put the value back.
         RunForward();
@@ -173,7 +177,6 @@ template<typename Real> class Layer {
     return input_derivatives_[0];
   }
   Matrix<Real> *GetMutableOutput() {
-    //std::cout << name_ << std::endl;
     assert(GetNumOutputs() == 1);
     return &(outputs_[0]);
   }

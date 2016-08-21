@@ -47,10 +47,6 @@ template<typename Real> class LookupLayer : public Layer<Real> {
     weight_derivatives->push_back(dE_);
   }
 
-  double GetUniformInitializationLimit(Matrix<Real> *W) {
-    return 0.05;
-  }
-
   void SetFixedEmbeddings(const Matrix<Real> *fixed_embeddings) {
     // Assumes the word ids of the fixed embeddings are contiguous,
     // starting in zero up to num_words_fixed_.
