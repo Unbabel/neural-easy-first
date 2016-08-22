@@ -191,7 +191,13 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                 src_right_context_id = embedding_src.get_id(src_right_context)
                 aligned_token_id = embedding_src.get_id(aligned_token)
 
-                # TODO handle multiple alignments
+                if "|" in aligned_token:  # multiple alignments
+                    if aligned_token_id == embedding_src.UNK_id: # this pair of alignments has not been seen during training
+                        aligned_tokens = aligned_token.split("|")
+                        for at in aligned_tokens:
+                            at_id = embedding_src.get_id(at)
+                            if at_id != embedding_src.UNK_id:
+                                aligned_token_id = at_id  # no averaging during test time possible
 
                 # keep track of unknown words
                 if token_id == embedding_tgt.UNK_id:
@@ -296,7 +302,6 @@ def buckets_by_length(data_list, label_list, buckets=20, max_len=0, mode='pad'):
             bin_edges = np.append([int(b) for b in bin_edges], [max_len])
         else:
             bin_edges = np.array([int(b) for b in bin_edges])
-        print "bin edges:", bin_edges
         train_input_bucket_index = [i if i < len(buckets) else len(buckets)-1 for i in
                                     np.digitize(input_lengths[:len(train_data)], buckets, right=False)]  # truncate too long sentences
         dev_input_bucket_index = [i if i < len(buckets) else len(buckets)-1 for i in
@@ -308,8 +313,10 @@ def buckets_by_length(data_list, label_list, buckets=20, max_len=0, mode='pad'):
     else:  # put data in one bucket of max_len length
         buckets = [max_len]
         bin_edges = [0, max_len]
-        train_input_bucket_index = [0 for i in input_lengths[:len(train_data)]]
-        dev_input_bucket_index = [0 for i in input_lengths[len(train_data):]]
+        train_input_bucket_index = [1 for i in input_lengths[:len(train_data)]]
+        dev_input_bucket_index = [1 for i in input_lengths[len(train_data):]]
+    print "bin edges:", bin_edges
+
 
     # pad and bucket train data
     bucketed_train_data = {}
