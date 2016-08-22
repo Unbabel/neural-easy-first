@@ -54,6 +54,7 @@ tf.app.flags.DEFINE_integer("lstm_units", 50, "number of LSTM-RNN encoder units"
 tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
 tf.app.flags.DEFINE_float("l2_scale", 0, "L2 regularization constant")
 tf.app.flags.DEFINE_float("keep_prob", 0.8 , "keep probability for dropout during training (1: no dropout)")
+tf.app.flags.DEFINE_float("keep_prob_sketch", 1, "keep probability for dropout during sketching (1: no dropout)")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
 tf.app.flags.DEFINE_integer("threads", 8, "number of threads")
@@ -61,7 +62,7 @@ FLAGS = tf.app.flags.FLAGS
 
 
 def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, r,
-                    lstm_units, concat, window_size, keep_prob, l2_scale,
+                    lstm_units, concat, window_size, keep_prob, keep_prob_sketch, l2_scale,
                     src_embeddings=None, tgt_embeddings=None, class_weights=None, bilstm=True):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
@@ -213,14 +214,14 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
                 b = tf.ones(shape=[batch_size, L], dtype=tf.float32)
                 b = b/L
 
-            if keep_prob < 1:
+            if keep_prob_sketch < 1:
                 with tf.name_scope("dropout"):  # the same dropout mask for all sketches
                     # create mask
-                    keep_prob_tensor = tf.convert_to_tensor(keep_prob, name="keep_prob")
-                    # see https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/nn_ops.py#L1078
-                    W_hs_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(W_hs)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)  # binary mask * (1-keep_prob) for scaling
+                    keep_prob_tensor = tf.convert_to_tensor(keep_prob_sketch, name="keep_prob_sketch")
+                    # see https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/nn_ops.py#L1078 (inverted dropout)
+                    W_hs_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(W_hs)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)  # binary mask * (1-keep_prob_sketch) for scaling
                     W_ss_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(W_ss)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)
-                    S_n_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(S)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)
+                    #S_n_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(S)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)
 
         def z_i(i):
             """
@@ -299,17 +300,18 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
             s_avg = tf.batch_matmul(tf.expand_dims(a_n, [1]), conv)  # batch_size x 1 x state_size*(2*r+1)
             s_avg = tf.reshape(s_avg, [batch_size, state_size*(2*r+1)])
 
-            if keep_prob < 1:  # same dropout for all steps (http://arxiv.org/pdf/1512.05287v3.pdf)
+            if keep_prob_sketch < 1:  # same dropout for all steps (http://arxiv.org/pdf/1512.05287v3.pdf)
                 _1 = tf.matmul(h_avg, tf.mul(W_hs, W_hs_mask))
                 _2 = tf.matmul(s_avg, tf.mul(W_ss, W_ss_mask))
             else:
                 _1 = tf.matmul(h_avg, W_hs)
                 _2 = tf.matmul(s_avg, W_ss)
             s_n = tf.nn.tanh(_1 + _2 + w_s)  # batch_size x state_size
+
             S_update = tf.batch_matmul(tf.expand_dims(s_n, [2]), tf.expand_dims(a_n, [1]))
             S_n = S + S_update
-            if keep_prob < 1:
-                S_n = tf.mul(S_n, S_n_mask)
+            #if keep_prob_sketch < 1:  # apply dropout to final sketch
+            #    S_n = tf.mul(S_n, S_n_mask)
             return n+1, b_n, S_n
 
         with tf.name_scope("sketching"):
@@ -381,6 +383,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
 
 def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
            src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob,
+           keep_prob_sketch=1,
            lstm_units=0, bilstm=False, concat=False, r=0, N=0, seq_lens=None):
     """
     QUETCH model for word-level QE predictions  (MLP based on embeddings)
@@ -437,9 +440,9 @@ def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
             D_loaded = len(tgt_embeddings.table[0])
             emb_size += D_loaded
 
-        if keep_prob < 1:  # dropout for word embeddings ("pervasive dropout")
-            M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
-            M_src = tf.nn.dropout(M_src, keep_prob)
+        #if keep_prob < 1:  # dropout for word embeddings ("pervasive dropout")
+        #    M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
+        #    M_src = tf.nn.dropout(M_src, keep_prob)
 
         x_src, x_tgt = tf.split(2, 2, inputs)  # split src and tgt part of input
         emb_tgt = tf.nn.embedding_lookup(M_tgt, x_src, name="emg_tgt")  # batch_size x L x window_size x emb_size
@@ -498,7 +501,7 @@ class EasyFirstModel():
     def __init__(self, K, D, N, J, r, vocab_size, batch_size, optimizer, learning_rate,
                  max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
                  tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0.1,
-                 keep_prob=0.5, model_dir="models/", bilstm=True, model="ef_single_state"):
+                 keep_prob=1, keep_prob_sketch=1, model_dir="models/", bilstm=True, model="ef_single_state"):
         """
         Initialize the model
         :param K:
@@ -518,6 +521,7 @@ class EasyFirstModel():
         :param tgt_embeddings
         :param l2_scale
         :param keep_prob
+        :param keep_prob_sketch
         :param bilstm
         :param model
         :return:
@@ -543,15 +547,16 @@ class EasyFirstModel():
         self.tgt_embeddings = tgt_embeddings
         self.l2_scale = l2_scale
         self.keep_prob = keep_prob
+        self.keep_prob_sketch = keep_prob_sketch
         self.bilstm = bilstm
 
         self.class_weights = class_weights if class_weights is not None else [1./K]*K
 
         self.path = "%s/ef_single_state_K%d_D%d_N%d_J%d_r%d_vocab%d_batch%d_opt%s_lr%0.4f_gradnorm%0.2f" \
-                    "_lstm%d_concat%r_window%d_weights%s_l2r%0.4f_dropout%0.2f.model" % \
+                    "_lstm%d_concat%r_window%d_weights%s_l2r%0.4f_dropout%0.2f_sketchdrop%0.2f.model" % \
                     (model_dir, K, D, N, J, r, vocab_size, batch_size, optimizer,
                      learning_rate, max_gradient_norm, lstm_units, concat, window_size,
-                     "-".join([str(c) for c in class_weights]), l2_scale, keep_prob)
+                     "-".join([str(c) for c in class_weights]), l2_scale, keep_prob, keep_prob_sketch)
         print "Model path:", self.path
 
         if self.lstm_units > 0:
@@ -581,8 +586,11 @@ class EasyFirstModel():
 
         if forward_only:
             self.keep_prob = 1
+            self.keep_prob_sketch = 1
         if self.keep_prob < 1:
             print "Dropout with p=%f" % self.keep_prob
+        if self.keep_prob_sketch < 1:
+            print "Dropout during sketching with p=%f" % self.keep_prob_sketch
 
         self.buckets = buckets
 
@@ -628,7 +636,8 @@ class EasyFirstModel():
                     J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units, concat=self.concat,
                     window_size=self.window_size, src_embeddings=self.src_embeddings,
                     tgt_embeddings=self.tgt_embeddings, class_weights=self.class_weights,
-                    keep_prob=self.keep_prob, l2_scale=self.l2_scale, bilstm=self.bilstm)
+                    keep_prob=self.keep_prob, keep_prob_sketch=self.keep_prob_sketch,
+                    l2_scale=self.l2_scale, bilstm=self.bilstm)
 
                 self.losses_reg.append(bucket_losses_reg)
                 self.losses.append(bucket_losses) # list of tensors, one for each bucket
@@ -708,7 +717,8 @@ def create_model(session, buckets, forward_only=False, src_embeddings=None, tgt_
                            concat=FLAGS.concat, forward_only=forward_only, buckets=buckets,
                            src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
                            window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale,
-                           keep_prob=FLAGS.keep_prob, model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm,
+                           keep_prob=FLAGS.keep_prob, keep_prob_sketch=FLAGS.keep_prob_sketch,
+                           model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm,
                            model=model_type)
     checkpoint = tf.train.get_checkpoint_state("models")
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
