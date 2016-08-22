@@ -52,6 +52,11 @@ def load_vocabs(feature_file, src_limit=0, tgt_limit=0):
                 for src_token in src_tokens:
                     if src_token == " ":
                         src_token = "</s>"  # FIXME because of data format (end of src sentence=space)
+                    if "|" in src_token:  # multiple alignments: treat as single and as combined word
+                        sub_tokens = src_token.split("|")
+                        for sub_token in sub_tokens:
+                            freq = src_vocab.get(sub_token, 0)
+                            src_vocab[sub_token] = freq + 1
                     freq = src_vocab.get(src_token, 0)
                     src_vocab[src_token] = freq + 1
                 for tgt_token in tgt_tokens:
