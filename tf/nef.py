@@ -20,6 +20,7 @@ Tensorflow issues:
 """
 
 # Flags
+tf.app.flags.DEFINE_string("model", "ef_single_state", "Model for training: quetch or ef_single_state")
 tf.app.flags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
 tf.app.flags.DEFINE_string("optimizer", "sgd", "Optimizer [sgd, adam, adagrad, adadelta, "
                                                     "momentum]")
@@ -477,28 +478,6 @@ def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
             xent = tf.mul(xent, label_weights)
 
         cross_entropy = tf.cast(masks, dtype=tf.float32)*tf.reduce_mean(xent, 2)  # batch_size x L
-        accuracy_sent = tf.reduce_mean(tf.cast(tf.equal(pred_labels, tf.cast(labels, tf.int64)), tf.float32), 1)  # accuracy per sentence
-
-        #TODO make sure that masking has correct impact on f1s
-
-        is_label_one = tf.cast(labels, dtype=tf.bool, name="is_one")  # batch_size x L
-        is_label_zero = tf.logical_not(is_label_one, name="is_zero")
-
-        correct_prediction = tf.logical_and(tf.cast(masks, dtype=tf.bool), tf.equal(pred_labels, tf.cast(labels, tf.int64), name="correct_answers"))  # batch_size x L
-        false_prediction = tf.logical_and(tf.cast(masks, dtype=tf.bool), tf.logical_not(correct_prediction))
-
-        true_positives = tf.to_float(tf.reduce_sum(tf.to_int32(tf.logical_and(correct_prediction, is_label_one)), 1))  # batch_size scalar
-        false_positives = tf.to_float(tf.reduce_sum(tf.to_int32(tf.logical_and(false_prediction, is_label_zero)), 1))
-        true_negatives = tf.to_float(tf.reduce_sum(tf.to_int32(tf.logical_and(correct_prediction, is_label_zero)), 1))
-        false_negatives = tf.to_float(tf.reduce_sum(tf.to_int32(tf.logical_and(false_prediction, is_label_one)), 1))
-
-        precision_ok = true_positives / (true_positives + false_positives + 1e-10)
-        precision_bad = true_negatives / (true_negatives + false_negatives + 1e-10)
-        recall_ok = true_positives / (true_positives + false_negatives + 1e-10)
-        recall_bad = true_negatives / (true_negatives + false_positives + 1e-10)
-        f1_ok = 2 * (precision_ok*recall_ok) / (precision_ok + recall_ok+ 1e-10)
-        f1_bad = 2 * (precision_bad*recall_bad) / (precision_bad + recall_bad + 1e-10)
-        f1_mult = f1_ok*f1_bad
 
         losses = cross_entropy
         if l2_scale > 0:
@@ -509,9 +488,7 @@ def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
         else:
             losses_reg = losses
 
-
     return losses, losses_reg, pred_labels
-
 
 
 class EasyFirstModel():
@@ -521,7 +498,7 @@ class EasyFirstModel():
     def __init__(self, K, D, N, J, r, vocab_size, batch_size, optimizer, learning_rate,
                  max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
                  tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0.1,
-                 keep_prob=0.5, model_dir="models/", bilstm=True):
+                 keep_prob=0.5, model_dir="models/", bilstm=True, model="ef_single_state"):
         """
         Initialize the model
         :param K:
@@ -542,6 +519,7 @@ class EasyFirstModel():
         :param l2_scale
         :param keep_prob
         :param bilstm
+        :param model
         :return:
         """
         self.K = K
@@ -617,6 +595,12 @@ class EasyFirstModel():
             self.buckets = pkl.load(open(buckets_path, "rb"))
         print "Buckets:", self.buckets
 
+        if model == "quetch":
+            model_func = quetch
+            print "Using QUETCH model"
+        else:
+            model_func = ef_single_state
+            print "Using neural easy first single state model"
 
         # prepare input feeds
         self.inputs = []
@@ -638,7 +622,7 @@ class EasyFirstModel():
                                                 shape=[None], name="seq_lens{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 print "Initializing parameters for bucket with max len", max_len
-                bucket_losses, bucket_losses_reg, bucket_predictions = ef_single_state(  # or: quetch
+                bucket_losses, bucket_losses_reg, bucket_predictions = model_func(
                     inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j], seq_lens=self.seq_lens[j],
                     vocab_size=self.vocab_size, K=self.K, D=self.D, N=max_len,  # as much sketches as words in sequence
                     J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units, concat=self.concat,
@@ -710,7 +694,7 @@ class EasyFirstModel():
 
 
 def create_model(session, buckets, forward_only=False, src_embeddings=None, tgt_embeddings=None,
-                 class_weights=None):
+                 class_weights=None, model_type="ef_single_state"):
     """
     Create a model
     :param session:
@@ -724,7 +708,8 @@ def create_model(session, buckets, forward_only=False, src_embeddings=None, tgt_
                            concat=FLAGS.concat, forward_only=forward_only, buckets=buckets,
                            src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
                            window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale,
-                           keep_prob=FLAGS.keep_prob, model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm)
+                           keep_prob=FLAGS.keep_prob, model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm,
+                           model=model_type)
     checkpoint = tf.train.get_checkpoint_state("models")
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
         print "Reading model parameters from %s" % checkpoint.model_checkpoint_path
@@ -813,7 +798,7 @@ def train():
         train_reordering_indexes = reordering_indexes[0]
         dev_reordering_indexes = reordering_indexes[1]
 
-        model = create_model(sess, bucket_edges[1:], False, src_embeddings, tgt_embeddings, class_weights)
+        model = create_model(sess, bucket_edges[1:], False, src_embeddings, tgt_embeddings, class_weights, FLAGS.model)
 
         train_buckets_sizes = {i : len(indx) for i, indx in train_reordering_indexes.items()}
         print "Creating buckets for training data:"
