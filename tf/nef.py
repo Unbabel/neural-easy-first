@@ -163,7 +163,15 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
                 H = rnn_outputs
 
             else:
-                H = emb
+                # fully-connected layer on top of embeddings to reduce size
+                remb = tf.reshape(emb, [-1, window_size*emb_size])
+                W_fc = tf.get_variable(name="W_fc", shape=[window_size*emb_size, J],  # TODO another param?
+                              initializer=tf.contrib.layers.xavier_initializer(
+                                  uniform=True, dtype=tf.float32))
+                b_fc = tf.get_variable(shape=[J], initializer=tf.random_uniform_initializer(
+                    dtype=tf.float32), name="b_fc")
+                H = tf.reshape(activation(tf.matmul(remb, W_fc)+b_fc), [batch_size, L, J])
+                #H = emb
                 state_size = window_size*emb_size
 
             with tf.name_scope("alpha"):
