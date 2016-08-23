@@ -1,7 +1,6 @@
 # coding=utf-8
 
 import tensorflow as tf
-from tensorflow.python.ops import rnn
 import numpy as np
 import time
 import sys
@@ -141,28 +140,27 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
                 # Split to get a list of 'n_steps=L' tensors of shape (batch_size, window_size*emb_size)
                 remb = tf.split(0, L, remb)
 
-                # alternatively use LSTMCell supporting peep-holes and output projection
-                fw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=lstm_units, state_is_tuple=True)
+                fw_cell = tf.nn.rnn_cell.LSTMCell(num_units=lstm_units, state_is_tuple=True)
 
                 if bilstm:
                     with tf.name_scope("bi-lstm"):
-                        bw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=lstm_units, state_is_tuple=True)
+                        bw_cell = tf.nn.rnn_cell.LSTMCell(num_units=lstm_units, state_is_tuple=True)
 
                         if keep_prob < 1:
-                            #print "Dropping out LSTM input and output"
+                            #print "Dropping out LSTM output"
                             fw_cell = tf.nn.rnn_cell.DropoutWrapper(fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
                             bw_cell = tf.nn.rnn_cell.DropoutWrapper(bw_cell, input_keep_prob=1, output_keep_prob=keep_prob)
 
-                        outputs, _, _ = rnn.bidirectional_rnn(fw_cell, bw_cell, remb, sequence_length=seq_lens, dtype=tf.float32)
+                        outputs, _, _ = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, remb, sequence_length=seq_lens, dtype=tf.float32)
                         state_size = 2*lstm_units  # concat of fw and bw lstm output
                 else:
                     with tf.name_scope("lstm"):
 
                         if keep_prob < 1:
-                            #print "Dropping out LSTM input and output"
+                            #print "Dropping out LSTM output"
                             fw_cell = tf.nn.rnn_cell.DropoutWrapper(fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
 
-                        outputs, _, = rnn.rnn(fw_cell, remb, sequence_length=seq_lens, dtype=tf.float32)
+                        outputs, _, = tf.nn.dynamic_rnn(cell=fw_cell, inputs=remb, sequence_length=seq_lens, dtype=tf.float32)
                         state_size = lstm_units  # concat of fw and bw lstm output
 
                 # 'outputs' is a list of output at every timestep (until L)
