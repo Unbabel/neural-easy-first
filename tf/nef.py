@@ -129,16 +129,9 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
                 emb_tgt = tf.nn.embedding_lookup(M_tgt, x_src, name="emg_tgt")  # batch_size x L x window_size x emb_size
                 emb_src = tf.nn.embedding_lookup(M_src, x_tgt, name="emb_src")  # batch_size x L x window_size x emb_size
                 emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
-                emb = tf.reshape(emb_comb, [batch_size, -1, window_size*emb_size], name="emb") # batch_size x L x window_size*emb_size
+                emb = tf.reshape(emb_comb, [batch_size, L, window_size*emb_size], name="emb") # batch_size x L x window_size*emb_size
 
             if lstm_units > 0:
-
-                # Permuting batch_size and n_steps
-                remb = tf.transpose(emb, [1, 0, 2])  # L x batch_size x window_size*emb_size
-                # Reshaping to (n_steps*batch_size, n_input)
-                remb = tf.reshape(remb, [-1, window_size*emb_size])  # L*batch_size x window_size*emb_size
-                # Split to get a list of 'n_steps=L' tensors of shape (batch_size, window_size*emb_size)
-                remb = tf.split(0, L, remb)
 
                 fw_cell = tf.nn.rnn_cell.LSTMCell(num_units=lstm_units, state_is_tuple=True)
 
@@ -151,7 +144,8 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
                             fw_cell = tf.nn.rnn_cell.DropoutWrapper(fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
                             bw_cell = tf.nn.rnn_cell.DropoutWrapper(bw_cell, input_keep_prob=1, output_keep_prob=keep_prob)
 
-                        outputs, _, _ = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, remb, sequence_length=seq_lens, dtype=tf.float32)
+                        outputs, _ = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, emb, sequence_length=seq_lens, dtype=tf.float32, time_major=False)
+                        outputs = tf.concat(2, outputs)
                         state_size = 2*lstm_units  # concat of fw and bw lstm output
                 else:
                     with tf.name_scope("lstm"):
@@ -160,8 +154,8 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
                             #print "Dropping out LSTM output"
                             fw_cell = tf.nn.rnn_cell.DropoutWrapper(fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
 
-                        outputs, _, = tf.nn.dynamic_rnn(cell=fw_cell, inputs=remb, sequence_length=seq_lens, dtype=tf.float32)
-                        state_size = lstm_units  # concat of fw and bw lstm output
+                        outputs, _, = tf.nn.dynamic_rnn(cell=fw_cell, inputs=emb, sequence_length=seq_lens, dtype=tf.float32, time_major=False)
+                        state_size = lstm_units
 
                 # 'outputs' is a list of output at every timestep (until L)
                 rnn_outputs = tf.pack(outputs)
@@ -170,7 +164,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
 
             else:
                 H = emb
-                state_size = 2*window_size*emb_size
+                state_size = window_size*emb_size
 
             with tf.name_scope("alpha"):
                 w_z = tf.get_variable(name="w_z", shape=[J],
@@ -610,13 +604,12 @@ class EasyFirstModel():
             model_func = ef_single_state
             print "Using neural easy first single state model"
 
-        if activation == "tanh":
-            print "tanh activations"
-            activation_func = tf.nn.tanh
-        elif activation == "relu":
+        activation_func = tf.nn.tanh
+        if activation == "relu":
             activation_func = tf.nn.relu
         elif activation == "sigmoid":
             activation_func = tf.nn.sigmoid
+        print "Activation function %s" % activation_func.__name__
 
         # prepare input feeds
         self.inputs = []
@@ -634,7 +627,7 @@ class EasyFirstModel():
                                               shape=[None, max_len], name="labels{0}".format(j)))
             self.masks.append(tf.placeholder(tf.int64,
                                              shape=[None, max_len], name="masks{0}".format(j)))
-            self.seq_lens.append(tf.placeholder(tf.int32,
+            self.seq_lens.append(tf.placeholder(tf.int64,
                                                 shape=[None], name="seq_lens{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 print "Initializing parameters for bucket with max len", max_len
@@ -1133,7 +1126,4 @@ if __name__ == "__main__":
 # - language als parameter
 # - modularization
 # - nicer way of storing model parameters (params)
-# - why has quetch nan values?
 # - replace numbers by <NUM>?
-# - validation also in batches for speedup
-# - during testing: multiple aligned words are often unknown -> have a backoff
