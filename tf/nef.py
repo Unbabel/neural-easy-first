@@ -12,10 +12,8 @@ import math
 Tensorflow implementation of the neural easy-first model
 - Single-State Model
 
-
-Tensorflow issues:
-- no rmsprop support for sparse gradient updates in version 0.9
-- no nested while loops supported in version 0.9
+Baseline model
+- QUETCH
 """
 
 # Flags
@@ -33,10 +31,10 @@ tf.app.flags.DEFINE_integer("max_train_data_size", 0,
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 58, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 3, "number of buckets")
-#tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl.train.basic_features_with_tags.0.extended.pkl", "path to source language embeddings")
-#tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl.train.basic_features_with_tags.0.extended.pkl", "path to target language embeddings")
-tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
-tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
+tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl.train.basic_features_with_tags.7000.extended.pkl", "path to source language embeddings")
+tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl.train.basic_features_with_tags.7000.extended.pkl", "path to target language embeddings")
+#tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
+#tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
 #tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
 #tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
@@ -630,7 +628,7 @@ class EasyFirstModel():
                 print "Initializing parameters for bucket with max len", max_len
                 bucket_losses, bucket_losses_reg, bucket_predictions = model_func(
                     inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j], seq_lens=self.seq_lens[j],
-                    vocab_size=self.vocab_size, K=self.K, D=self.D, N=max_len,  # as much sketches as words in sequence
+                    vocab_size=self.vocab_size, K=self.K, D=self.D, N=max_len,  # as many sketches as words in sequence
                     J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units, concat=self.concat,
                     window_size=self.window_size, src_embeddings=self.src_embeddings,
                     tgt_embeddings=self.tgt_embeddings, class_weights=self.class_weights,
@@ -919,7 +917,7 @@ def train():
 
             if epoch % FLAGS.checkpoint_freq == 0:
                 # save checkpoint
-                model.saver.save(sess, model.path, global_step=model.global_step)
+                model.saver.save(sess, model.path, global_step=model.global_step, write_meta_graph=True)
 
         print "Training finished after %d epochs. Best validation result: %f at epoch %d." \
               % (epoch+1, best_valid, best_valid_epoch)
