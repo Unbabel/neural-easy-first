@@ -37,6 +37,7 @@ tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglo
 #tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
 #tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
 #tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
+tf.app.flags.DEFINE_string("activation", "tanh", "activation function")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
 tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
@@ -59,8 +60,9 @@ FLAGS = tf.app.flags.FLAGS
 
 
 def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, r,
-                    lstm_units, concat, window_size, keep_prob, keep_prob_sketch, l2_scale,
-                    src_embeddings=None, tgt_embeddings=None, class_weights=None, bilstm=True):
+                    lstm_units, concat, window_size, keep_prob, keep_prob_sketch,
+                    l2_scale, src_embeddings=None, tgt_embeddings=None,
+                    class_weights=None, bilstm=True, activation=tf.nn.tanh):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
     :param inputs:
@@ -238,8 +240,8 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
             _1 = tf.matmul(s_context, W_sz)
             _2 = tf.matmul(b_context, W_bz)
             _3 = tf.batch_matmul(h_i, W_hz)
-            tanh = tf.tanh(_1 + _2 + _3 + w_z)  # batch_size x J
-            z_i = tf.matmul(tanh, v)
+            activ = activation(_1 + _2 + _3 + w_z)  # batch_size x J
+            z_i = tf.matmul(activ, v)
             return z_i
 
         def alpha():
@@ -302,7 +304,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
             else:
                 _1 = tf.matmul(h_avg, W_hs)
                 _2 = tf.matmul(s_avg, W_ss)
-            s_n = tf.nn.tanh(_1 + _2 + w_s)  # batch_size x state_size
+            s_n = activation(_1 + _2 + w_s)  # batch_size x state_size
 
             S_update = tf.batch_matmul(tf.expand_dims(s_n, [2]), tf.expand_dims(a_n, [1]))
             S_n = S + S_update
@@ -380,7 +382,8 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
 def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
            src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob,
            keep_prob_sketch=1,
-           lstm_units=0, bilstm=False, concat=False, r=0, N=0, seq_lens=None):
+           lstm_units=0, bilstm=False, concat=False, r=0, N=0, seq_lens=None,
+           activation=tf.nn.tanh):
     """
     QUETCH model for word-level QE predictions  (MLP based on embeddings)
     :param inputs:
@@ -461,7 +464,7 @@ def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
             dtype=tf.float32), name="b_1")
         b_2 = tf.get_variable(shape=[K], initializer=tf.random_uniform_initializer(
             dtype=tf.float32), name="b_2")
-        hidden = tf.nn.tanh(tf.matmul(inputs, W_1) + b_1)  # batch_size*emb_size, J
+        hidden = activation(tf.matmul(inputs, W_1) + b_1)  # batch_size*emb_size, J
         if keep_prob < 1:
             hidden = tf.nn.dropout(hidden, keep_prob)
         out = tf.matmul(hidden, W_2) + b_2  # batch_size*emb_size, K
@@ -497,7 +500,8 @@ class EasyFirstModel():
     def __init__(self, K, D, N, J, r, vocab_size, batch_size, optimizer, learning_rate,
                  max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
                  tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0.1,
-                 keep_prob=1, keep_prob_sketch=1, model_dir="models/", bilstm=True, model="ef_single_state"):
+                 keep_prob=1, keep_prob_sketch=1, model_dir="models/",
+                 bilstm=True, model="ef_single_state", activation="tanh"):
         """
         Initialize the model
         :param K:
@@ -606,6 +610,14 @@ class EasyFirstModel():
             model_func = ef_single_state
             print "Using neural easy first single state model"
 
+        if activation == "tanh":
+            print "tanh activations"
+            activation_func = tf.nn.tanh
+        elif activation == "relu":
+            activation_func = tf.nn.relu
+        elif activation == "sigmoid":
+            activation_func = tf.nn.sigmoid
+
         # prepare input feeds
         self.inputs = []
         self.labels = []
@@ -633,7 +645,7 @@ class EasyFirstModel():
                     window_size=self.window_size, src_embeddings=self.src_embeddings,
                     tgt_embeddings=self.tgt_embeddings, class_weights=self.class_weights,
                     keep_prob=self.keep_prob, keep_prob_sketch=self.keep_prob_sketch,
-                    l2_scale=self.l2_scale, bilstm=self.bilstm)
+                    l2_scale=self.l2_scale, bilstm=self.bilstm, activation=activation_func)
 
                 self.losses_reg.append(bucket_losses_reg)
                 self.losses.append(bucket_losses) # list of tensors, one for each bucket
@@ -715,7 +727,7 @@ def create_model(session, buckets, forward_only=False, src_embeddings=None, tgt_
                            window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale,
                            keep_prob=FLAGS.keep_prob, keep_prob_sketch=FLAGS.keep_prob_sketch,
                            model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm,
-                           model=model_type)
+                           model=model_type, activation=FLAGS.activation)
     checkpoint = tf.train.get_checkpoint_state("models")
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
         print "Reading model parameters from %s" % checkpoint.model_checkpoint_path
