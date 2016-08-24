@@ -17,7 +17,9 @@ def main(args):
     tgt_embeddings = load_embedding(args.tgt_embeddings)
 
     # load the vocabulary (most frequent words)
-    src_vocab, tgt_vocab = load_vocabs(args.train_data, args.src_limit, args.tgt_limit, args.freq_limit)
+    src_vocab, tgt_vocab = load_vocabs(args.train_src, args.train_tgt,
+                                       args.train_data, args.src_limit,
+                                       args.tgt_limit, args.freq_limit)
 
     # update the embeddings
     # add zero vectors for new words and for multiple alignment
@@ -37,8 +39,8 @@ def main(args):
     # dump embeddings
     train_name = os.path.basename(args.train_data)
 
-    src_embeddings_file = "%s.%s.%d.min%d.extended.pkl" % (args.src_embeddings, train_name, args.src_limit, args.freq_limit)
-    tgt_embeddings_file = "%s.%s.%d.min%d.extended.pkl" % (args.tgt_embeddings, train_name, args.tgt_limit, args.freq_limit)
+    src_embeddings_file = "%s.%s.%d.min%d.extended.pkl" % (args.src_embeddings.split(".pkl")[0], train_name, args.src_limit, args.freq_limit)
+    tgt_embeddings_file = "%s.%s.%d.min%d.extended.pkl" % (args.tgt_embeddings.split(".pkl")[0], train_name, args.tgt_limit, args.freq_limit)
     src_embeddings.store(src_embeddings_file)
     tgt_embeddings.store(tgt_embeddings_file)
 
