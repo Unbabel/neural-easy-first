@@ -23,7 +23,7 @@
   Pre-trained embeddings as e.g. polyglot (pickle dumps) are merged with new vocabulary introduced by the task.
   To construct the vocabulary and the initial lookup table, use the following script:
   
-      python prepare_vocab.py <path to training data> <path to src embeddings> <path to tgt embeddings> --freq_limit <freq_limit> --tgt_limit <tgt_limit> --src_limit <src_limit>
+      python prepare_vocab.py <path to training src> <path to training tgt> <path to training feature file>  <path to src embeddings> <path to tgt embeddings> --freq_limit <freq_limit> --tgt_limit <tgt_limit> --src_limit <src_limit>
   
   This creates a new embedding dump including the `src_limit` and `tgt_limit` most frequent new words that occur more than `freq_limit` times on either source or target size.
 
