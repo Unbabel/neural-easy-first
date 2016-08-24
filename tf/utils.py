@@ -7,6 +7,7 @@ import embedding
 from scipy import stats
 import operator
 
+
 def load_embedding(pkl_file):
     word2id = {}
     id2word = {}
@@ -27,14 +28,85 @@ def load_embedding(pkl_file):
     emb = embedding.embedding(vectors, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
     return emb
 
-def load_vocabs(feature_file, src_limit=0, tgt_limit=0, freq_limit=0):
+
+def load_vocabs(train_src, train_tgt, train_features, src_limit,tgt_limit, freq_limit):
+    """
+    Load the vocabulary of src and tgt size of a qe corpus
+    and limit it to a certain size (by frequency).
+    In contrast to 'load_vocabs_from_features' the absolute frequencies are
+    not distorted by alignments.
+    :param train_src:
+    :param train_tgt:
+    :param train_features:
+    :param src_limit:
+    :param tgt_limit:
+    :param freq_limit:
+    :return:
+    """
+    src_vocab = {}
+    tgt_vocab = {}
+
+    # count occurrences in tgt and src text
+    with codecs.open(train_src, "r", "utf8") as src, \
+        codecs.open(train_tgt, "r", "utf8") as tgt:
+        for src_line in src:
+            src_tokens = src_line.split()
+            for src_token in src_tokens:
+                freq = src_vocab.get(src_token, 0)
+                src_vocab[src_token] = freq+1
+        for tgt_line in tgt:
+            tgt_tokens = tgt_line.split()
+            for tgt_token in tgt_tokens:
+                freq = tgt_vocab.get(tgt_token, 0)
+                tgt_vocab[tgt_token] = freq+1
+
+    # count occurrences of combinations of multiple aligned src words
+    with codecs.open(train_features, "r", "utf8") as qe_data:
+        for line in qe_data:
+            stripped = line.strip()
+            if stripped == "":  # sentence end
+                continue
+            else:
+                split_line = stripped.split("\t")
+                src_tokens = split_line[6:9]
+                for src_token in src_tokens:
+                    if "|" in src_token:  # multiple alignments: treat as single and as combined word
+                        freq = src_vocab.get(src_token, 0)
+                        src_vocab[src_token] = freq + 1
+
+     # sort by frequency (descending)
+    src_vocab_by_freq = sorted(src_vocab.items(), key=operator.itemgetter(1), reverse=True)
+    tgt_vocab_by_freq = sorted(tgt_vocab.items(), key=operator.itemgetter(1), reverse=True)
+
+    print "found %d tokens in train src vocabulary" % len(src_vocab_by_freq)
+    print "found %d tokens in train tgt vocabulary" % len(tgt_vocab_by_freq)
+
+    #cut off infrequent ones
+    if src_limit > 0:
+        src_vocab_by_freq = src_vocab_by_freq[:src_limit]
+        print "cutting down src vocab to %d tokens" % len(src_vocab_by_freq)
+    if tgt_limit > 0:
+        tgt_vocab_by_freq = tgt_vocab_by_freq[:tgt_limit]
+        print "cutting down tgt vocab to %d tokens" % len(tgt_vocab_by_freq)
+    if freq_limit > 0:
+        src_vocab_by_freq = [(word, freq) for (word, freq) in src_vocab_by_freq if freq > freq_limit]
+        tgt_vocab_by_freq = [(word, freq) for (word, freq) in tgt_vocab_by_freq if freq > freq_limit]
+
+    vocab = {"<PAD>", "<UNK>", "<s>", "</s>"}
+    src_words = list(set(map(operator.itemgetter(0), src_vocab_by_freq)).union(vocab))
+    tgt_words = list(set(map(operator.itemgetter(0), tgt_vocab_by_freq)).union(vocab))
+
+    print "final %d tokens in src vocabulary" % len(src_words)
+    print "final %d tokens in tgt vocabulary" % len(tgt_words)
+
+
+def load_vocabs_from_features(feature_file, src_limit=0, tgt_limit=0):
     """
     Load the vocabulary of a qe corpus (in "feature and tags file")
     and limit it to a certain size (by frequency)
     :param feature_file:
     :param src_limit:
     :param tgt_limit:
-    :param freq_limit:
     :return:
     """
     src_vocab = {}
@@ -48,7 +120,7 @@ def load_vocabs(feature_file, src_limit=0, tgt_limit=0, freq_limit=0):
                 continue
             else:
                 split_line = stripped.split("\t")
-                tgt_tokens = split_line[3:6]
+                tgt_tokens = split_line[3]
                 src_tokens = split_line[6:9]
                 for src_token in src_tokens:
                     if src_token == " ":
@@ -78,10 +150,6 @@ def load_vocabs(feature_file, src_limit=0, tgt_limit=0, freq_limit=0):
     if tgt_limit > 0:
         tgt_vocab_by_freq = tgt_vocab_by_freq[:tgt_limit]
         print "cutting down tgt vocab to %d tokens" % len(tgt_vocab_by_freq)
-    if freq_limit > 0:
-        print "only keeping words that occur more than %d times" % freq_limit
-        src_vocab_by_freq = [(word, freq) for (word, freq) in src_vocab_by_freq if freq > freq_limit]
-        tgt_vocab_by_freq = [(word, freq) for (word, freq) in tgt_vocab_by_freq if freq > freq_limit]
 
     vocab = {"<PAD>", "<UNK>", "<s>", "</s>"}
     src_words = list(set(map(operator.itemgetter(0), src_vocab_by_freq)).union(vocab))
@@ -344,6 +412,7 @@ def put_in_buckets(data_array, labels, buckets, mode='pad'):
         padded = pad_data(data_array[length_indexes], labels[length_indexes], max_len=maxlen)
         bucketed_data[bucket] = padded  # in final dict, start counting by zero
     return bucketed_data, reordering_indexes
+
 
 def accuracy(y_i, predictions):
     """
