@@ -99,6 +99,8 @@ def load_vocabs(train_src, train_tgt, train_features, src_limit,tgt_limit, freq_
     print "final %d tokens in src vocabulary" % len(src_words)
     print "final %d tokens in tgt vocabulary" % len(tgt_words)
 
+    return src_words, tgt_words
+
 
 def load_vocabs_from_features(feature_file, src_limit=0, tgt_limit=0):
     """
