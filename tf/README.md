@@ -45,8 +45,8 @@
 
   1. On batch data from stored model
   
-    python nef.py --train False
+     python nef.py --train False
 
   2. Interactively
   
-    python nef.py --interactive
+     python nef.py --interactive
