@@ -21,7 +21,7 @@ tf.app.flags.DEFINE_string("model", "ef_single_state", "Model for training: quet
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_string("optimizer", "adam", "Optimizer [sgd, adam, adagrad, adadelta, "
                                                     "momentum]")
-tf.app.flags.DEFINE_integer("batch_size", 500,
+tf.app.flags.DEFINE_integer("batch_size", 200,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("vocab_size", 20000, "Vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
@@ -31,8 +31,8 @@ tf.app.flags.DEFINE_integer("max_train_data_size", 0,
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 58, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
-tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl.train.basic_features_with_tags.7000.extended.pkl", "path to source language embeddings")
-tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl.train.basic_features_with_tags.7000.extended.pkl", "path to target language embeddings")
+tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.train.basic_features_with_tags.0.min1.extended.pkl", "path to source language embeddings")
+tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.train.basic_features_with_tags.0.min1.extended.pkl", "path to target language embeddings")
 #tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
 #tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
 #tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
@@ -160,7 +160,6 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
 
                 # 'outputs' is a list of output at every timestep (until L)
                 rnn_outputs = tf.pack(outputs)
-                rnn_outputs = tf.transpose(rnn_outputs, [1, 0, 2])  # batch_size x L x state_size
                 H = rnn_outputs
 
             else:
@@ -828,17 +827,7 @@ def train():
 
         # bucketing training and dev data
 
-        # quantile strategy
-        #data_buckets, reordering_indexes, bucket_edges = buckets_by_length(
-        #    [np.asarray(train_feature_vectors), np.asarray(dev_feature_vectors)],
-        #    [np.asarray(train_labels), np.asarray(dev_labels)], buckets=FLAGS.buckets,
-        #    max_len=FLAGS.L, mode="pad", strategy="quantile")
-        #train_buckets = data_buckets[0]
-        #dev_buckets = data_buckets[1]
-        #train_reordering_indexes = reordering_indexes[0]
-        #dev_reordering_indexes = reordering_indexes[1]
-
-        # equal strategy
+        # equal bucket sizes
         data_buckets, reordering_indexes, bucket_edges = buckets_by_length(
             np.asarray(train_feature_vectors),
             np.asarray(train_labels), buckets=FLAGS.buckets,
@@ -894,8 +883,8 @@ def train():
                 order = np.random.permutation(len(bucket_xs))
                 # split data in bucket into random batches of at most batch_size
                 if train_buckets_sizes[bucket_id] > FLAGS.batch_size:
-                    samples_per_batch = train_buckets_sizes[bucket_id]/float(FLAGS.batch_size)
-                    batch_ids = np.array_split(order, samples_per_batch)
+                    number_of_batches = np.ceil(train_buckets_sizes[bucket_id]/float(FLAGS.batch_size))
+                    batch_ids = np.array_split(order, number_of_batches)
                 else:
                     batch_ids = [order]  # only one batch
                 bucket_loss = 0

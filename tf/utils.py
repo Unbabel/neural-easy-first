@@ -368,7 +368,7 @@ def buckets_by_length(data, labels, buckets=20, max_len=0, mode='pad'):
     data_lengths_with_idx = [(len(s), i) for i, s in enumerate(data)]
     sorted_data_lengths_with_idx = sorted(data_lengths_with_idx, key=operator.itemgetter(0))
     bucket_size = int(np.ceil(len(data)/float(buckets)))
-    print "Creating %d Buckets of size %f" % (buckets, bucket_size)
+    print "Creating %d Buckets of size %d" % (buckets, bucket_size)
     buckets_data = [sorted_data_lengths_with_idx[i:i+bucket_size] for i in xrange(0, len(sorted_data_lengths_with_idx), bucket_size)]
     bin_edges = [bucket[-1][0] for bucket in buckets_data]  # max len of sequence in bucket
     print "bin_edges", bin_edges
