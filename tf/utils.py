@@ -304,8 +304,8 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                 label_sentence.append(label_dict[label])
 
     print "Loaded %d sentences" % len(feature_vectors)
-    print "%d UNK words in src: %s, ..." % (len(src_unks), ", ".join(list(src_unks)[:10]))
-    print "%d UNK words in tgt: %s, ..." % (len(tgt_unks), ", ".join(list(tgt_unks)[:10]))
+    print "%d UNK words in src" % len(src_unks)
+    print "%d UNK words in tgt" % len(tgt_unks)
     if train:
         return feature_vectors, tgt_sentences, labels, label_dict, embedding_src, embedding_tgt
     else:

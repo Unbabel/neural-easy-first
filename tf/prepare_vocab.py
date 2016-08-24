@@ -37,8 +37,8 @@ def main(args):
     # dump embeddings
     train_name = os.path.basename(args.train_data)
 
-    src_embeddings_file = "%s.%s.%d.extended.pkl" % (args.src_embeddings, train_name, args.src_limit)
-    tgt_embeddings_file = "%s.%s.%d.extended.pkl" % (args.tgt_embeddings, train_name, args.tgt_limit)
+    src_embeddings_file = "%s.%s.%d.min%d.extended.pkl" % (args.src_embeddings, train_name, args.src_limit, args.freq_limit)
+    tgt_embeddings_file = "%s.%s.%d.min%d.extended.pkl" % (args.tgt_embeddings, train_name, args.tgt_limit, args.freq_limit)
     src_embeddings.store(src_embeddings_file)
     tgt_embeddings.store(tgt_embeddings_file)
 
