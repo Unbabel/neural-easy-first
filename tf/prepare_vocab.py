@@ -49,7 +49,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Prepare vocabulary and embeddings for nef.')
     parser.add_argument('train_src', type=str, help='the training source text')
     parser.add_argument('train_tgt', type=str, help='the training target text')
-    parser.add_argument('train_features', type=str, help='training data set ("features with tags" format)')
+    parser.add_argument('train_data', type=str, help='training data set ("features with tags" format)')
     parser.add_argument('src_embeddings', type=str, help='the source embeddings')
     parser.add_argument('tgt_embeddings', type=str, help='the target embeddings')
     parser.add_argument('--src_limit', type=int, default=0, help='most frequent src words added from data to embedding')
