@@ -17,7 +17,7 @@ def main(args):
     tgt_embeddings = load_embedding(args.tgt_embeddings)
 
     # load the vocabulary (most frequent words)
-    src_vocab, tgt_vocab = load_vocabs(args.train_data, args.src_limit, args.tgt_limit)
+    src_vocab, tgt_vocab = load_vocabs(args.train_data, args.src_limit, args.tgt_limit, args.freq_limit)
 
     # update the embeddings
     # add zero vectors for new words and for multiple alignment
@@ -50,6 +50,7 @@ if __name__ == "__main__":
     parser.add_argument('tgt_embeddings', type=str, help='the target embeddings')
     parser.add_argument('--src_limit', type=int, default=0, help='most frequent src words added from data to embedding')
     parser.add_argument('--tgt_limit', type=int, default=0, help='most frequent tgt words added from data to embedding')
+    parser.add_argument('--freq_limit', type=int, default=0, help='only include words that occur more than this often')
 
     args = parser.parse_args()
     main(args)

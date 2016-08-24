@@ -18,8 +18,8 @@ Baseline model
 
 # Flags
 tf.app.flags.DEFINE_string("model", "ef_single_state", "Model for training: quetch or ef_single_state")
-tf.app.flags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
-tf.app.flags.DEFINE_string("optimizer", "sgd", "Optimizer [sgd, adam, adagrad, adadelta, "
+tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
+tf.app.flags.DEFINE_string("optimizer", "adam", "Optimizer [sgd, adam, adagrad, adadelta, "
                                                     "momentum]")
 tf.app.flags.DEFINE_integer("batch_size", 500,
                             "Batch size to use during training.")
@@ -30,7 +30,7 @@ tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 58, "maximum length of sequences")
-tf.app.flags.DEFINE_integer("buckets", 3, "number of buckets")
+tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
 tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl.train.basic_features_with_tags.7000.extended.pkl", "path to source language embeddings")
 tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl.train.basic_features_with_tags.7000.extended.pkl", "path to target language embeddings")
 #tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
@@ -42,16 +42,17 @@ tf.app.flags.DEFINE_integer("K", 2, "number of labels")
 tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
 tf.app.flags.DEFINE_integer("J", 20, "dimensionality of hidden layer")
-tf.app.flags.DEFINE_integer("r", 2, "context size")
+tf.app.flags.DEFINE_integer("r", 3, "context size")
 tf.app.flags.DEFINE_integer("bad_weight", 3.0, "weight for BAD instances" )
 tf.app.flags.DEFINE_boolean("concat", True, "concatenating s_i and h_i for prediction")
 tf.app.flags.DEFINE_boolean("train", True, "training model")
 tf.app.flags.DEFINE_integer("epochs", 500, "training epochs")
-tf.app.flags.DEFINE_integer("checkpoint_freq", 20, "save model every x epochs")
-tf.app.flags.DEFINE_integer("lstm_units", 50, "number of LSTM-RNN encoder units")
+tf.app.flags.DEFINE_integer("checkpoint_freq", 100, "save model every x epochs")
+tf.app.flags.DEFINE_integer("lstm_units", 20, "number of LSTM-RNN encoder units")
 tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
 tf.app.flags.DEFINE_float("l2_scale", 0, "L2 regularization constant")
-tf.app.flags.DEFINE_float("keep_prob", 0.8 , "keep probability for dropout during training (1: no dropout)")
+tf.app.flags.DEFINE_float("l1_scale", 0, "L1 regularization constant")
+tf.app.flags.DEFINE_float("keep_prob", 1 , "keep probability for dropout during training (1: no dropout)")
 tf.app.flags.DEFINE_float("keep_prob_sketch", 1, "keep probability for dropout during sketching (1: no dropout)")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
@@ -61,7 +62,7 @@ FLAGS = tf.app.flags.FLAGS
 
 def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, r,
                     lstm_units, concat, window_size, keep_prob, keep_prob_sketch,
-                    l2_scale, src_embeddings=None, tgt_embeddings=None,
+                    l2_scale, l1_scale, src_embeddings=None, tgt_embeddings=None,
                     class_weights=None, bilstm=True, activation=tf.nn.tanh):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
@@ -172,7 +173,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
                     dtype=tf.float32), name="b_fc")
                 H = tf.reshape(activation(tf.matmul(remb, W_fc)+b_fc), [batch_size, L, J])
                 #H = emb
-                state_size = window_size*emb_size
+                state_size = J
 
             with tf.name_scope("alpha"):
                 w_z = tf.get_variable(name="w_z", shape=[J],
@@ -367,13 +368,17 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
             pred_labels = mask*tf.transpose(tf.pack(pred_labels), [1, 0])  # masked, batch_size x L
             losses = tf.reduce_mean(tf.cast(mask, tf.float32)*tf.transpose(tf.pack(losses), [1, 0]),
                                     1)  # masked, batch_size x 1
+            losses_reg = losses
             if l2_scale > 0:
                 weights_list = [W_sz, W_hs, W_ss, W_bz, W_sp, W_hz]  # M_src, M_tgt word embeddings not included
                 l2_loss = tf.contrib.layers.apply_regularization(
                     tf.contrib.layers.l2_regularizer(l2_scale), weights_list=weights_list)
-                losses_reg = losses + l2_loss
-            else:
-                losses_reg = losses
+                losses_reg += l2_loss
+            if l1_scale > 0:
+                weights_list = [W_sz, W_hs, W_ss, W_bz, W_sp, W_hz]
+                l1_loss = tf.contrib.layers.apply_regularization(
+                    tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
+                losses_reg += l1_loss
 
         return losses, losses_reg, pred_labels
 
@@ -382,7 +387,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
 
 
 def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
-           src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob,
+           src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob, l1_scale,
            keep_prob_sketch=1,
            lstm_units=0, bilstm=False, concat=False, r=0, N=0, seq_lens=None,
            activation=tf.nn.tanh):
@@ -407,6 +412,7 @@ def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
     :param tgt_embeddings:
     :param class_weights:
     :param l2_scale:
+    :param l1_scale:
     :param keep_prob:
     :return:
     """
@@ -484,13 +490,18 @@ def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
         cross_entropy = tf.cast(masks, dtype=tf.float32)*tf.reduce_mean(xent, 2)  # batch_size x L
 
         losses = cross_entropy
+        losses_reg = losses
+
         if l2_scale > 0:
             weights_list = [W_1, W_2]  # M_src, M_tgt,
             l2_loss = tf.contrib.layers.apply_regularization(
                 tf.contrib.layers.l2_regularizer(l2_scale), weights_list=weights_list)
-            losses_reg = losses + l2_loss
-        else:
-            losses_reg = losses
+            losses_reg += l2_loss
+        if l1_scale > 0:
+            weights_list = [W_1, W_2]  # M_src, M_tgt,
+            l1_loss = tf.contrib.layers.apply_regularization(
+                tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
+            losses_reg += l1_loss
 
     return losses, losses_reg, pred_labels
 
@@ -501,9 +512,9 @@ class EasyFirstModel():
     """
     def __init__(self, K, D, N, J, r, vocab_size, batch_size, optimizer, learning_rate,
                  max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
-                 tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0.1,
+                 tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0,
                  keep_prob=1, keep_prob_sketch=1, model_dir="models/",
-                 bilstm=True, model="ef_single_state", activation="tanh"):
+                 bilstm=True, model="ef_single_state", activation="tanh", l1_scale=0):
         """
         Initialize the model
         :param K:
@@ -522,6 +533,7 @@ class EasyFirstModel():
         :param src_embeddings
         :param tgt_embeddings
         :param l2_scale
+        :param l1_scale
         :param keep_prob
         :param keep_prob_sketch
         :param bilstm
@@ -548,6 +560,7 @@ class EasyFirstModel():
         self.src_embeddings = src_embeddings
         self.tgt_embeddings = tgt_embeddings
         self.l2_scale = l2_scale
+        self.l1_scale = l1_scale
         self.keep_prob = keep_prob
         self.keep_prob_sketch = keep_prob_sketch
         self.bilstm = bilstm
@@ -555,10 +568,10 @@ class EasyFirstModel():
         self.class_weights = class_weights if class_weights is not None else [1./K]*K
 
         self.path = "%s/ef_single_state_K%d_D%d_N%d_J%d_r%d_vocab%d_batch%d_opt%s_lr%0.4f_gradnorm%0.2f" \
-                    "_lstm%d_concat%r_window%d_weights%s_l2r%0.4f_dropout%0.2f_sketchdrop%0.2f.model" % \
+                    "_lstm%d_concat%r_window%d_weights%s_l2r%0.4f_l1r%0.4f_dropout%0.2f_sketchdrop%0.2f.model" % \
                     (model_dir, K, D, N, J, r, vocab_size, batch_size, optimizer,
                      learning_rate, max_gradient_norm, lstm_units, concat, window_size,
-                     "-".join([str(c) for c in class_weights]), l2_scale, keep_prob, keep_prob_sketch)
+                     "-".join([str(c) for c in class_weights]), l2_scale, l1_scale, keep_prob, keep_prob_sketch)
         print "Model path:", self.path
 
         if self.lstm_units > 0:
@@ -585,6 +598,9 @@ class EasyFirstModel():
 
         if self.l2_scale > 0:
             print "L2 regularizer with weight %f" % self.l2_scale
+
+        if self.l1_scale > 0:
+            print "L1 regularizer with weight %f" % self.l1_scale
 
         if forward_only:
             self.keep_prob = 1
@@ -640,13 +656,16 @@ class EasyFirstModel():
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 print "Initializing parameters for bucket with max len", max_len
                 bucket_losses, bucket_losses_reg, bucket_predictions = model_func(
-                    inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j], seq_lens=self.seq_lens[j],
-                    vocab_size=self.vocab_size, K=self.K, D=self.D, N=max_len,  # as many sketches as words in sequence
-                    J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units, concat=self.concat,
-                    window_size=self.window_size, src_embeddings=self.src_embeddings,
-                    tgt_embeddings=self.tgt_embeddings, class_weights=self.class_weights,
+                    inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j],
+                    seq_lens=self.seq_lens[j], vocab_size=self.vocab_size, K=self.K,
+                    D=self.D, N=max_len,  # as many sketches as words in sequence
+                    J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units,
+                    concat=self.concat, window_size=self.window_size,
+                    src_embeddings=self.src_embeddings, tgt_embeddings=self.tgt_embeddings,
+                    class_weights=self.class_weights,
                     keep_prob=self.keep_prob, keep_prob_sketch=self.keep_prob_sketch,
-                    l2_scale=self.l2_scale, bilstm=self.bilstm, activation=activation_func)
+                    l2_scale=self.l2_scale, l1_scale=self.l1_scale,
+                    bilstm=self.bilstm, activation=activation_func)
 
                 self.losses_reg.append(bucket_losses_reg)
                 self.losses.append(bucket_losses) # list of tensors, one for each bucket
@@ -728,7 +747,7 @@ def create_model(session, buckets, forward_only=False, src_embeddings=None, tgt_
                            window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale,
                            keep_prob=FLAGS.keep_prob, keep_prob_sketch=FLAGS.keep_prob_sketch,
                            model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm,
-                           model=model_type, activation=FLAGS.activation)
+                           model=model_type, activation=FLAGS.activation, l1_scale=FLAGS.l1_scale)
     checkpoint = tf.train.get_checkpoint_state("models")
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
         print "Reading model parameters from %s" % checkpoint.model_checkpoint_path
@@ -808,40 +827,51 @@ def train():
         print "Weights for classes:", class_weights
 
         # bucketing training and dev data
+
+        # quantile strategy
+        #data_buckets, reordering_indexes, bucket_edges = buckets_by_length(
+        #    [np.asarray(train_feature_vectors), np.asarray(dev_feature_vectors)],
+        #    [np.asarray(train_labels), np.asarray(dev_labels)], buckets=FLAGS.buckets,
+        #    max_len=FLAGS.L, mode="pad", strategy="quantile")
+        #train_buckets = data_buckets[0]
+        #dev_buckets = data_buckets[1]
+        #train_reordering_indexes = reordering_indexes[0]
+        #dev_reordering_indexes = reordering_indexes[1]
+
+        # equal strategy
         data_buckets, reordering_indexes, bucket_edges = buckets_by_length(
-            [np.asarray(train_feature_vectors), np.asarray(dev_feature_vectors)],
-            [np.asarray(train_labels), np.asarray(dev_labels)], buckets=FLAGS.buckets,
+            np.asarray(train_feature_vectors),
+            np.asarray(train_labels), buckets=FLAGS.buckets,
             max_len=FLAGS.L, mode="pad")
-        train_buckets = data_buckets[0]
-        dev_buckets = data_buckets[1]
-        train_reordering_indexes = reordering_indexes[0]
-        dev_reordering_indexes = reordering_indexes[1]
+        train_buckets = data_buckets
+        train_reordering_indexes = reordering_indexes
 
-        model = create_model(sess, bucket_edges[1:], False, src_embeddings, tgt_embeddings, class_weights, FLAGS.model)
+        # bucketing dev data
+        dev_buckets, dev_reordering_indexes = put_in_buckets(np.asarray(dev_feature_vectors),
+                                                             np.asarray(dev_labels),
+                                                             buckets=bucket_edges)
 
-        train_buckets_sizes = {i : len(indx) for i, indx in train_reordering_indexes.items()}
+
+        model = create_model(sess, bucket_edges, False, src_embeddings, tgt_embeddings, class_weights, FLAGS.model)
+
+        train_buckets_sizes = {i: len(indx) for i, indx in train_reordering_indexes.items()}
+        dev_buckets_sizes = {i: len(indx) for i, indx in dev_reordering_indexes.items()}
+
         print "Creating buckets for training data:"
         for i in train_buckets.keys():
             X_train_padded, Y_train_padded, train_masks, train_seq_lens = train_buckets[i]
-            total_number_of_pads = sum([bucket_edges[i+1]-l for l in train_seq_lens])
+            total_number_of_pads = sum([bucket_edges[i]-l for l in train_seq_lens])
             print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
-                  "%d number of PADS in total" % (i, bucket_edges[i+1], train_buckets_sizes[i],
+                  "%d number of PADS in total" % (i, bucket_edges[i], train_buckets_sizes[i],
                                                   np.average(train_seq_lens), total_number_of_pads)
 
-
-        # bucketing dev data
-        #dev_buckets, dev_reordering_indexes = put_in_buckets(np.asarray(dev_feature_vectors),
-        #                                                     np.asarray(dev_labels),
-        #                                                     buckets=bucket_edges)
-        dev_buckets_sizes = {i : len(indx) for i, indx in dev_reordering_indexes.items()}
-        #print dev_buckets_sizes
 
         print "Creating buckets for dev data:"
         for i in dev_buckets.keys():
             X_dev_padded, Y_dev_padded, dev_masks, dev_seq_lens = dev_buckets[i]
-            total_number_of_pads = sum([bucket_edges[i+1]-l for l in dev_seq_lens])
+            total_number_of_pads = sum([bucket_edges[i]-l for l in dev_seq_lens])
             print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
-                  "%d number of PADS in total" % (i, bucket_edges[i+1], dev_buckets_sizes[i],
+                  "%d number of PADS in total" % (i, bucket_edges[i], dev_buckets_sizes[i],
                                                   np.average(dev_seq_lens), total_number_of_pads)
 
         # training in epochs
