@@ -25,7 +25,7 @@ def load_embedding(pkl_file):
             id2word[i] = w
     print "Loaded embeddings for %d words with dimensionality %d" % (len(words), len(vectors[0]))
     print "Special tokens:", UNK_id, PAD_id, start_id, end_id
-    emb = embedding.embedding(vectors, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
+    emb = embedding.Embedding(vectors, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
     return emb
 
 
@@ -220,14 +220,14 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
         vocab, UNK_id, PAD_id, start_id, end_id = build_vocab(feature_label_file, "src", True)
         word2id = {word: i for i, word in enumerate(vocab)}
         id2word = {i: word for i, word in enumerate(vocab)}
-        embedding_src = embedding.embedding(None, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
+        embedding_src = embedding.Embedding(None, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
 
     if embedding_tgt is None:
         # if embeddings are not given, build vocabulary
         vocab, UNK_id, PAD_id, start_id, end_id = build_vocab(feature_label_file, "tgt", True)
         word2id = {word: i for i, word in enumerate(vocab)}
         id2word = {i: word for i, word in enumerate(vocab)}
-        embedding_tgt = embedding.embedding(None, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
+        embedding_tgt = embedding.Embedding(None, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
 
 
     # load features and labels

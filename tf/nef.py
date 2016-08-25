@@ -6,6 +6,7 @@ import time
 import sys
 from utils import *
 import math
+from embedding import *
 
 
 """
@@ -37,6 +38,7 @@ tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglo
 #tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
 #tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
 #tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
+tf.app.flags.DEFINE_boolean("update_emb", True, "update the embeddings")
 tf.app.flags.DEFINE_string("activation", "tanh", "activation function")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
 tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
@@ -63,7 +65,8 @@ FLAGS = tf.app.flags.FLAGS
 def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, r,
                     lstm_units, concat, window_size, keep_prob, keep_prob_sketch,
                     l2_scale, l1_scale, src_embeddings=None, tgt_embeddings=None,
-                    class_weights=None, bilstm=True, activation=tf.nn.tanh):
+                    class_weights=None, bilstm=True, activation=tf.nn.tanh,
+                    update_emb=True):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
     :param inputs:
@@ -99,7 +102,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
                                     shape=[src_embeddings.table.shape[0],
                                            src_embeddings.table.shape[1]],
                                     initializer=tf.constant_initializer(src_embeddings.table),
-                                    trainable=True)
+                                    trainable=update_emb)
                     D_loaded = len(tgt_embeddings.table[0])
                     #print "Loading existing src embeddings of dimensionality %d" % D_loaded
                     emb_size = D_loaded
@@ -115,7 +118,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
                         shape=[tgt_embeddings.table.shape[0],
                                tgt_embeddings.table.shape[1]],
                         initializer=tf.constant_initializer(tgt_embeddings.table),
-                        trainable=True)
+                        trainable=update_emb)
                     D_loaded = len(tgt_embeddings.table[0])
                     #print "Loading existing tgt embeddings of dimensionality %d" % D_loaded
                     emb_size += D_loaded
@@ -379,17 +382,17 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
                     tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
                 losses_reg += l1_loss
 
-        return losses, losses_reg, pred_labels
+        return losses, losses_reg, pred_labels, M_src, M_tgt
 
-    losses, losses_reg, predictions = forward(inputs, labels, masks, seq_lens, class_weights)
-    return losses, losses_reg, predictions
+    losses, losses_reg, predictions, M_src, M_tgt = forward(inputs, labels, masks, seq_lens, class_weights)
+    return losses, losses_reg, predictions, M_src, M_tgt
 
 
 def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
            src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob, l1_scale,
            keep_prob_sketch=1,
            lstm_units=0, bilstm=False, concat=False, r=0, N=0, seq_lens=None,
-           activation=tf.nn.tanh):
+           activation=tf.nn.tanh, update_emb=True):
     """
     QUETCH model for word-level QE predictions  (MLP based on embeddings)
     :param inputs:
@@ -427,7 +430,7 @@ def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
                                     shape=[src_embeddings.table.shape[0],
                                            src_embeddings.table.shape[1]],
                                     initializer=tf.constant_initializer(src_embeddings.table),
-                                    trainable=True)
+                                    trainable=update_emb)
             D_loaded = len(tgt_embeddings.table[0])
             emb_size = D_loaded
 
@@ -442,7 +445,7 @@ def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
                                     shape=[tgt_embeddings.table.shape[0],
                                            tgt_embeddings.table.shape[1]],
                                     initializer=tf.constant_initializer(tgt_embeddings.table),
-                                    trainable=True)
+                                    trainable=update_emb)
             D_loaded = len(tgt_embeddings.table[0])
             emb_size += D_loaded
 
@@ -502,7 +505,7 @@ def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
                 tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
             losses_reg += l1_loss
 
-    return losses, losses_reg, pred_labels
+    return losses, losses_reg, pred_labels, M_src, M_tgt
 
 
 class EasyFirstModel():
@@ -513,7 +516,8 @@ class EasyFirstModel():
                  max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
                  tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0,
                  keep_prob=1, keep_prob_sketch=1, model_dir="models/",
-                 bilstm=True, model="ef_single_state", activation="tanh", l1_scale=0):
+                 bilstm=True, model="ef_single_state", activation="tanh", l1_scale=0,
+                 update_emb=True):
         """
         Initialize the model
         :param K:
@@ -537,6 +541,7 @@ class EasyFirstModel():
         :param keep_prob_sketch
         :param bilstm
         :param model
+        :param update_emb
         :return:
         """
         self.K = K
@@ -567,10 +572,11 @@ class EasyFirstModel():
         self.class_weights = class_weights if class_weights is not None else [1./K]*K
 
         self.path = "%s/ef_single_state_K%d_D%d_N%d_J%d_r%d_vocab%d_batch%d_opt%s_lr%0.4f_gradnorm%0.2f" \
-                    "_lstm%d_concat%r_window%d_weights%s_l2r%0.4f_l1r%0.4f_dropout%0.2f_sketchdrop%0.2f.model" % \
+                    "_lstm%d_concat%r_window%d_weights%s_l2r%0.4f_l1r%0.4f_dropout%0.2f_sketchdrop%0.2f_updateemb%s.model" % \
                     (model_dir, K, D, N, J, r, vocab_size, batch_size, optimizer,
                      learning_rate, max_gradient_norm, lstm_units, concat, window_size,
-                     "-".join([str(c) for c in class_weights]), l2_scale, l1_scale, keep_prob, keep_prob_sketch)
+                     "-".join([str(c) for c in class_weights]), l2_scale, l1_scale,
+                     keep_prob, keep_prob_sketch, update_emb)
         print "Model path:", self.path
 
         if self.lstm_units > 0:
@@ -585,6 +591,10 @@ class EasyFirstModel():
                 print "Model with simple embeddings of size %d (src) & %d (tgt)" % \
                       (self.src_embeddings.table.shape[0], self.tgt_embeddings.table.shape[0])
 
+        if update_emb:
+            print "Updating the embeddings during training"
+        else:
+            print "Keeping the embeddings fixed"
 
         if self.N > 0:
             print "Model with %d sketches" % self.N
@@ -654,14 +664,14 @@ class EasyFirstModel():
                                                 shape=[None], name="seq_lens{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 print "Initializing parameters for bucket with max len", max_len
-                bucket_losses, bucket_losses_reg, bucket_predictions = model_func(
+                bucket_losses, bucket_losses_reg, bucket_predictions, src_table, tgt_table = model_func(
                     inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j],
                     seq_lens=self.seq_lens[j], vocab_size=self.vocab_size, K=self.K,
                     D=self.D, N=max_len,  # as many sketches as words in sequence
                     J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units,
                     concat=self.concat, window_size=self.window_size,
                     src_embeddings=self.src_embeddings, tgt_embeddings=self.tgt_embeddings,
-                    class_weights=self.class_weights,
+                    class_weights=self.class_weights, update_emb=update_emb,
                     keep_prob=self.keep_prob, keep_prob_sketch=self.keep_prob_sketch,
                     l2_scale=self.l2_scale, l1_scale=self.l1_scale,
                     bilstm=self.bilstm, activation=activation_func)
@@ -669,6 +679,8 @@ class EasyFirstModel():
                 self.losses_reg.append(bucket_losses_reg)
                 self.losses.append(bucket_losses) # list of tensors, one for each bucket
                 self.predictions.append(bucket_predictions)  # list of tensors, one for each bucket
+                self.src_table = src_table  # shared for all buckets
+                self.tgt_table = tgt_table
 
         # gradients and update operation for training the model
         if not forward_only:
@@ -745,7 +757,7 @@ def create_model(session, buckets, forward_only=False, src_embeddings=None, tgt_
                            src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
                            window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale,
                            keep_prob=FLAGS.keep_prob, keep_prob_sketch=FLAGS.keep_prob_sketch,
-                           model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm,
+                           model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm, update_emb=FLAGS.update_emb,
                            model=model_type, activation=FLAGS.activation, l1_scale=FLAGS.l1_scale)
     checkpoint = tf.train.get_checkpoint_state("models")
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
@@ -797,14 +809,14 @@ def train():
                       labeled=True)  # use training vocab for dev
 
         if FLAGS.src_embeddings == "":
-            src_embeddings = embedding.embedding(None, train_src_embeddings.word2id,
+            src_embeddings = embedding.Embedding(None, train_src_embeddings.word2id,
                                                  train_src_embeddings.id2word,
                                                  train_src_embeddings.UNK_id,
                                                  train_src_embeddings.PAD_id,
                                                  train_src_embeddings.end_id,
                                                  train_src_embeddings.start_id)
         if FLAGS.tgt_embeddings == "":
-            tgt_embeddings = embedding.embedding(None, train_tgt_embeddings.word2id,
+            tgt_embeddings = embedding.Embedding(None, train_tgt_embeddings.word2id,
                                                  train_tgt_embeddings.id2word,
                                                  train_tgt_embeddings.UNK_id,
                                                  train_tgt_embeddings.PAD_id,
@@ -954,6 +966,14 @@ def train():
         print "Training finished after %d epochs. Best validation result: %f at epoch %d." \
               % (epoch+1, best_valid, best_valid_epoch)
 
+        # dump final embeddings
+        src_lookup, tgt_lookup = sess.run([model.src_table, model.tgt_table])
+        src_embeddings.set_table(src_lookup)
+        tgt_embeddings.set_table(tgt_lookup)
+        src_embeddings.store("%s.%d.src.emb.pkl" % (model.path.split(".model")[0], epoch+1))
+        tgt_embeddings.store("%s.%d.tgt.emb.pkl" % (model.path.split(".model")[0], epoch+1))
+
+
 def test():
     """
     Test a model
@@ -973,7 +993,7 @@ def test():
             src_train_vocab = pkl.load(open(src_train_vocab_file, "rb"))
             src_word2id = {w: i for i, w in enumerate(src_train_vocab)}
             src_id2word = {i: w for w, i in src_word2id.items()}
-            src_embeddings = embedding.embedding(None, src_word2id, src_id2word, 0, 1, 2, 3)
+            src_embeddings = embedding.Embedding(None, src_word2id, src_id2word, 0, 1, 2, 3)
 
         if FLAGS.tgt_embeddings != "":
             tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
@@ -983,7 +1003,7 @@ def test():
             tgt_train_vocab = pkl.load(open(tgt_train_vocab_file, "rb"))
             tgt_word2id = {w: i for i, w in enumerate(tgt_train_vocab)}
             tgt_id2word = {i: w for w, i in tgt_word2id.items()}
-            tgt_embeddings = embedding.embedding(None, tgt_word2id, tgt_id2word, 0, 1, 2, 3)
+            tgt_embeddings = embedding.Embedding(None, tgt_word2id, tgt_id2word, 0, 1, 2, 3)
 
         test_dir = FLAGS.data_dir+"/task2_en-de_test/test.features"
         test_feature_vectors, test_tgt_sentences, test_labels, test_label_dict = \
@@ -1048,7 +1068,7 @@ def demo():
             src_train_vocab = pkl.load(open(src_train_vocab_file, "rb"))
             src_word2id = {w: i for i, w in enumerate(src_train_vocab)}
             src_id2word = {i: w for w, i in src_word2id.items()}
-            src_embeddings = embedding.embedding(None, src_word2id, src_id2word, 0, 1, 2, 3)
+            src_embeddings = embedding.Embedding(None, src_word2id, src_id2word, 0, 1, 2, 3)
 
         if FLAGS.tgt_embeddings != "":
             tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
@@ -1058,7 +1078,7 @@ def demo():
             tgt_train_vocab = pkl.load(open(tgt_train_vocab_file, "rb"))
             tgt_word2id = {w: i for i, w in enumerate(tgt_train_vocab)}
             tgt_id2word = {i: w for w, i in tgt_word2id.items()}
-            tgt_embeddings = embedding.embedding(None, tgt_word2id, tgt_id2word, 0, 1, 2, 3)
+            tgt_embeddings = embedding.Embedding(None, tgt_word2id, tgt_id2word, 0, 1, 2, 3)
 
         # load model
         class_weights = [1-FLAGS.bad_weight, FLAGS.bad_weight]  # QE-specific

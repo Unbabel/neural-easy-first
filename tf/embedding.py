@@ -2,7 +2,7 @@ import numpy as np
 import operator
 import cPickle as pkl
 
-class embedding:
+class Embedding:
     def __init__(self, table, word2id, id2word, UNK_id, PAD_id, end_id, start_id):
         self.table = table
         self.word2id = word2id
@@ -52,6 +52,14 @@ class embedding:
             new_id = self.word2id[word]
             #print "word exists", word, new_id
         return new_id
+
+    def set_table(self, table):
+        """
+        Set the lookup table by a numpy array
+        :param table:
+        :return:
+        """
+        self.table = table
 
     def store(self, file):
         """
