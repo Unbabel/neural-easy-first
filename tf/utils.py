@@ -7,6 +7,7 @@ import embedding
 from scipy import stats
 import operator
 
+
 def load_embedding(pkl_file):
     word2id = {}
     id2word = {}
@@ -23,11 +24,85 @@ def load_embedding(pkl_file):
             word2id[w] = i
             id2word[i] = w
     print "Loaded embeddings for %d words with dimensionality %d" % (len(words), len(vectors[0]))
-    print "Special tokens:", UNK_id, PAD_id, start_id, end_id
-    emb = embedding.embedding(vectors, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
+    #print "Special tokens:", UNK_id, PAD_id, start_id, end_id
+    emb = embedding.Embedding(vectors, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
     return emb
 
-def load_vocabs(feature_file, src_limit=0, tgt_limit=0):
+
+def load_vocabs(train_src, train_tgt, train_features, src_limit,tgt_limit, freq_limit):
+    """
+    Load the vocabulary of src and tgt size of a qe corpus
+    and limit it to a certain size (by frequency).
+    In contrast to 'load_vocabs_from_features' the absolute frequencies are
+    not distorted by alignments.
+    :param train_src:
+    :param train_tgt:
+    :param train_features:
+    :param src_limit:
+    :param tgt_limit:
+    :param freq_limit:
+    :return:
+    """
+    src_vocab = {}
+    tgt_vocab = {}
+
+    # count occurrences in tgt and src text
+    with codecs.open(train_src, "r", "utf8") as src, \
+        codecs.open(train_tgt, "r", "utf8") as tgt:
+        for src_line in src:
+            src_tokens = src_line.split()
+            for src_token in src_tokens:
+                freq = src_vocab.get(src_token, 0)
+                src_vocab[src_token] = freq+1
+        for tgt_line in tgt:
+            tgt_tokens = tgt_line.split()
+            for tgt_token in tgt_tokens:
+                freq = tgt_vocab.get(tgt_token, 0)
+                tgt_vocab[tgt_token] = freq+1
+
+    # count occurrences of combinations of multiple aligned src words
+    with codecs.open(train_features, "r", "utf8") as qe_data:
+        for line in qe_data:
+            stripped = line.strip()
+            if stripped == "":  # sentence end
+                continue
+            else:
+                split_line = stripped.split("\t")
+                src_tokens = split_line[6:9]
+                for src_token in src_tokens:
+                    if "|" in src_token:  # multiple alignments: treat as single and as combined word
+                        freq = src_vocab.get(src_token, 0)
+                        src_vocab[src_token] = freq + 1
+
+     # sort by frequency (descending)
+    src_vocab_by_freq = sorted(src_vocab.items(), key=operator.itemgetter(1), reverse=True)
+    tgt_vocab_by_freq = sorted(tgt_vocab.items(), key=operator.itemgetter(1), reverse=True)
+
+    print "found %d tokens in train src vocabulary" % len(src_vocab_by_freq)
+    print "found %d tokens in train tgt vocabulary" % len(tgt_vocab_by_freq)
+
+    #cut off infrequent ones
+    if src_limit > 0:
+        src_vocab_by_freq = src_vocab_by_freq[:src_limit]
+        print "cutting down src vocab to %d tokens" % len(src_vocab_by_freq)
+    if tgt_limit > 0:
+        tgt_vocab_by_freq = tgt_vocab_by_freq[:tgt_limit]
+        print "cutting down tgt vocab to %d tokens" % len(tgt_vocab_by_freq)
+    if freq_limit > 0:
+        src_vocab_by_freq = [(word, freq) for (word, freq) in src_vocab_by_freq if freq > freq_limit]
+        tgt_vocab_by_freq = [(word, freq) for (word, freq) in tgt_vocab_by_freq if freq > freq_limit]
+
+    vocab = {"<PAD>", "<UNK>", "<s>", "</s>"}
+    src_words = list(set(map(operator.itemgetter(0), src_vocab_by_freq)).union(vocab))
+    tgt_words = list(set(map(operator.itemgetter(0), tgt_vocab_by_freq)).union(vocab))
+
+    print "final %d tokens in src vocabulary" % len(src_words)
+    print "final %d tokens in tgt vocabulary" % len(tgt_words)
+
+    return src_words, tgt_words
+
+
+def load_vocabs_from_features(feature_file, src_limit=0, tgt_limit=0):
     """
     Load the vocabulary of a qe corpus (in "feature and tags file")
     and limit it to a certain size (by frequency)
@@ -47,7 +122,7 @@ def load_vocabs(feature_file, src_limit=0, tgt_limit=0):
                 continue
             else:
                 split_line = stripped.split("\t")
-                tgt_tokens = split_line[3:6]
+                tgt_tokens = split_line[3]
                 src_tokens = split_line[6:9]
                 for src_token in src_tokens:
                     if src_token == " ":
@@ -145,14 +220,14 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
         vocab, UNK_id, PAD_id, start_id, end_id = build_vocab(feature_label_file, "src", True)
         word2id = {word: i for i, word in enumerate(vocab)}
         id2word = {i: word for i, word in enumerate(vocab)}
-        embedding_src = embedding.embedding(None, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
+        embedding_src = embedding.Embedding(None, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
 
     if embedding_tgt is None:
         # if embeddings are not given, build vocabulary
         vocab, UNK_id, PAD_id, start_id, end_id = build_vocab(feature_label_file, "tgt", True)
         word2id = {word: i for i, word in enumerate(vocab)}
         id2word = {i: word for i, word in enumerate(vocab)}
-        embedding_tgt = embedding.embedding(None, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
+        embedding_tgt = embedding.Embedding(None, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
 
 
     # load features and labels
@@ -179,7 +254,6 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                     break
             else:  # one word per line
                 split_line = stripped.split("\t")
-
                 # select features
                 token = split_line[3]
                 left_context = split_line[4]
@@ -231,8 +305,8 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                 label_sentence.append(label_dict[label])
 
     print "Loaded %d sentences" % len(feature_vectors)
-    print "%d UNK words in src: %s, ..." % (len(src_unks), ", ".join(list(src_unks)[:10]))
-    print "%d UNK words in tgt: %s, ..." % (len(tgt_unks), ", ".join(list(tgt_unks)[:10]))
+    print "%d UNK words in src" % len(src_unks)
+    print "%d UNK words in tgt" % len(tgt_unks)
     if train:
         return feature_vectors, tgt_sentences, labels, label_dict, embedding_src, embedding_tgt
     else:
@@ -272,10 +346,11 @@ def pad_data(X, Y, max_len, PAD_symbol=0):
     #print "padded", X_padded[0], seq_lens[0]
     return X_padded, Y_padded, masks, np.asarray(seq_lens)
 
-def buckets_by_length(data_list, label_list, buckets=20, max_len=0, mode='pad'):
+
+def buckets_by_length(data, labels, buckets=20, max_len=0, mode='pad'):
     """
-    :param data_list: a list of numpy arrays of data
-    :param label_list: a list of numpy arrays of labels
+    :param data: numpy arrays of data
+    :param labels: numpy arrays of labels
     :param buckets: list of buckets (lengths) into which to group samples according to their length.
     :param mode: either 'truncate' or 'pad':
                 * When truncation, remove the final part of a sample that does not match a bucket length;
@@ -283,69 +358,38 @@ def buckets_by_length(data_list, label_list, buckets=20, max_len=0, mode='pad'):
                 The obvious consequence of truncating is that no sample will be padded.
     :return: a dictionary of grouped data and a dictionary of the data original indexes, both keyed by bucket, and the bin edges
     """
-    train_data = data_list[0]
-    train_labels = label_list[0]
-    dev_data = None
-    dev_labels = None
-    if len(data_list) == 2:
-        print "bucketing according to train AND dev sentence lengths"
-        dev_data = data_list[1]
-        dev_labels = label_list[1]
-        data = np.concatenate((train_data, dev_data))
-    elif len(data_list) == 1:
-        data = train_data
-    else:
-        raise NotImplementedError("Bucketing for more than two datasets not implemented")
     input_lengths = np.array([len(s) for s in data], dtype='int')  # for dev and train (if dev given)
 
-    if buckets > 1:
-        maxlen = max_len if max_len > 0 else max(input_lengths) + 1
-        buckets = np.linspace(min(input_lengths)-1, maxlen, buckets, dtype='int')
-        bin_edges = stats.mstats.mquantiles(input_lengths, (buckets - buckets[0]) /
-                                            float(max_len - buckets[0]))
-        if max_len > int(bin_edges[-1]):  # if specified maximum length is longer than all train and dev instances
-            bin_edges = np.append([int(b) for b in bin_edges], [max_len])
-        else:
-            bin_edges = np.array([int(b) for b in bin_edges])
-        train_input_bucket_index = [i if i < len(buckets) else len(buckets)-1 for i in
-                                    np.digitize(input_lengths[:len(train_data)], buckets, right=False)]  # truncate too long sentences
-        dev_input_bucket_index = [i if i < len(buckets) else len(buckets)-1 for i in
-                                  np.digitize(input_lengths[len(train_data):], buckets, right=False)]
-        if mode == 'truncate':
-            train_input_bucket_index -= 1
-            dev_input_bucket_index -= 1
+    maxlen = max_len if max_len > 0 else max(input_lengths) + 1
 
-    else:  # put data in one bucket of max_len length
-        buckets = [max_len]
-        bin_edges = [0, max_len]
-        train_input_bucket_index = [1 for i in input_lengths[:len(train_data)]]
-        dev_input_bucket_index = [1 for i in input_lengths[len(train_data):]]
-    print "bin edges:", bin_edges
-
+    # sort data by length
+    # split this array into 'bucket' many parts, these are the buckets
+    data_lengths_with_idx = [(len(s), i) for i, s in enumerate(data)]
+    sorted_data_lengths_with_idx = sorted(data_lengths_with_idx, key=operator.itemgetter(0))
+    bucket_size = int(np.ceil(len(data)/float(buckets)))
+    print "Creating %d Buckets of size %d" % (buckets, bucket_size)
+    buckets_data = [sorted_data_lengths_with_idx[i:i+bucket_size] for i in xrange(0, len(sorted_data_lengths_with_idx), bucket_size)]
+    bin_edges = [bucket[-1][0] for bucket in buckets_data]  # max len of sequence in bucket
+    print "bin_edges", bin_edges
+    if bin_edges[-1] < maxlen:
+        bin_edges[-1] = maxlen
+    print "final bin_edges", bin_edges
+    input_bucket_index = np.zeros(shape=len(data), dtype=int)
+    for bucket_idx, bucket in enumerate(buckets_data):
+        for l, d_idx in bucket:
+            input_bucket_index[d_idx] = bucket_idx
 
     # pad and bucket train data
-    bucketed_train_data = {}
-    bucketed_dev_data = {}
+    bucketed_data = {}
     reordering_indexes_train = {}
-    reordering_indexes_dev = {}
-    for bucket in list(np.unique(train_input_bucket_index)):
-        length_indexes = np.where(train_input_bucket_index == bucket)[0]
-        reordering_indexes_train[bucket-1] = length_indexes
-        maxlen = int(np.floor(bin_edges[bucket]))
-        padded_train = pad_data(train_data[length_indexes], train_labels[length_indexes], max_len=maxlen)
-        bucketed_train_data[bucket-1] = padded_train  # in final dict, start counting by zero
+    for bucket in list(np.unique(input_bucket_index)):
+        length_indexes = np.where(input_bucket_index == bucket)[0]
+        reordering_indexes_train[bucket] = length_indexes
+        maxlen = bin_edges[bucket]
+        padded_data = pad_data(data[length_indexes], labels[length_indexes], max_len=maxlen)
+        bucketed_data[bucket] = padded_data # in final dict, start counting by zero
 
-    # pad and bucket dev data
-    if dev_data is not None:
-        for bucket in list(np.unique(dev_input_bucket_index)):
-            length_indexes = np.where(dev_input_bucket_index == bucket)[0]
-            reordering_indexes_dev[bucket-1] = length_indexes
-            maxlen = int(np.floor(bin_edges[bucket]))
-            padded_dev = pad_data(dev_data[length_indexes], dev_labels[length_indexes], max_len=maxlen)
-            bucketed_dev_data[bucket-1] = padded_dev  # in final dict, start counting by zero
-
-    return [bucketed_train_data, bucketed_dev_data], \
-           [reordering_indexes_train, reordering_indexes_dev], bin_edges
+    return bucketed_data, reordering_indexes_train, bin_edges
 
 
 def put_in_buckets(data_array, labels, buckets, mode='pad'):
@@ -364,11 +408,12 @@ def put_in_buckets(data_array, labels, buckets, mode='pad'):
     reordering_indexes = {}
     for bucket in list(np.unique(input_bucket_index)):
         length_indexes = np.where(input_bucket_index == bucket)[0]
-        reordering_indexes[bucket-1] = length_indexes
+        reordering_indexes[bucket] = length_indexes
         maxlen = int(np.floor(buckets[bucket]))
         padded = pad_data(data_array[length_indexes], labels[length_indexes], max_len=maxlen)
-        bucketed_data[bucket-1] = padded  # in final dict, start counting by zero
+        bucketed_data[bucket] = padded  # in final dict, start counting by zero
     return bucketed_data, reordering_indexes
+
 
 def accuracy(y_i, predictions):
     """
@@ -435,25 +480,34 @@ if __name__ == "__main__":
 
     # test data loader
     data_file = "../data/WMT2016/WMT2016/task2_en-de_dev/dev.basic_features_with_tags"
-    data = load_data(data_file, src_embeddings, tgt_embeddings,  max_sent=10)
+    data = load_data(data_file, src_embeddings, tgt_embeddings,  max_sent=100)
     print data
 
     # test padding and bucketing
     feature_vectors, tgt_sentences, labels, label_dict = data
     #print pad_data(feature_vectors, labels, max_len=30)
 
-    bucketed_data, reordering_indexes, bucket_edges = buckets_by_length(np.asarray(feature_vectors),
-                                                          np.asarray(labels), buckets=3, mode="pad")
-    print "bucketed data", bucketed_data  # X_padded, Y_padded, masks, seq_lens
+    bucketed_data, reordering_indexes, bucket_edges = buckets_by_length([np.asarray(feature_vectors)],
+                                                          [np.asarray(labels)], buckets=3, mode="pad")
+    #print "bucketed data", bucketed_data  # X_padded, Y_padded, masks, seq_lens
     print "reordering idx", reordering_indexes
     print "bucket edges", bucket_edges
 
     # test putting in pre-defined buckets
     bucketed_data_2, reordering_indexes_2 = put_in_buckets(np.asarray(feature_vectors), np.asarray(labels), buckets=bucket_edges)
-    print "bucketed data (2)", bucketed_data_2
+    #print "bucketed data (2)", bucketed_data_2
     print "reordering idx (2)", reordering_indexes_2
 
-    assert np.array_equal(bucketed_data[-1][0],bucketed_data_2[-1][0])
+    # test equal strategy
+    bucketed_data, reordering_indexes, bucket_edges = buckets_by_length([np.asarray(feature_vectors)],
+                                                          [np.asarray(labels)], buckets=3, mode="pad", strategy="equal")
+    #print "bucketed data", bucketed_data  # X_padded, Y_padded, masks, seq_lens
+    print "reordering idx", reordering_indexes
+    print "bucket edges", bucket_edges
+
+    bucketed_data_2, reordering_indexes_2 = put_in_buckets(np.asarray(feature_vectors), np.asarray(labels), buckets=bucket_edges)
+    #print "bucketed data (3)", bucketed_data_2
+    print "reordering idx (3)", reordering_indexes_2
 
 
     # test f1 eval
