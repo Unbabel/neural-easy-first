@@ -24,7 +24,7 @@ def load_embedding(pkl_file):
             word2id[w] = i
             id2word[i] = w
     print "Loaded embeddings for %d words with dimensionality %d" % (len(words), len(vectors[0]))
-    print "Special tokens:", UNK_id, PAD_id, start_id, end_id
+    #print "Special tokens:", UNK_id, PAD_id, start_id, end_id
     emb = embedding.Embedding(vectors, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
     return emb
 
@@ -254,7 +254,6 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                     break
             else:  # one word per line
                 split_line = stripped.split("\t")
-
                 # select features
                 token = split_line[3]
                 left_context = split_line[4]

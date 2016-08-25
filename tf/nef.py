@@ -24,7 +24,8 @@ tf.app.flags.DEFINE_string("optimizer", "adam", "Optimizer [sgd, adam, adagrad, 
                                                     "momentum]")
 tf.app.flags.DEFINE_integer("batch_size", 200,
                             "Batch size to use during training.")
-tf.app.flags.DEFINE_integer("vocab_size", 20000, "Vocabulary size.")
+tf.app.flags.DEFINE_integer("src_vocab_size", 10000, "Vocabulary size.")
+tf.app.flags.DEFINE_integer("tgt_vocab_size", 10000, "Vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
@@ -62,7 +63,7 @@ tf.app.flags.DEFINE_integer("threads", 8, "number of threads")
 FLAGS = tf.app.flags.FLAGS
 
 
-def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, r,
+def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_size, K, D, N, J, L, r,
                     lstm_units, concat, window_size, keep_prob, keep_prob_sketch,
                     l2_scale, l1_scale, src_embeddings=None, tgt_embeddings=None,
                     class_weights=None, bilstm=True, activation=tf.nn.tanh,
@@ -71,7 +72,8 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
     :param inputs:
     :param labels:
-    :param vocab_size:
+    :param src_vocab_size:
+    :param tgt_vocab_size:
     :param K:
     :param D:
     :param N:
@@ -94,7 +96,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
             with tf.name_scope("embedding"):
                 if src_embeddings.table is None:
                     #print "Random src embeddings of dimensionality %d" % D
-                    M_src = tf.get_variable(name="M_src", shape=[vocab_size, D], # TODO vocab size
+                    M_src = tf.get_variable(name="M_src", shape=[src_vocab_size, D],
                                     initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
                     emb_size = D
                 else:
@@ -110,7 +112,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
 
                 if tgt_embeddings.table is None:
                     #print "Random tgt embeddings of dimensionality %d" % D
-                    M_tgt = tf.get_variable(name="M_tgt", shape=[vocab_size, D],
+                    M_tgt = tf.get_variable(name="M_tgt", shape=[tgt_vocab_size, D],
                                     initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
                     emb_size += D
                 else:
@@ -133,7 +135,8 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
                 emb_tgt = tf.nn.embedding_lookup(M_tgt, x_src, name="emg_tgt")  # batch_size x L x window_size x emb_size
                 emb_src = tf.nn.embedding_lookup(M_src, x_tgt, name="emb_src")  # batch_size x L x window_size x emb_size
                 emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
-                emb = tf.reshape(emb_comb, [batch_size, L, window_size*emb_size], name="emb") # batch_size x L x window_size*emb_size
+                emb = tf.reshape(emb_comb, [batch_size, L, window_size*emb_size],
+                                 name="emb") # batch_size x L x window_size*emb_size
 
             if lstm_units > 0:
 
@@ -145,10 +148,17 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
 
                         if keep_prob < 1:
                             #print "Dropping out LSTM output"
-                            fw_cell = tf.nn.rnn_cell.DropoutWrapper(fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
-                            bw_cell = tf.nn.rnn_cell.DropoutWrapper(bw_cell, input_keep_prob=1, output_keep_prob=keep_prob)
+                            fw_cell = \
+                                tf.nn.rnn_cell.DropoutWrapper(
+                                    fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
+                            bw_cell = \
+                                tf.nn.rnn_cell.DropoutWrapper(
+                                    bw_cell, input_keep_prob=1, output_keep_prob=keep_prob)
 
-                        outputs, _ = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, emb, sequence_length=seq_lens, dtype=tf.float32, time_major=False)
+                        outputs, _ = \
+                            tf.nn.bidirectional_dynamic_rnn(
+                                fw_cell, bw_cell, emb, sequence_length=seq_lens,
+                                dtype=tf.float32, time_major=False)
                         outputs = tf.concat(2, outputs)
                         state_size = 2*lstm_units  # concat of fw and bw lstm output
                 else:
@@ -156,9 +166,12 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
 
                         if keep_prob < 1:
                             #print "Dropping out LSTM output"
-                            fw_cell = tf.nn.rnn_cell.DropoutWrapper(fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
+                            fw_cell = tf.nn.rnn_cell.DropoutWrapper(
+                                fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
 
-                        outputs, _, = tf.nn.dynamic_rnn(cell=fw_cell, inputs=emb, sequence_length=seq_lens, dtype=tf.float32, time_major=False)
+                        outputs, _, = tf.nn.dynamic_rnn(
+                            cell=fw_cell, inputs=emb, sequence_length=seq_lens,
+                            dtype=tf.float32, time_major=False)
                         state_size = lstm_units
 
                 # 'outputs' is a list of output at every timestep (until L)
@@ -388,7 +401,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, vocab_size, K, D, N, J, L, 
     return losses, losses_reg, predictions, M_src, M_tgt
 
 
-def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
+def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, window_size,
            src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob, l1_scale,
            keep_prob_sketch=1,
            lstm_units=0, bilstm=False, concat=False, r=0, N=0, seq_lens=None,
@@ -399,7 +412,8 @@ def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
     :param labels:
     :param masks:
     :param seq_lens:
-    :param vocab_size:
+    :param src_vocab_size:
+    :param tgt_vocab_size:
     :param K:
     :param D:
     :param N:
@@ -421,7 +435,7 @@ def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
     batch_size = tf.shape(inputs)[0]
     with tf.name_scope("embedding"):
         if src_embeddings.table is None:
-            M_src = tf.get_variable(name="M_src", shape=[vocab_size, D],
+            M_src = tf.get_variable(name="M_src", shape=[src_vocab_size, D],
                             initializer=tf.contrib.layers.xavier_initializer(
                                 uniform=True, dtype=tf.float32))
             emb_size = D
@@ -436,7 +450,7 @@ def quetch(inputs, labels, masks, vocab_size, K, D, J, L, window_size,
 
 
         if tgt_embeddings.table is None:
-            M_tgt = tf.get_variable(name="M_tgt", shape=[vocab_size, D],
+            M_tgt = tf.get_variable(name="M_tgt", shape=[tgt_vocab_size, D],
                             initializer=tf.contrib.layers.xavier_initializer(
                                 uniform=True, dtype=tf.float32))
             emb_size += D
@@ -512,7 +526,7 @@ class EasyFirstModel():
     """
     Neural easy-first model
     """
-    def __init__(self, K, D, N, J, r, vocab_size, batch_size, optimizer, learning_rate,
+    def __init__(self, K, D, N, J, r, src_vocab_size, tgt_vocab_size, batch_size, optimizer, learning_rate,
                  max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
                  tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0,
                  keep_prob=1, keep_prob_sketch=1, model_dir="models/",
@@ -526,7 +540,8 @@ class EasyFirstModel():
         :param J:
         :param r:
         :param lstm_units:
-        :param vocab_size:
+        :param src_vocab_size:
+        :param tgt_vocab_size:
         :param batch_size:
         :param optimizer:
         :param learning_rate:
@@ -550,7 +565,8 @@ class EasyFirstModel():
         self.J = J
         self.r = r
         self.lstm_units = lstm_units
-        self.vocab_size = vocab_size
+        self.src_vocab_size = src_vocab_size
+        self.tgt_vocab_size = tgt_vocab_size
         self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.concat = concat
@@ -568,15 +584,21 @@ class EasyFirstModel():
         self.keep_prob = keep_prob
         self.keep_prob_sketch = keep_prob_sketch
         self.bilstm = bilstm
+        self.max_gradient_norm = max_gradient_norm
+        self.update_emb = update_emb
+        self.model_dir = model_dir
 
         self.class_weights = class_weights if class_weights is not None else [1./K]*K
 
-        self.path = "%s/ef_single_state_K%d_D%d_N%d_J%d_r%d_vocab%d_batch%d_opt%s_lr%0.4f_gradnorm%0.2f" \
-                    "_lstm%d_concat%r_window%d_weights%s_l2r%0.4f_l1r%0.4f_dropout%0.2f_sketchdrop%0.2f_updateemb%s.model" % \
-                    (model_dir, K, D, N, J, r, vocab_size, batch_size, optimizer,
-                     learning_rate, max_gradient_norm, lstm_units, concat, window_size,
-                     "-".join([str(c) for c in class_weights]), l2_scale, l1_scale,
-                     keep_prob, keep_prob_sketch, update_emb)
+        self.path = "%s/%s_K%d_D%d_N%d_J%d_r%d_batch%d_opt%s_lr%0.4f_gradnorm%0.2f" \
+                    "_lstm%d_concat%r_window%d_weights%s_l2r%0.4f_l1r%0.4f_dropout%0.2f_sketchdrop%0.2f_updateemb%s_srcvoc%d_tgtvoc%d.model" % \
+                    (self.model_dir, model, self.K, self.D, self.N, self.J,
+                     self.r, self.batch_size, optimizer,
+                     self.learning_rate, self.max_gradient_norm, self.lstm_units,
+                     self.concat, self.window_size,
+                     "-".join([str(c) for c in class_weights]), self.l2_scale,
+                     self.l1_scale, self.keep_prob, self.keep_prob_sketch,
+                     self.update_emb, self.src_vocab_size, self.tgt_vocab_size)
         print "Model path:", self.path
 
         if self.lstm_units > 0:
@@ -621,12 +643,12 @@ class EasyFirstModel():
 
         self.buckets = buckets
 
-        buckets_path = self.path+".buckets.pkl"
+        buckets_path = self.path.split(".model", 2)[0]+".buckets.pkl"
         if self.buckets is not None:  # store bucket edges
-            print "Dumping bucket edges"
+            print "Dumping bucket edges in %s" % buckets_path
             pkl.dump(self.buckets, open(buckets_path, "wb"))
         else:  # load bucket edges
-            print "Loading bucket edges"
+            print "Loading bucket edges from %s" % buckets_path
             self.buckets = pkl.load(open(buckets_path, "rb"))
         print "Buckets:", self.buckets
 
@@ -666,7 +688,8 @@ class EasyFirstModel():
                 print "Initializing parameters for bucket with max len", max_len
                 bucket_losses, bucket_losses_reg, bucket_predictions, src_table, tgt_table = model_func(
                     inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j],
-                    seq_lens=self.seq_lens[j], vocab_size=self.vocab_size, K=self.K,
+                    seq_lens=self.seq_lens[j], src_vocab_size=self.src_vocab_size,
+                    tgt_vocab_size=self.tgt_vocab_size, K=self.K,
                     D=self.D, N=max_len,  # as many sketches as words in sequence
                     J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units,
                     concat=self.concat, window_size=self.window_size,
@@ -741,8 +764,9 @@ class EasyFirstModel():
         return outputs[0], predictions, outputs[2]  # loss, predictions, regularized loss
 
 
-def create_model(session, buckets, forward_only=False, src_embeddings=None, tgt_embeddings=None,
-                 class_weights=None, model_type="ef_single_state"):
+def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
+                 forward_only=False, src_embeddings=None, tgt_embeddings=None,
+                 class_weights=None):
     """
     Create a model
     :param session:
@@ -750,7 +774,8 @@ def create_model(session, buckets, forward_only=False, src_embeddings=None, tgt_
     :return:
     """
     model = EasyFirstModel(K=FLAGS.K, D=FLAGS.D, N=FLAGS.N, J=FLAGS.J, r=FLAGS.r,
-                           vocab_size=FLAGS.vocab_size, batch_size=FLAGS.batch_size,
+                           src_vocab_size=src_vocab_size, tgt_vocab_size=tgt_vocab_size,
+                           batch_size=FLAGS.batch_size,
                            optimizer=FLAGS.optimizer, learning_rate=FLAGS.learning_rate,
                            max_gradient_norm=FLAGS.max_gradient_norm, lstm_units=FLAGS.lstm_units,
                            concat=FLAGS.concat, forward_only=forward_only, buckets=buckets,
@@ -758,7 +783,7 @@ def create_model(session, buckets, forward_only=False, src_embeddings=None, tgt_
                            window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale,
                            keep_prob=FLAGS.keep_prob, keep_prob_sketch=FLAGS.keep_prob_sketch,
                            model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm, update_emb=FLAGS.update_emb,
-                           model=model_type, activation=FLAGS.activation, l1_scale=FLAGS.l1_scale)
+                           model=FLAGS.model, activation=FLAGS.activation, l1_scale=FLAGS.l1_scale)
     checkpoint = tf.train.get_checkpoint_state("models")
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
         print "Reading model parameters from %s" % checkpoint.model_checkpoint_path
@@ -797,7 +822,6 @@ def train():
         else:
             tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
 
-
         train_feature_vectors, train_tgt_sentences, train_labels, train_label_dict, \
         train_src_embeddings, train_tgt_embeddings = load_data(train_dir, src_embeddings,
                                                                tgt_embeddings,
@@ -808,6 +832,7 @@ def train():
             load_data(dev_dir, train_src_embeddings, train_tgt_embeddings, train=False,
                       labeled=True)  # use training vocab for dev
 
+
         if FLAGS.src_embeddings == "":
             src_embeddings = embedding.Embedding(None, train_src_embeddings.word2id,
                                                  train_src_embeddings.id2word,
@@ -815,6 +840,10 @@ def train():
                                                  train_src_embeddings.PAD_id,
                                                  train_src_embeddings.end_id,
                                                  train_src_embeddings.start_id)
+            src_vocab_size = FLAGS.src_vocab_size
+        else:
+            src_vocab_size = len(train_src_embeddings.word2id)
+
         if FLAGS.tgt_embeddings == "":
             tgt_embeddings = embedding.Embedding(None, train_tgt_embeddings.word2id,
                                                  train_tgt_embeddings.id2word,
@@ -822,9 +851,11 @@ def train():
                                                  train_tgt_embeddings.PAD_id,
                                                  train_tgt_embeddings.end_id,
                                                  train_tgt_embeddings.start_id)
+            tgt_vocab_size = FLAGS.tgt_vocab_size
+        else:
+            tgt_vocab_size = len(train_tgt_embeddings.word2id)
 
-        src_vocab_size = len(train_src_embeddings.word2id)
-        tgt_vocab_size = len(train_tgt_embeddings.word2id)
+
         print "src vocab size", src_vocab_size
         print "tgt vocab size", tgt_vocab_size
 
@@ -852,11 +883,13 @@ def train():
                                                              np.asarray(dev_labels),
                                                              buckets=bucket_edges)
 
-
-        model = create_model(sess, bucket_edges, False, src_embeddings, tgt_embeddings, class_weights, FLAGS.model)
+        # create the model
+        model = create_model(sess, bucket_edges, src_vocab_size, tgt_vocab_size,
+                             False, src_embeddings, tgt_embeddings,class_weights)
 
         train_buckets_sizes = {i: len(indx) for i, indx in train_reordering_indexes.items()}
         dev_buckets_sizes = {i: len(indx) for i, indx in dev_reordering_indexes.items()}
+
 
         print "Creating buckets for training data:"
         for i in train_buckets.keys():
@@ -865,7 +898,6 @@ def train():
             print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
                   "%d number of PADS in total" % (i, bucket_edges[i], train_buckets_sizes[i],
                                                   np.average(train_seq_lens), total_number_of_pads)
-
 
         print "Creating buckets for dev data:"
         for i in dev_buckets.keys():
@@ -982,42 +1014,25 @@ def test():
     print "Testing"
     FLAGS.restore = True  # has to be loaded
     with tf.Session() as sess:
-         # load data and embeddings
 
-        if FLAGS.src_embeddings != "":
-            src_embeddings = load_embedding(FLAGS.src_embeddings)
+        # load the embeddings
+        src_embeddings = load_embedding(FLAGS.src_embeddings)
+        tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
+        src_vocab_size = src_embeddings.table.shape[0]
+        tgt_vocab_size = tgt_embeddings.table.shape[0]
 
-        else:
-            src_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.src.pkl"
-            print "Reading src vocabulary from %s" % src_train_vocab_file
-            src_train_vocab = pkl.load(open(src_train_vocab_file, "rb"))
-            src_word2id = {w: i for i, w in enumerate(src_train_vocab)}
-            src_id2word = {i: w for w, i in src_word2id.items()}
-            src_embeddings = embedding.Embedding(None, src_word2id, src_id2word, 0, 1, 2, 3)
-
-        if FLAGS.tgt_embeddings != "":
-            tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
-        else:
-            tgt_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.tgt.pkl"
-            print "Reading tgt vocabulary from %s" % tgt_train_vocab_file
-            tgt_train_vocab = pkl.load(open(tgt_train_vocab_file, "rb"))
-            tgt_word2id = {w: i for i, w in enumerate(tgt_train_vocab)}
-            tgt_id2word = {i: w for w, i in tgt_word2id.items()}
-            tgt_embeddings = embedding.Embedding(None, tgt_word2id, tgt_id2word, 0, 1, 2, 3)
-
-        test_dir = FLAGS.data_dir+"/task2_en-de_test/test.features"
+        test_dir = FLAGS.data_dir+"/task2_en-de_test/test.corrected_full_parsed_features_with_tags"
         test_feature_vectors, test_tgt_sentences, test_labels, test_label_dict = \
             load_data(test_dir, src_embeddings, tgt_embeddings, train=False,
-                      labeled=False)
+                      labeled=True)
 
         # load model
-        class_weights = [1-FLAGS.bad_weight, FLAGS.bad_weight]  #QE-specific
-        model = create_model(sess, buckets=None, forward_only=True, src_embeddings=src_embeddings,
+        class_weights = [1, FLAGS.bad_weight]  #QE-specific
+        model = create_model(sess, src_vocab_size=src_vocab_size, tgt_vocab_size=tgt_vocab_size, buckets=None, forward_only=True, src_embeddings=src_embeddings,
                              tgt_embeddings=tgt_embeddings, class_weights=class_weights)
 
         # bucketing test data
-        bucket_edges = [0]
-        bucket_edges.extend(model.buckets)
+        bucket_edges = model.buckets
         test_buckets, test_reordering_indexes = put_in_buckets(np.asarray(test_feature_vectors),
                                                                np.asarray(test_labels),
                                                                buckets=bucket_edges)
@@ -1026,9 +1041,9 @@ def test():
         print "Creating buckets for test data:"
         for i in test_buckets.keys():
             X_test_padded, Y_test_padded, test_masks, test_seq_lens = test_buckets[i]
-            total_number_of_pads = sum([bucket_edges[i+1]-l for l in test_seq_lens])
+            total_number_of_pads = sum([bucket_edges[i]-l for l in test_seq_lens])
             print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
-                  "%d number of PADS in total" % (i, bucket_edges[i+1], test_buckets_sizes[i],
+                  "%d number of PADS in total" % (i, bucket_edges[i], test_buckets_sizes[i],
                                                   np.average(test_seq_lens), total_number_of_pads)
 
         # eval on test
@@ -1038,16 +1053,18 @@ def test():
         test_true = []
         for bucket_id in test_buckets.keys():
             bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = test_buckets[bucket_id]
-            step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id, bucket_xs,
-                                                                       bucket_ys, bucket_masks,
-                                                                       bucket_seq_lens, True)  # loss for whole bucket
+            step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
+                                                                       bucket_xs, bucket_ys,
+                                                                       bucket_masks,
+                                                                       bucket_seq_lens,
+                                                                       True)  # loss for whole bucket
             test_predictions.extend(predictions)
             test_true.extend(bucket_ys)
             test_loss += np.sum(step_loss)
         time_valid = time.time() - start_time_valid
         test_accuracy = accuracy(test_true, test_predictions)
         test_f1_1, test_f1_2 = f1s_binary(test_true, test_predictions)
-        print "TEST took %fs, loss %f, acc. %f, f1 prod %f (%f/%f) " % \
+        print "Test time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
               (time_valid, test_loss/len(test_labels), test_accuracy,
                test_f1_1*test_f1_2, test_f1_1, test_f1_2)
 
@@ -1059,30 +1076,17 @@ def demo():
     """
     FLAGS.restore = True
     with tf.Session() as sess:
-        # load embeddings
-        if FLAGS.src_embeddings != "":
-            src_embeddings = load_embedding(FLAGS.src_embeddings)
-        else:
-            src_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.src.pkl"
-            print "Reading src vocabulary from %s" % src_train_vocab_file
-            src_train_vocab = pkl.load(open(src_train_vocab_file, "rb"))
-            src_word2id = {w: i for i, w in enumerate(src_train_vocab)}
-            src_id2word = {i: w for w, i in src_word2id.items()}
-            src_embeddings = embedding.Embedding(None, src_word2id, src_id2word, 0, 1, 2, 3)
+        # load the embeddings
+        src_embeddings = load_embedding(FLAGS.src_embeddings)
+        tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
+        src_vocab_size = src_embeddings.table.shape[0]
+        tgt_vocab_size = tgt_embeddings.table.shape[0]
 
-        if FLAGS.tgt_embeddings != "":
-            tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
-        else:
-            tgt_train_vocab_file = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags.vocab.tgt.pkl"
-            print "Reading tgt vocabulary from %s" % tgt_train_vocab_file
-            tgt_train_vocab = pkl.load(open(tgt_train_vocab_file, "rb"))
-            tgt_word2id = {w: i for i, w in enumerate(tgt_train_vocab)}
-            tgt_id2word = {i: w for w, i in tgt_word2id.items()}
-            tgt_embeddings = embedding.Embedding(None, tgt_word2id, tgt_id2word, 0, 1, 2, 3)
 
         # load model
-        class_weights = [1-FLAGS.bad_weight, FLAGS.bad_weight]  # QE-specific
-        model = create_model(sess, buckets=None, forward_only=True, src_embeddings=src_embeddings,
+        class_weights = [1, FLAGS.bad_weight]  # QE-specific
+        model = create_model(sess, src_vocab_size=src_vocab_size, tgt_vocab_size=tgt_vocab_size,
+                             buckets=None, forward_only=True, src_embeddings=src_embeddings,
                              tgt_embeddings=tgt_embeddings, class_weights=class_weights)
 
         # bucketing test data
@@ -1172,5 +1176,4 @@ if __name__ == "__main__":
 # TODO
 # - language als parameter
 # - modularization
-# - nicer way of storing model parameters (params)
 # - replace numbers by <NUM>?
