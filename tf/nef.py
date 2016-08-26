@@ -174,20 +174,17 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                             dtype=tf.float32, time_major=False)
                         state_size = lstm_units
 
-                # 'outputs' is a list of output at every timestep (until L)
-                rnn_outputs = tf.pack(outputs)
-                H = rnn_outputs
+                H = outputs
 
             else:
                 # fully-connected layer on top of embeddings to reduce size
-                remb = tf.reshape(emb, [-1, window_size*emb_size])
+                remb = tf.reshape(emb, [batch_size*L, window_size*emb_size])
                 W_fc = tf.get_variable(name="W_fc", shape=[window_size*emb_size, J],  # TODO another param?
                               initializer=tf.contrib.layers.xavier_initializer(
                                   uniform=True, dtype=tf.float32))
                 b_fc = tf.get_variable(shape=[J], initializer=tf.random_uniform_initializer(
                     dtype=tf.float32), name="b_fc")
                 H = tf.reshape(activation(tf.matmul(remb, W_fc)+b_fc), [batch_size, L, J])
-                #H = emb
                 state_size = J
 
             with tf.name_scope("alpha"):
@@ -197,13 +194,11 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                                     initializer=tf.random_uniform_initializer(dtype=tf.float32))
                 W_hz = tf.get_variable(name="W_hz", shape=[state_size, J],
                                        initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-                W_sz = tf.get_variable(name="W_sz", shape=[state_size*(2*r+1), J],
+                W_hsz = tf.get_variable(name="W_hsz", shape=[2*state_size*(2*r+1), J],
                                        initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
 
             with tf.name_scope("beta"):
-                W_hs = tf.get_variable(name="W_hs", shape=[state_size, state_size],
-                                       initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-                W_ss = tf.get_variable(name="W_ss", shape=[state_size*(2*r+1), state_size],
+                W_hss = tf.get_variable(name="W_hss", shape=[2*state_size*(2*r+1), state_size],
                                        initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
                 w_s = tf.get_variable(name="w_s", shape=[state_size],
                                       initializer=tf.random_uniform_initializer(dtype=tf.float32))
@@ -211,28 +206,24 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             with tf.name_scope("prediction"):
                 w_p = tf.get_variable(name="w_p", shape=[K],
                                        initializer=tf.random_uniform_initializer(dtype=tf.float32))
-
-                wsp_size = state_size
-                if concat:  # h_i and s_i are concatenated before prediction
-                    wsp_size = state_size*2
+                wsp_size = 2*state_size
                 W_sp = tf.get_variable(name="W_sp", shape=[wsp_size, K],
                                        initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
 
             with tf.name_scope("paddings"):
-                padding_s_col = tf.constant([[0, 0], [0, 0], [r, r]], name="padding_s_col")
+                padding_s_col = tf.constant([[0, 0], [r, r], [0, 0]], name="padding_s_col")
 
             with tf.name_scope("sketches"):
                 n = tf.constant(1, dtype=tf.int32, name="n")
-                S = tf.zeros(shape=[batch_size, state_size, L], dtype=tf.float32)
+                S = tf.zeros(shape=[batch_size, L, state_size], dtype=tf.float32)
+                HS = tf.concat(2, [H, S])  # [batch_size, L, 2*state_size]
 
             if keep_prob_sketch < 1:
                 with tf.name_scope("dropout"):  # the same dropout mask for all sketches
                     # create mask
                     keep_prob_tensor = tf.convert_to_tensor(keep_prob_sketch, name="keep_prob_sketch")
                     # see https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/nn_ops.py#L1078 (inverted dropout)
-                    W_hs_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(W_hs)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)  # binary mask * (1-keep_prob_sketch) for scaling
-                    W_ss_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(W_ss)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)
-                    #S_n_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(S)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)
+                    W_hss_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(W_hss)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)
 
         def z_i(i):
             """
@@ -240,16 +231,10 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             :param i:
             :return:
             """
-            h_i = tf.slice(H, [0, i, 0], [batch_size, 1, state_size], name="h_i")
-            h_i = tf.reshape(h_i, [batch_size, state_size])
-
-            S_padded = tf.pad(S, padding_s_col, "CONSTANT", name="S_padded")
-            S_sliced = tf.slice(S_padded, [0, 0, i], [batch_size, state_size, 2*r+1])  # slice columns around i
-            s_context = tf.reshape(S_sliced, [batch_size, state_size*(2*r+1)], name="s_context")  # batch_size x state_size*(2*r+1)
-
-            _1 = tf.matmul(s_context, W_sz)
-            _2 = tf.batch_matmul(h_i, W_hz)
-            activ = activation(_1 + _2 + w_z) # batch_size x J
+            HS_padded = tf.pad(HS, padding_s_col, "CONSTANT", name="HS_padded")  # add column on right and left
+            HS_sliced = tf.slice(HS_padded, [0, i, 0], [batch_size, 2*r+1, 2*state_size])
+            hs_context = tf.reshape(HS_sliced, [batch_size, 2*state_size*(2*r+1)], name="s_context")  # batch_size x 2*state_size*(2*r+1)
+            activ = activation(tf.matmul(hs_context, W_hsz) + w_z)
             z_i = tf.matmul(activ, v)
             return z_i
 
@@ -266,69 +251,62 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             a_n = tf.nn.softmax(rz)
             return a_n
 
-        def conv_r(S):
+        def conv_r(HS):
             """
             Extract r context columns around each column and concatenate
-            :param S:
-            :param r:
+            :param HS: batch_size x L x 2*state_size (concatenation of S and H)
             :return:
             """
             # pad
-            S_padded = tf.pad(S, padding_s_col, name="padded")
+            HS_padded = tf.pad(HS, padding_s_col, name="padded")
             # now gather indices of padded
-            transposed_S = tf.transpose(S_padded, [2,1,0])  # batch is last dimension -> L x state_size x batch_size
+            transposed_HS = tf.transpose(HS_padded, [1, 2, 0])  # time-major  -> L x 2*state_size x batch_size
             contexts = []
             for i in np.arange(r, L+r):
                 # extract 2r+1 rows around i for each batch
-                context_i = transposed_S[i-r:i+r+1, :, :]  # 2*r+1 x state_size x batch_size
+                context_i = transposed_HS[i-r:i+r+1, :, :]  # 2*r+1 x 2*state_size x batch_size
                 # concatenate
-                context_i = tf.reshape(context_i, [(2*r+1)*state_size, batch_size])  # (2*r+1)*(state_size) x batch_size
+                context_i = tf.reshape(context_i, [(2*r+1)*2*state_size, batch_size])  # (2*r+1)*(state_size) x batch_size
                 contexts.append(context_i)
-            contexts = tf.pack(contexts)  # L x (2*r+1)*(state_size) x batch_size
-            contexts = tf.transpose(contexts, [2, 0, 1]) # switch back: batch_size x L x (2*r+1)*(state_size)
+            contexts = tf.pack(contexts)  # L x (2*r+1)* 2*(state_size) x batch_size
+            contexts = tf.transpose(contexts, [2, 0, 1]) # switch back: batch_size x L x (2*r+1)*2(state_size) (batch-major)
             return contexts
 
-
-        def sketch_step(n, S):
+        def sketch_step(n, HS):
             """
             Compute the sketch vector and update the sketch according to attention over words
             :param n:
-            :param S:
-            :param H:
+            :param HS: batch_size x L x 2*state_size (concatenation of S and H)
             :return:
             """
             # beta function
             a_n = alpha()  # batch_size x L
-            h_avg = tf.batch_matmul(tf.expand_dims(a_n, [1]), H)  # batch_size x 1 x state_size
-            h_avg = tf.reshape(h_avg, [batch_size, state_size])  # batch_size x state_size
-            conv = conv_r(S)  # batch_size x L x state_size*(2*r+1)
-            s_avg = tf.batch_matmul(tf.expand_dims(a_n, [1]), conv)  # batch_size x 1 x state_size*(2*r+1)
-            s_avg = tf.reshape(s_avg, [batch_size, state_size*(2*r+1)])
+            conv = conv_r(HS)  # batch_size x L x 2*state_size*(2*r+1)
+            hs_avg = tf.batch_matmul(tf.expand_dims(a_n, [1]), conv)  # batch_size x 1 x 2*state_size*(2*r+1)
+            hs_avg = tf.reshape(hs_avg, [batch_size, 2*state_size*(2*r+1)])
 
             if keep_prob_sketch < 1:  # same dropout for all steps (http://arxiv.org/pdf/1512.05287v3.pdf)
-                _1 = tf.matmul(h_avg, tf.mul(W_hs, W_hs_mask))
-                _2 = tf.matmul(s_avg, tf.mul(W_ss, W_ss_mask))
+                a = tf.matmul(hs_avg, tf.mul(W_hss, W_hss_mask))
             else:
-                _1 = tf.matmul(h_avg, W_hs)
-                _2 = tf.matmul(s_avg, W_ss)
-            s_n = activation(_1 + _2 + w_s)  # batch_size x state_size
+                a = tf.matmul(hs_avg, W_hss)
+            hs_n = activation(a + w_s)  # batch_size x state_size
 
-            S_update = tf.batch_matmul(tf.expand_dims(s_n, [2]), tf.expand_dims(a_n, [1]))
-            S_n = S + S_update
-            #if keep_prob_sketch < 1:  # apply dropout to final sketch
-            #    S_n = tf.mul(S_n, S_n_mask)
-            return n+1, S_n
+            S_update = tf.batch_matmul(tf.expand_dims(a_n, [2]), tf.expand_dims(hs_n, [1]))  # batch_size x L x state_size
+            H_update = tf.zeros_like(H)  # batch_size x L x state_size
+            HS_update = tf.concat(2, [H_update, S_update])
+            HS_n = HS + HS_update  # only update the S part of the concatenated matrix
+            return n+1, HS_n
 
         with tf.name_scope("sketching"):
 
             if N > 0:
-                (final_n, final_S) = tf.while_loop(
+                (final_n, final_HS) = tf.while_loop(
                     cond=lambda n, _1: n <= N,
                     body=sketch_step,
-                    loop_vars=(n, S)
+                    loop_vars=(n, HS)
                 )
             else:
-                final_S = S  # no sketching -> empty sketch
+                final_HS = HS
 
         with tf.name_scope("scoring"):
 
@@ -337,13 +315,8 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 Score the word at index i
                 """
                 # state vector for this word (column) across batch
-                s_i = tf.slice(final_S, [0, 0, i], [batch_size, state_size, 1])
-                # hidden representation for this word across batch
-                h_i = tf.slice(H, [0, i, 0], [batch_size, 1, state_size], name="h_i")
-                if concat:
-                    # 1st dimension is batch size
-                    s_i = tf.concat(1, [s_i, tf.transpose(h_i, [0,2,1])])
-                l = tf.matmul(tf.reshape(s_i, [batch_size, -1]), W_sp) + w_p
+                hs_i = tf.slice(final_HS, [0, i, 0], [batch_size, 1, 2*state_size])
+                l = tf.matmul(tf.reshape(hs_i, [batch_size, 2*state_size]), W_sp) + w_p
                 return l  # batch_size x K
 
             # avg word-level xent
@@ -374,12 +347,12 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                                     1)  # masked, batch_size x 1
             losses_reg = losses
             if l2_scale > 0:
-                weights_list = [W_sz, W_hs, W_ss, W_sp, W_hz]  # M_src, M_tgt word embeddings not included
+                weights_list = [W_hss, W_sp, W_hz]  # M_src, M_tgt word embeddings not included
                 l2_loss = tf.contrib.layers.apply_regularization(
                     tf.contrib.layers.l2_regularizer(l2_scale), weights_list=weights_list)
                 losses_reg += l2_loss
             if l1_scale > 0:
-                weights_list = [W_sz, W_hs, W_ss, W_sp, W_hz]
+                weights_list = [W_hss, W_sp, W_hz]
                 l1_loss = tf.contrib.layers.apply_regularization(
                     tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
                 losses_reg += l1_loss
