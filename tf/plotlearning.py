@@ -28,6 +28,9 @@ def main(args):
             plot_dict[logfile.split(".log")[0]] = (train_F1_OKs, train_F1_BADs, train_F1_prods)
 
     subplots = len(plot_dict)
+    min_epoch = min([len(data[0]) for data in plot_dict.values()])
+    ymin = min([min(data[2]) for data in plot_dict.values()])
+    ymax = max([max(data[0]) for data in plot_dict.values()])
     i = 0
     for run, data in plot_dict.items():
         i += 1
@@ -36,7 +39,8 @@ def main(args):
         y_OK = data[0]
         y_BAD = data[1]
         y_prod = data[2]
-        plt.ylim(0,1)
+        plt.ylim(ymin, ymax)
+        plt.xlim(0,min_epoch)
         plt.title(run)
         plt.plot(x, y_OK, x, y_BAD, x, y_prod)
         plt.legend(['F1 OK', 'F1 BAD', 'F1 prod'], loc='lower right')
