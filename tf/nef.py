@@ -18,7 +18,8 @@ Baseline model
 """
 
 # Flags
-tf.app.flags.DEFINE_string("model", "ef_single_state", "Model for training: quetch or ef_single_state")
+tf.app.flags.DEFINE_string("model", "quetch", "Model for training: quetch or ef_single_state")
+#tf.app.flags.DEFINE_string("model", "ef_single_state", "Model for training: quetch or ef_single_state")
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_string("optimizer", "adam", "Optimizer [sgd, adam, adagrad, adadelta, "
                                                     "momentum]")
