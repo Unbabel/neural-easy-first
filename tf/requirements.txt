@@ -1,4 +1,5 @@
-tensorflow
-numpy
-scipy
-sklearn
+tensorflow>=0.10.0
+numpy>=1.9.3
+scipy>=0.16.0
+sklearn>=0.16
+hmmlearn
