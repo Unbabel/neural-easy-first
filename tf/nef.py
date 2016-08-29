@@ -18,8 +18,8 @@ Baseline model
 """
 
 # Flags
-tf.app.flags.DEFINE_string("model", "quetch", "Model for training: quetch or ef_single_state")
-#tf.app.flags.DEFINE_string("model", "ef_single_state", "Model for training: quetch or ef_single_state")
+#tf.app.flags.DEFINE_string("model", "quetch", "Model for training: quetch or ef_single_state")
+tf.app.flags.DEFINE_string("model", "ef_single_state", "Model for training: quetch or ef_single_state")
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_string("optimizer", "adam", "Optimizer [sgd, adam, adagrad, adadelta, "
                                                     "momentum]")
@@ -188,7 +188,6 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 b_fc = tf.get_variable(shape=[J], initializer=tf.random_uniform_initializer(
                     dtype=tf.float32), name="b_fc")
                 H = tf.reshape(activation(tf.matmul(remb, W_fc)+b_fc), [batch_size, L, J])
-                #H = emb
                 state_size = J
 
             with tf.name_scope("alpha"):
