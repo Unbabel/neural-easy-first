@@ -3,10 +3,13 @@
 import tensorflow as tf
 import numpy as np
 import time
+import os
 import sys
 from utils import *
 import math
 from embedding import *
+
+from pdb import set_trace
 
 
 """
@@ -27,7 +30,10 @@ tf.app.flags.DEFINE_integer("batch_size", 200,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("src_vocab_size", 10000, "Vocabulary size.")
 tf.app.flags.DEFINE_integer("tgt_vocab_size", 10000, "Vocabulary size.")
-tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/", "Data directory")
+tf.app.flags.DEFINE_string("train_file", "../data/WMT2016/task2_en-de_training/train.basic_features_with_tags", "train data")
+tf.app.flags.DEFINE_string("dev_file", "../data/WMT2016/task2_en-de_dev/dev.basic_features_with_tags", "dev data")
+tf.app.flags.DEFINE_string("test_file", "../data/WMT2016/task2_en-de_test/test.corrected_full_parsed_features_with_tags", "test data")
+tf.app.flags.DEFINE_string("save_pBAD", False, "During test, store BAD token probabilities for ensembling")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
@@ -359,6 +365,10 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
 
             # avg word-level xent
             pred_labels = []
+
+            # New
+            pBADs = []
+
             losses = []
 
             if class_weights is not None:
@@ -367,6 +377,9 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             for i in np.arange(L):  # compute score, probs and losses per word for whole batch
                 word_label_score = score(i)
                 word_label_probs = tf.nn.softmax(word_label_score)
+                # New
+                pBADs.append(1-word_label_probs[:, 0])
+
                 word_preds = tf.argmax(word_label_probs, 1)
                 pred_labels.append(word_preds)
                 y_words = tf.reshape(tf.slice(y, [0, i], [batch_size, 1]), [batch_size])
@@ -379,6 +392,9 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
 
                 loss = cross_entropy
                 losses.append(loss)
+
+            # New
+            pBADs = tf.transpose(tf.pack(pBADs), [1, 0])
 
             pred_labels = mask*tf.transpose(tf.pack(pred_labels), [1, 0])  # masked, batch_size x L
             losses = tf.reduce_mean(tf.cast(mask, tf.float32)*tf.transpose(tf.pack(losses), [1, 0]),
@@ -395,10 +411,10 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                     tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
                 losses_reg += l1_loss
 
-        return losses, losses_reg, pred_labels, M_src, M_tgt
+        return losses, losses_reg, pred_labels, pBADs, M_src, M_tgt
 
-    losses, losses_reg, predictions, M_src, M_tgt = forward(inputs, labels, masks, seq_lens, class_weights)
-    return losses, losses_reg, predictions, M_src, M_tgt
+    losses, losses_reg, predictions, pBADs, M_src, M_tgt = forward(inputs, labels, masks, seq_lens, class_weights)
+    return losses, losses_reg, predictions, pBADs, M_src, M_tgt
 
 
 def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, window_size,
@@ -674,6 +690,7 @@ class EasyFirstModel():
         self.losses = []
         self.losses_reg = []
         self.predictions = []
+        self.pBADs = []
         for j, max_len in enumerate(self.buckets):
             self.inputs.append(tf.placeholder(tf.int32,
                                               shape=[None, max_len, 2*self.window_size],
@@ -686,7 +703,7 @@ class EasyFirstModel():
                                                 shape=[None], name="seq_lens{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 print "Initializing parameters for bucket with max len", max_len
-                bucket_losses, bucket_losses_reg, bucket_predictions, src_table, tgt_table = model_func(
+                bucket_losses, bucket_losses_reg, bucket_predictions, bucket_pBADs, src_table, tgt_table = model_func(
                     inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j],
                     seq_lens=self.seq_lens[j], src_vocab_size=self.src_vocab_size,
                     tgt_vocab_size=self.tgt_vocab_size, K=self.K,
@@ -702,6 +719,7 @@ class EasyFirstModel():
                 self.losses_reg.append(bucket_losses_reg)
                 self.losses.append(bucket_losses) # list of tensors, one for each bucket
                 self.predictions.append(bucket_predictions)  # list of tensors, one for each bucket
+                self.pBADs.append(bucket_pBADs)  # list of tensors, one for each bucket
                 self.src_table = src_table  # shared for all buckets
                 self.tgt_table = tgt_table
 
@@ -747,11 +765,13 @@ class EasyFirstModel():
         if not forward_only:
             output_feed = [self.losses[bucket_id],
                            self.predictions[bucket_id],
+                           self.pBADs[bucket_id],
                            self.losses_reg[bucket_id],
                            self.updates[bucket_id],
                            self.gradient_norms[bucket_id]]
         else:
-            output_feed = [self.losses[bucket_id], self.predictions[bucket_id], self.losses_reg[bucket_id]]
+            output_feed = [self.losses[bucket_id], self.predictions[bucket_id], 
+                           self.pBADs[bucket_id], self.losses_reg[bucket_id]]
         #print "output_feed", output_feed
 
         outputs = session.run(output_feed, input_feed)
@@ -760,8 +780,12 @@ class EasyFirstModel():
         predictions = []
         for seq_len, pred in zip(seq_lens, outputs[1]):
                 predictions.append(pred[:seq_len].tolist())
+        pBADs = []
+        for seq_len, pBAD in zip(seq_lens, outputs[2]):
+                pBADs.append(pBAD[:seq_len].tolist())
 
-        return outputs[0], predictions, outputs[2]  # loss, predictions, regularized loss
+        # loss, predictions, pBADs, regularized loss
+        return outputs[0], predictions, pBADs, outputs[3]  
 
 
 def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
@@ -809,8 +833,8 @@ def train():
     with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
         # load data and embeddings
-        train_dir = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags"
-        dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.basic_features_with_tags"
+        train_dir = FLAGS.train_file
+        dev_dir = FLAGS.dev_file
 
         if FLAGS.src_embeddings == "":
             src_embeddings = None
@@ -939,11 +963,13 @@ def train():
                     y_batch = bucket_ys[batch_samples]
                     mask_batch = bucket_masks[batch_samples]
                     seq_lens_batch = bucket_seq_lens[batch_samples]
-                    step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
-                                                                               x_batch, y_batch,
-                                                                               mask_batch,
-                                                                               seq_lens_batch,
-                                                                               False)  # loss for each instance in batch
+                    # loss for each instance in batch
+                    step_loss, predictions, pBADS, step_loss_reg = \
+                        model.batch_update(sess, bucket_id,
+                                           x_batch, y_batch,
+                                           mask_batch,
+                                           seq_lens_batch,
+                                           False)  
                     loss_reg += np.sum(step_loss_reg)
                     loss += np.sum(step_loss)  # sum over batch
                     bucket_loss += np.sum(step_loss)
@@ -970,11 +996,12 @@ def train():
             dev_true = []
             for bucket_id in dev_buckets.keys():
                 bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = dev_buckets[bucket_id]
-                step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
-                                                                           bucket_xs, bucket_ys,
-                                                                           bucket_masks,
-                                                                           bucket_seq_lens,
-                                                                           True)  # loss for whole bucket
+                step_loss, predictions, pBADS, step_loss_reg = \
+                    model.batch_update(sess, bucket_id,
+                                       bucket_xs, bucket_ys,
+                                       bucket_masks,
+                                       bucket_seq_lens,
+                                       True)  # loss for whole bucket
                 dev_predictions.extend(predictions)
                 dev_true.extend(bucket_ys)
                 dev_loss += np.sum(step_loss)
@@ -1021,7 +1048,7 @@ def test():
         src_vocab_size = src_embeddings.table.shape[0]
         tgt_vocab_size = tgt_embeddings.table.shape[0]
 
-        test_dir = FLAGS.data_dir+"/task2_en-de_test/test.corrected_full_parsed_features_with_tags"
+        test_dir = FLAGS.test_file
         test_feature_vectors, test_tgt_sentences, test_labels, test_label_dict = \
             load_data(test_dir, src_embeddings, tgt_embeddings, train=False,
                       labeled=True)
@@ -1050,18 +1077,39 @@ def test():
         start_time_valid = time.time()
         test_loss = 0.0
         test_predictions = []
+        bucketed_test_pBADs = {}
         test_true = []
+
+        #
+        #sum([len(val2) for val in test_buckets.values() for val2 in val])
+
         for bucket_id in test_buckets.keys():
             bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = test_buckets[bucket_id]
-            step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
+            step_loss, predictions, pBADs, step_loss_reg = model.batch_update(sess, bucket_id,
                                                                        bucket_xs, bucket_ys,
                                                                        bucket_masks,
                                                                        bucket_seq_lens,
                                                                        True)  # loss for whole bucket
+            bucketed_test_pBADs[bucket_id] = pBADs
             test_predictions.extend(predictions)
             test_true.extend(bucket_ys)
             test_loss += np.sum(step_loss)
         time_valid = time.time() - start_time_valid
+
+        if FLAGS.save_pBAD:
+
+            # 
+            ordered_test_pBADs = take_from_buckets(bucketed_test_pBADs, 
+                                                   test_reordering_indexes)
+
+            pBAD_file = "%s/%s.pBAD" % (FLAGS.model_dir, os.path.basename(FLAGS.test_file))
+            with open(pBAD_file, 'w') as fid:
+                for pBAD in ordered_test_pBADs:
+                    for num in pBAD:
+                        fid.write("%1.12f\n" % num)
+                    fid.write("\n")
+                print "pBADs stored on %s" % pBAD_file
+        
         test_accuracy = accuracy(test_true, test_predictions)
         test_f1_1, test_f1_2 = f1s_binary(test_true, test_predictions)
         print "Test time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
@@ -1142,7 +1190,7 @@ def demo():
             Y_padded = np.zeros_like(mask)  # dummy labels
 
             # get predictions
-            step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id, X_padded,
+            step_loss, predictions, pBADS, step_loss_reg = model.batch_update(sess, bucket_id, X_padded,
                                                                        Y_padded, mask, [seq_len],
                                                                        True)
             outputs = predictions[0]

@@ -7,6 +7,8 @@ import embedding
 from scipy import stats
 import operator
 
+from pdb import set_trace
+
 
 def load_embedding(pkl_file):
     word2id = {}
@@ -401,7 +403,9 @@ def put_in_buckets(data_array, labels, buckets, mode='pad'):
     :return:
     """
     input_lengths = np.array([len(s) for s in data_array], dtype='int')
-    input_bucket_index = [i if i<len(buckets) else len(buckets)-1 for i in np.digitize(input_lengths, buckets, right=False)]  # during testing, longer sentences are just truncated
+    # during testing, longer sentences are just truncated
+    input_bucket_index = [i if i<len(buckets) else len(buckets)-1 for i in 
+                          np.digitize(input_lengths, buckets, right=False)]  
     if mode == 'truncate':
         input_bucket_index -= 1
     bucketed_data = {}
@@ -414,6 +418,20 @@ def put_in_buckets(data_array, labels, buckets, mode='pad'):
         bucketed_data[bucket] = padded  # in final dict, start counting by zero
     return bucketed_data, reordering_indexes
 
+
+def take_from_buckets(bucketed_array, reordering_indexes):
+    """
+    Reconstructs bucketed array
+    """
+    nr_elements = sum([len(cosa) for cosa in reordering_indexes.values()])
+    nr_elements2 = sum([len(cosa) for cosa in bucketed_array.values()])
+    assert nr_elements == nr_elements2, \
+        "bucketed data and reordering_indexes do not match"
+    array = [[]]*nr_elements
+    for i, indx in reordering_indexes.items():
+        for j in range(len(indx)):
+            array[indx[j]] = bucketed_array[i][j]
+    return array 
 
 def accuracy(y_i, predictions):
     """
