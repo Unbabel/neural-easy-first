@@ -833,8 +833,8 @@ def train():
     with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
         # load data and embeddings
-        train_dir = FLAGS.train_file
-        dev_dir = FLAGS.dev_file
+        train_file = FLAGS.train_file
+        dev_file = FLAGS.dev_file
 
         if FLAGS.src_embeddings == "":
             src_embeddings = None
@@ -847,13 +847,15 @@ def train():
             tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
 
         train_feature_vectors, train_tgt_sentences, train_labels, train_label_dict, \
-        train_src_embeddings, train_tgt_embeddings = load_data(train_dir, src_embeddings,
+        train_src_embeddings, train_tgt_embeddings = load_data(train_file, src_embeddings,
                                                                tgt_embeddings,
                                                                max_sent=FLAGS.max_train_data_size,
                                                                train=True, labeled=True)
 
+        set_trace()
+
         dev_feature_vectors, dev_tgt_sentences, dev_labels, dev_label_dict = \
-            load_data(dev_dir, train_src_embeddings, train_tgt_embeddings, train=False,
+            load_data(dev_file, train_src_embeddings, train_tgt_embeddings, train=False,
                       labeled=True)  # use training vocab for dev
 
 
