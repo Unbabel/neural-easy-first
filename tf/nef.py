@@ -7,7 +7,8 @@ import sys
 from utils import *
 import math
 from embedding import *
-
+import logging
+import datetime
 
 """
 Tensorflow implementation of the neural easy-first model
@@ -61,6 +62,10 @@ tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
 tf.app.flags.DEFINE_integer("threads", 8, "number of threads")
 FLAGS = tf.app.flags.FLAGS
+
+logging.basicConfig(filename=FLAGS.model_dir+str(datetime.datetime.now()).replace(" ", "-")+".training.log")
+logger = logging.getLogger("NEF")
+logger.setLevel(logging.INFO)
 
 
 def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_size, K, D, N, J, L, r,
@@ -130,9 +135,9 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 M_src = tf.nn.dropout(M_src, keep_prob)
 
             #print "embedding size", emb_size
-            x_src, x_tgt = tf.split(2, 2, x)  # split src and tgt part of input
-            emb_tgt = tf.nn.embedding_lookup(M_tgt, x_src, name="emg_tgt")  # batch_size x L x window_size x emb_size
-            emb_src = tf.nn.embedding_lookup(M_src, x_tgt, name="emb_src")  # batch_size x L x window_size x emb_size
+            x_tgt, x_src = tf.split(2, 2, x)  # split src and tgt part of input
+            emb_tgt = tf.nn.embedding_lookup(M_tgt, x_tgt, name="emg_tgt")  # batch_size x L x window_size x emb_size
+            emb_src = tf.nn.embedding_lookup(M_src, x_src, name="emb_src")  # batch_size x L x window_size x emb_size
             emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
             emb = tf.reshape(emb_comb, [batch_size, L, window_size*emb_size],
                              name="emb") # batch_size x L x window_size*emb_size
@@ -422,9 +427,9 @@ def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, wi
         #    M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
         #    M_src = tf.nn.dropout(M_src, keep_prob)
 
-        x_src, x_tgt = tf.split(2, 2, inputs)  # split src and tgt part of input
-        emb_tgt = tf.nn.embedding_lookup(M_tgt, x_src, name="emg_tgt")  # batch_size x L x window_size x emb_size
-        emb_src = tf.nn.embedding_lookup(M_src, x_tgt, name="emb_src")  # batch_size x L x window_size x emb_size
+        x_tgt, x_src = tf.split(2, 2, inputs)  # split src and tgt part of input
+        emb_tgt = tf.nn.embedding_lookup(M_tgt, x_tgt, name="emg_tgt")  # batch_size x L x window_size x emb_size
+        emb_src = tf.nn.embedding_lookup(M_src, x_src, name="emb_src")  # batch_size x L x window_size x emb_size
         emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
         emb = tf.reshape(emb_comb, [batch_size, -1, window_size*emb_size], name="emb") # batch_size x L x window_size*emb_size
 
@@ -554,72 +559,73 @@ class EasyFirstModel():
                      "-".join([str(c) for c in class_weights]), self.l2_scale,
                      self.l1_scale, self.keep_prob, self.keep_prob_sketch,
                      self.update_emb, self.src_vocab_size, self.tgt_vocab_size)
-        print "Model path:", self.path
+        logger.info("Model path: %s"  % self.path)
+
 
         if self.lstm_units > 0:
             if self.bilstm:
-                print "Model with bi-directional LSTM RNN encoder of %d units" % self.lstm_units
+                logger.info("Model with bi-directional LSTM RNN encoder of %d units" % self.lstm_units)
             else:
-                print "Model with uni-directional LSTM RNN encoder of %d units" % self.lstm_units
+                logger.info("Model with uni-directional LSTM RNN encoder of %d units" % self.lstm_units)
         else:
             if self.src_embeddings.table is None and self.tgt_embeddings.table is None:
-                print "Model with simple embeddings of size %d" % self.D
+                logger.info("Model with simple embeddings of size %d" % self.D)
             else:
-                print "Model with simple embeddings of size %d (src) & %d (tgt)" % \
-                      (self.src_embeddings.table.shape[0], self.tgt_embeddings.table.shape[0])
+                logger.info("Model with simple embeddings of size %d (src) & %d (tgt)" % \
+                      (self.src_embeddings.table.shape[0], self.tgt_embeddings.table.shape[0]))
 
         if update_emb:
-            print "Updating the embeddings during training"
+            logger.info("Updating the embeddings during training")
         else:
-            print "Keeping the embeddings fixed"
+            logger.info("Keeping the embeddings fixed")
 
         if self.N > 0:
-            print "Model with %d sketches" % self.N
+            logger.info("Model with %d sketches" % self.N)
         else:
-            print "No sketches"
+            logger.info("No sketches")
             self.concat = True
 
         if self.concat or self.N == 0:
-            print "Concatenating H and S for predictions"
+            logger.info("Concatenating H and S for predictions")
 
         if self.l2_scale > 0:
-            print "L2 regularizer with weight %f" % self.l2_scale
+            logger.info("L2 regularizer with weight %f" % self.l2_scale)
 
         if self.l1_scale > 0:
-            print "L1 regularizer with weight %f" % self.l1_scale
+            logger.info("L1 regularizer with weight %f" % self.l1_scale)
 
         if forward_only:
             self.keep_prob = 1
             self.keep_prob_sketch = 1
         if self.keep_prob < 1:
-            print "Dropout with p=%f" % self.keep_prob
+            logger.info("Dropout with p=%f" % self.keep_prob)
         if self.keep_prob_sketch < 1:
-            print "Dropout during sketching with p=%f" % self.keep_prob_sketch
+            logger.info("Dropout during sketching with p=%f" % self.keep_prob_sketch)
 
         self.buckets = buckets
 
         buckets_path = self.path.split(".model", 2)[0]+".buckets.pkl"
         if self.buckets is not None:  # store bucket edges
-            print "Dumping bucket edges in %s" % buckets_path
+            logger.info("Dumping bucket edges in %s" % buckets_path)
             pkl.dump(self.buckets, open(buckets_path, "wb"))
         else:  # load bucket edges
-            print "Loading bucket edges from %s" % buckets_path
+            logger.info("Loading bucket edges from %s" % buckets_path)
             self.buckets = pkl.load(open(buckets_path, "rb"))
-        print "Buckets:", self.buckets
+        logger.info("Buckets: %s" % str(self.buckets))
 
         if model == "quetch":
             model_func = quetch
-            print "Using QUETCH model"
+            logger.info("Using QUETCH model")
         else:
             model_func = ef_single_state
-            print "Using neural easy first single state model"
+            logger.info("Using neural easy first single state model")
 
         activation_func = tf.nn.tanh
         if activation == "relu":
             activation_func = tf.nn.relu
         elif activation == "sigmoid":
             activation_func = tf.nn.sigmoid
-        print "Activation function %s" % activation_func.__name__
+        logger.info("Activation function %s" % activation_func.__name__)
 
         # prepare input feeds
         self.inputs = []
@@ -640,7 +646,7 @@ class EasyFirstModel():
             self.seq_lens.append(tf.placeholder(tf.int64,
                                                 shape=[None], name="seq_lens{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
-                print "Initializing parameters for bucket with max len", max_len
+                logger.info("Initializing parameters for bucket with max len %d" % max_len)
                 bucket_losses, bucket_losses_reg, bucket_predictions, src_table, tgt_table = model_func(
                     inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j],
                     seq_lens=self.seq_lens[j], src_vocab_size=self.src_vocab_size,
@@ -741,16 +747,16 @@ def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
                            model=FLAGS.model, activation=FLAGS.activation, l1_scale=FLAGS.l1_scale)
     checkpoint = tf.train.get_checkpoint_state("models")
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
-        print "Reading model parameters from %s" % checkpoint.model_checkpoint_path
+        logger.info("Reading model parameters from %s" % checkpoint.model_checkpoint_path)
         model.saver.restore(session, checkpoint.model_checkpoint_path)
     else:
-        print "Creating model with fresh parameters"
+        logger.info("Creating model with fresh parameters")
         session.run(tf.initialize_all_variables())
     return model
 
 
 def print_config():
-    print "Configuration:", FLAGS.__dict__["__flags"]
+    logger.info("Configuration: %s" % str(FLAGS.__dict__["__flags"]))
 
 
 def train():
@@ -759,7 +765,7 @@ def train():
     :return:
     """
     print_config()
-    print "Training on %d thread(s)" % FLAGS.threads
+    logger.info("Training on %d thread(s)" % FLAGS.threads)
 
     with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
@@ -810,18 +816,17 @@ def train():
         else:
             tgt_vocab_size = len(train_tgt_embeddings.word2id)
 
+        logger.info("src vocab size: %d" % src_vocab_size)
+        logger.info("tgt vocab size: %d" % tgt_vocab_size)
 
-        print "src vocab size", src_vocab_size
-        print "tgt vocab size", tgt_vocab_size
+        logger.info("Training on %d instances" % len(train_labels))
+        logger.info("Validating on %d instances" % len(dev_labels))
 
-        print "Training on %d instances" % len(train_labels)
-        print "Validating on %d instances" % len(dev_labels)
-
-        print "Maximum sentence length (train):", max([len(y) for y in train_labels])
-        print "Maximum sentence length (dev):", max([len(y) for y in dev_labels])
+        logger.info("Maximum sentence length (train): %d" % max([len(y) for y in train_labels]))
+        logger.info("Maximum sentence length (dev): %d" % max([len(y) for y in dev_labels]))
 
         class_weights = [1, FLAGS.bad_weight]  # TODO QE specific
-        print "Weights for classes:", class_weights
+        logger.info("Weights for classes: %s" % str(class_weights))
 
         # bucketing training and dev data
 
@@ -846,22 +851,21 @@ def train():
         dev_buckets_sizes = {i: len(indx) for i, indx in dev_reordering_indexes.items()}
 
 
-        print "Creating buckets for training data:"
+        logger.info("Creating buckets for training data:")
         for i in train_buckets.keys():
             X_train_padded, Y_train_padded, train_masks, train_seq_lens = train_buckets[i]
             total_number_of_pads = sum([bucket_edges[i]-l for l in train_seq_lens])
-            print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
+            logger.info("Bucket no %d with max length %d: %d instances, avg length %f,  " \
                   "%d number of PADS in total" % (i, bucket_edges[i], train_buckets_sizes[i],
-                                                  np.average(train_seq_lens), total_number_of_pads)
+                                                  np.average(train_seq_lens), total_number_of_pads))
 
-        print "Creating buckets for dev data:"
+        logger.info("Creating buckets for dev data:")
         for i in dev_buckets.keys():
             X_dev_padded, Y_dev_padded, dev_masks, dev_seq_lens = dev_buckets[i]
             total_number_of_pads = sum([bucket_edges[i]-l for l in dev_seq_lens])
-            print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
+            logger.info("Bucket no %d with max length %d: %d instances, avg length %f,  " \
                   "%d number of PADS in total" % (i, bucket_edges[i], dev_buckets_sizes[i],
-                                                  np.average(dev_seq_lens), total_number_of_pads)
-
+                                                  np.average(dev_seq_lens), total_number_of_pads))
         # training in epochs
         best_valid = 0
         best_valid_epoch = 0
@@ -906,17 +910,17 @@ def train():
                     train_predictions.extend(predictions)
                     train_true.extend(y_batch)  # needs to be stored because of random order
                     current_sample += len(x_batch)
-                print "bucket %d - loss %0.2f - loss+reg %0.2f" % (bucket_id,
+                logger.info("bucket %d - loss %0.2f - loss+reg %0.2f" % (bucket_id,
                                                                    bucket_loss/len(bucket_xs),
-                                                                   bucket_loss_reg/len(bucket_xs))
+                                                                   bucket_loss_reg/len(bucket_xs)))
 
             train_accuracy = accuracy(train_true, train_predictions)
             train_f1_1, train_f1_2 = f1s_binary(train_true, train_predictions)
             time_epoch = time.time() - start_time_epoch
 
-            print "EPOCH %d: epoch time %fs, loss %f, train acc. %f, f1 prod %f (%f/%f) " % \
+            logger.info("EPOCH %d: epoch time %fs, loss %f, train acc. %f, f1 prod %f (%f/%f) " % \
                   (epoch+1, time_epoch, loss/len(train_labels), train_accuracy,
-                   train_f1_1*train_f1_2, train_f1_1, train_f1_2)
+                   train_f1_1*train_f1_2, train_f1_1, train_f1_2))
 
             # eval on dev (every epoch)
             start_time_valid = time.time()
@@ -936,22 +940,22 @@ def train():
             time_valid = time.time() - start_time_valid
             dev_accuracy = accuracy(dev_true, dev_predictions)
             dev_f1_1, dev_f1_2 = f1s_binary(dev_true, dev_predictions)
-            print "EPOCH %d: validation time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
+            logger.info("EPOCH %d: validation time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
                   (epoch+1, time_valid, dev_loss/len(dev_labels), dev_accuracy,
-                   dev_f1_1*dev_f1_2, dev_f1_1, dev_f1_2)
+                   dev_f1_1*dev_f1_2, dev_f1_1, dev_f1_2))
             if dev_f1_1*dev_f1_2 > best_valid:
-                print "NEW BEST!"
+                logger.info("NEW BEST!")
                 best_valid = dev_f1_1*dev_f1_2
                 best_valid_epoch = epoch+1
             else:
-                print "current best: %f at epoch %d" % (best_valid, best_valid_epoch)
+                logger.info("current best: %f at epoch %d" % (best_valid, best_valid_epoch))
 
             if epoch % FLAGS.checkpoint_freq == 0:
                 # save checkpoint
                 model.saver.save(sess, model.path, global_step=model.global_step, write_meta_graph=True)
 
-        print "Training finished after %d epochs. Best validation result: %f at epoch %d." \
-              % (epoch+1, best_valid, best_valid_epoch)
+        logger.info("Training finished after %d epochs. Best validation result: %f at epoch %d." \
+              % (epoch+1, best_valid, best_valid_epoch))
 
         # dump final embeddings
         src_lookup, tgt_lookup = sess.run([model.src_table, model.tgt_table])
@@ -966,7 +970,7 @@ def test():
     Test a model
     :return:
     """
-    print "Testing"
+    logger.info("Testing")
     FLAGS.restore = True  # has to be loaded
     with tf.Session() as sess:
 
@@ -993,13 +997,13 @@ def test():
                                                                buckets=bucket_edges)
         test_buckets_sizes = {i: len(indx) for i, indx in test_reordering_indexes.items()}
 
-        print "Creating buckets for test data:"
+        logger.info("Creating buckets for test data:")
         for i in test_buckets.keys():
             X_test_padded, Y_test_padded, test_masks, test_seq_lens = test_buckets[i]
             total_number_of_pads = sum([bucket_edges[i]-l for l in test_seq_lens])
-            print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
+            logger.info("Bucket no %d with max length %d: %d instances, avg length %f,  " \
                   "%d number of PADS in total" % (i, bucket_edges[i], test_buckets_sizes[i],
-                                                  np.average(test_seq_lens), total_number_of_pads)
+                                                  np.average(test_seq_lens), total_number_of_pads))
 
         # eval on test
         start_time_valid = time.time()
@@ -1019,9 +1023,9 @@ def test():
         time_valid = time.time() - start_time_valid
         test_accuracy = accuracy(test_true, test_predictions)
         test_f1_1, test_f1_2 = f1s_binary(test_true, test_predictions)
-        print "Test time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
+        logger.info("Test time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
               (time_valid, test_loss/len(test_labels), test_accuracy,
-               test_f1_1*test_f1_2, test_f1_1, test_f1_2)
+               test_f1_1*test_f1_2, test_f1_1, test_f1_2))
 
 
 def demo():
