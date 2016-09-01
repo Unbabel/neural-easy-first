@@ -33,12 +33,8 @@ tf.app.flags.DEFINE_integer("max_train_data_size", 0,
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 58, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
-tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.train.basic_features_with_tags.7000.extended.pkl", "path to source language embeddings")
-tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.train.basic_features_with_tags.7000.extended.pkl", "path to target language embeddings")
-#tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
-#tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
-#tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
-#tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
+tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
+tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
 tf.app.flags.DEFINE_boolean("update_emb", True, "update the embeddings")
 tf.app.flags.DEFINE_string("activation", "tanh", "activation function")
 tf.app.flags.DEFINE_integer("K", 2, "number of labels")
@@ -49,7 +45,6 @@ tf.app.flags.DEFINE_integer("r", 2, "context size")
 tf.app.flags.DEFINE_float("bad_weight", 1.0, "weight for BAD instances" )
 tf.app.flags.DEFINE_boolean("train", True, "training model")
 tf.app.flags.DEFINE_integer("epochs", 500, "training epochs")
-tf.app.flags.DEFINE_integer("checkpoint_freq", 100, "save model every x epochs")
 tf.app.flags.DEFINE_integer("lstm_units", 20, "number of LSTM-RNN encoder units")
 tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
 tf.app.flags.DEFINE_float("l2_scale", 0, "L2 regularization constant")
@@ -938,12 +933,10 @@ def train():
                 print "NEW BEST!"
                 best_valid = dev_f1_1*dev_f1_2
                 best_valid_epoch = epoch+1
-            else:
-                print "current best: %f at epoch %d" % (best_valid, best_valid_epoch)
-
-            if epoch % FLAGS.checkpoint_freq == 0:
                 # save checkpoint
                 model.saver.save(sess, model.path, global_step=model.global_step, write_meta_graph=True)
+            else:
+                print "current best: %f at epoch %d" % (best_valid, best_valid_epoch)
 
         print "Training finished after %d epochs. Best validation result: %f at epoch %d." \
               % (epoch+1, best_valid, best_valid_epoch)
