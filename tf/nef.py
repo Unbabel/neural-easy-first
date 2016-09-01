@@ -795,9 +795,7 @@ def train():
         train_sequences, train_labels = pkl.load(open("../data/hmm/equal.labels2.vocab200.train.pkl", "rb"))
         train_sequences = train_sequences[:FLAGS.max_train_data_size]
         train_labels = train_labels[:FLAGS.max_train_data_size]
-        print "train seq", train_sequences[:3]
         train_feature_vectors = extract_context_features(train_sequences, start_id=word2id["<s>"], end_id=word2id["</s>"], r=FLAGS.r)
-        print "feats", train_feature_vectors[:3]
 
         dev_sequences, dev_labels = pkl.load(open("../data/hmm/equal.labels2.vocab200.dev.pkl","rb"))
         dev_feature_vectors = extract_context_features(dev_sequences, start_id=word2id["<s>"], end_id=word2id["</s>"], r=FLAGS.r)
@@ -958,21 +956,21 @@ def test():
     FLAGS.restore = True  # has to be loaded
     with tf.Session() as sess:
 
-        # load the embeddings
-        src_embeddings = load_embedding(FLAGS.src_embeddings)
-        tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
-        src_vocab_size = src_embeddings.table.shape[0]
-        tgt_vocab_size = tgt_embeddings.table.shape[0]
+        # random embeddings
+        vocab = range(0, FLAGS.tgt_vocab_size-4)+["PAD", "UNK", "<s>", "</s>"]  # TODO no UNKs in this dataset
+        word2id = {w:i for i, w in enumerate(vocab)}
+        id2word = {i:w for i, w in word2id.items()}
+        embeddings = embedding.Embedding(None, word2id, id2word, word2id["UNK"], word2id["PAD"], word2id["</s>"], word2id["<s>"])
+        tgt_vocab_size = FLAGS.tgt_vocab_size
 
-        test_dir = FLAGS.data_dir+"/task2_en-de_test/test.corrected_full_parsed_features_with_tags"
-        test_feature_vectors, test_tgt_sentences, test_labels, test_label_dict = \
-            load_data(test_dir, src_embeddings, tgt_embeddings, train=False,
-                      labeled=True)
+        # load data
+        test_sequences, test_labels = pkl.load(open("../data/hmm/equal.labels2.vocab200.test.pkl", "rb"))
+        test_feature_vectors = extract_context_features(test_sequences, start_id=word2id["<s>"], end_id=word2id["</s>"], r=FLAGS.r)
 
         # load model
         class_weights = [1, FLAGS.bad_weight]  #QE-specific
-        model = create_model(sess, src_vocab_size=src_vocab_size, tgt_vocab_size=tgt_vocab_size, buckets=None, forward_only=True, src_embeddings=src_embeddings,
-                             tgt_embeddings=tgt_embeddings, class_weights=class_weights)
+        model = create_model(sess, src_vocab_size=0, tgt_vocab_size=tgt_vocab_size, buckets=None, forward_only=True, src_embeddings=None,
+                             tgt_embeddings=embeddings, class_weights=class_weights)
 
         # bucketing test data
         bucket_edges = model.buckets
