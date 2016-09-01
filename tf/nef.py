@@ -7,7 +7,7 @@ import sys
 from utils import *
 import math
 from embedding import *
-
+from data_generator import generate_hmm_data_random, extract_context_features
 
 """
 Tensorflow implementation of the neural easy-first model
@@ -47,7 +47,6 @@ tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
 tf.app.flags.DEFINE_integer("J", 20, "dimensionality of hidden layer")
 tf.app.flags.DEFINE_integer("r", 2, "context size")
 tf.app.flags.DEFINE_float("bad_weight", 3.0, "weight for BAD instances" )
-tf.app.flags.DEFINE_boolean("concat", True, "concatenating s_i and h_i for prediction")
 tf.app.flags.DEFINE_boolean("train", True, "training model")
 tf.app.flags.DEFINE_integer("epochs", 500, "training epochs")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 100, "save model every x epochs")
@@ -64,10 +63,10 @@ FLAGS = tf.app.flags.FLAGS
 
 
 def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_size, K, D, N, J, L, r,
-                    lstm_units, concat, window_size, keep_prob, keep_prob_sketch,
+                    lstm_units, window_size, keep_prob, keep_prob_sketch,
                     l2_scale, l1_scale, src_embeddings=None, tgt_embeddings=None,
                     class_weights=None, bilstm=True, activation=tf.nn.tanh,
-                    update_emb=True):
+                    update_emb=True, only_tgt=False):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
     :param inputs:
@@ -81,6 +80,10 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
     :param L:
     :param r:
     :param lstm_units:
+    :param bilstm:
+    :param activation:
+    :param update_emb:
+    :param only_tgt:
     :return:
     """
 
@@ -93,27 +96,12 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
         """
         batch_size = tf.shape(x)[0]
         with tf.name_scope("embedding"):
-            if src_embeddings.table is None:
-                #print "Random src embeddings of dimensionality %d" % D
-                M_src = tf.get_variable(name="M_src", shape=[src_vocab_size, D],
-                                initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-                emb_size = D
-            else:
-                M_src = tf.get_variable(name="M_src",
-                                shape=[src_embeddings.table.shape[0],
-                                       src_embeddings.table.shape[1]],
-                                initializer=tf.constant_initializer(src_embeddings.table),
-                                trainable=update_emb)
-                D_loaded = len(tgt_embeddings.table[0])
-                #print "Loading existing src embeddings of dimensionality %d" % D_loaded
-                emb_size = D_loaded
-
 
             if tgt_embeddings.table is None:
                 #print "Random tgt embeddings of dimensionality %d" % D
                 M_tgt = tf.get_variable(name="M_tgt", shape=[tgt_vocab_size, D],
                                 initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-                emb_size += D
+                emb_size = D
             else:
                 M_tgt = tf.get_variable(name="M_tgt",
                     shape=[tgt_embeddings.table.shape[0],
@@ -122,18 +110,42 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                     trainable=update_emb)
                 D_loaded = len(tgt_embeddings.table[0])
                 #print "Loading existing tgt embeddings of dimensionality %d" % D_loaded
-                emb_size += D_loaded
+                emb_size = D_loaded
 
             if keep_prob < 1:  # dropout for word embeddings ("pervasive dropout")
                 #print "Dropping out word embeddings"
                 M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
-                M_src = tf.nn.dropout(M_src, keep_prob)
+
+            M_src = None
+            if not only_tgt:
+                if src_embeddings.table is None:
+                    #print "Random src embeddings of dimensionality %d" % D
+                    M_src = tf.get_variable(name="M_src", shape=[src_vocab_size, D],
+                                    initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
+                    emb_size += D
+                else:
+                    M_src = tf.get_variable(name="M_src",
+                                    shape=[src_embeddings.table.shape[0],
+                                           src_embeddings.table.shape[1]],
+                                    initializer=tf.constant_initializer(src_embeddings.table),
+                                    trainable=update_emb)
+                    D_loaded = len(tgt_embeddings.table[0])
+                    #print "Loading existing src embeddings of dimensionality %d" % D_loaded
+                    emb_size += D_loaded
+
+                if keep_prob < 1:
+                    M_src = tf.nn.dropout(M_src, keep_prob)
 
             #print "embedding size", emb_size
-            x_src, x_tgt = tf.split(2, 2, x)  # split src and tgt part of input
-            emb_tgt = tf.nn.embedding_lookup(M_tgt, x_src, name="emg_tgt")  # batch_size x L x window_size x emb_size
-            emb_src = tf.nn.embedding_lookup(M_src, x_tgt, name="emb_src")  # batch_size x L x window_size x emb_size
-            emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
+            if not only_tgt:
+                x_tgt, x_src = tf.split(2, 2, x)  # split src and tgt part of input
+                emb_tgt = tf.nn.embedding_lookup(M_tgt, x_tgt, name="emg_tgt")  # batch_size x L x window_size x emb_size
+                emb_src = tf.nn.embedding_lookup(M_src, x_src, name="emb_src")  # batch_size x L x window_size x emb_size
+                emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
+            else:
+                emb_tgt = tf.nn.embedding_lookup(M_tgt, x, name="emg_tgt")  # batch_size x L x window_size x emb_size
+                emb_comb = emb_tgt
+
             emb = tf.reshape(emb_comb, [batch_size, L, window_size*emb_size],
                              name="emb") # batch_size x L x window_size*emb_size
 
@@ -198,7 +210,6 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                                 initializer=tf.random_uniform_initializer(dtype=tf.float32))
             W_hsz = tf.get_variable(name="W_hsz", shape=[2*state_size*(2*r+1), J],
                                        initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-            print tf.get_variable_scope().reuse
 
             if keep_prob_sketch < 1:
                 # create mask
@@ -359,8 +370,8 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
 def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, window_size,
            src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob, l1_scale,
            keep_prob_sketch=1,
-           lstm_units=0, bilstm=False, concat=False, r=0, N=0, seq_lens=None,
-           activation=tf.nn.tanh, update_emb=True):
+           lstm_units=0, bilstm=False, r=0, N=0, seq_lens=None,
+           activation=tf.nn.tanh, update_emb=True, only_tgt=False):
     """
     QUETCH model for word-level QE predictions  (MLP based on embeddings)
     :param inputs:
@@ -377,7 +388,6 @@ def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, wi
     :param r:
     :param lstm_units:
     :param bilstm:
-    :param concat:
     :param window_size:
     :param src_embeddings:
     :param tgt_embeddings:
@@ -385,51 +395,62 @@ def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, wi
     :param l2_scale:
     :param l1_scale:
     :param keep_prob:
+    :param only_tgt:
     :return:
     """
     batch_size = tf.shape(inputs)[0]
     with tf.name_scope("embedding"):
-        if src_embeddings.table is None:
-            M_src = tf.get_variable(name="M_src", shape=[src_vocab_size, D],
-                            initializer=tf.contrib.layers.xavier_initializer(
-                                uniform=True, dtype=tf.float32))
-            emb_size = D
-        else:
-            M_src = tf.get_variable(name="M_src",
-                                    shape=[src_embeddings.table.shape[0],
-                                           src_embeddings.table.shape[1]],
-                                    initializer=tf.constant_initializer(src_embeddings.table),
-                                    trainable=update_emb)
-            D_loaded = len(tgt_embeddings.table[0])
-            emb_size = D_loaded
-
 
         if tgt_embeddings.table is None:
+            #print "Random tgt embeddings of dimensionality %d" % D
             M_tgt = tf.get_variable(name="M_tgt", shape=[tgt_vocab_size, D],
-                            initializer=tf.contrib.layers.xavier_initializer(
-                                uniform=True, dtype=tf.float32))
-            emb_size += D
+                                    initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
+            emb_size = D
         else:
             M_tgt = tf.get_variable(name="M_tgt",
-                                    shape=[tgt_embeddings.table.shape[0],
-                                           tgt_embeddings.table.shape[1]],
-                                    initializer=tf.constant_initializer(tgt_embeddings.table),
-                                    trainable=update_emb)
+                shape=[tgt_embeddings.table.shape[0],
+                       tgt_embeddings.table.shape[1]],
+                initializer=tf.constant_initializer(tgt_embeddings.table),
+                trainable=update_emb)
             D_loaded = len(tgt_embeddings.table[0])
-            emb_size += D_loaded
+            #print "Loading existing tgt embeddings of dimensionality %d" % D_loaded
+            emb_size = D_loaded
 
-        #if keep_prob < 1:  # dropout for word embeddings ("pervasive dropout")
-        #    M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
-        #    M_src = tf.nn.dropout(M_src, keep_prob)
+        if keep_prob < 1:  # dropout for word embeddings ("pervasive dropout")
+            #print "Dropping out word embeddings"
+            M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
 
-        x_src, x_tgt = tf.split(2, 2, inputs)  # split src and tgt part of input
-        emb_tgt = tf.nn.embedding_lookup(M_tgt, x_src, name="emg_tgt")  # batch_size x L x window_size x emb_size
-        emb_src = tf.nn.embedding_lookup(M_src, x_tgt, name="emb_src")  # batch_size x L x window_size x emb_size
-        emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
-        emb = tf.reshape(emb_comb, [batch_size, -1, window_size*emb_size], name="emb") # batch_size x L x window_size*emb_size
+        if not only_tgt:
+            if src_embeddings.table is None:
+                #print "Random src embeddings of dimensionality %d" % D
+                M_src = tf.get_variable(name="M_src", shape=[src_vocab_size, D],
+                                initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
+                emb_size += D
+            else:
+                M_src = tf.get_variable(name="M_src",
+                                shape=[src_embeddings.table.shape[0],
+                                       src_embeddings.table.shape[1]],
+                                initializer=tf.constant_initializer(src_embeddings.table),
+                                trainable=update_emb)
+                D_loaded = len(tgt_embeddings.table[0])
+                #print "Loading existing src embeddings of dimensionality %d" % D_loaded
+                emb_size += D_loaded
 
-        if keep_prob < 1:
-            emb = tf.nn.dropout(emb, keep_prob=keep_prob, name="drop_emb")
+            if keep_prob < 1:
+                M_src = tf.nn.dropout(M_src, keep_prob)
+
+        #print "embedding size", emb_size
+        if not only_tgt:
+            x_tgt, x_src = tf.split(2, 2, inputs)  # split src and tgt part of input
+            emb_tgt = tf.nn.embedding_lookup(M_tgt, x_tgt, name="emg_tgt")  # batch_size x L x window_size x emb_size
+            emb_src = tf.nn.embedding_lookup(M_src, x_src, name="emb_src")  # batch_size x L x window_size x emb_size
+            emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
+        else:
+            emb_tgt = tf.nn.embedding_lookup(M_tgt, inputs, name="emg_tgt")  # batch_size x L x window_size x emb_size
+            emb_comb = emb_tgt
+
+        emb = tf.reshape(emb_comb, [batch_size, L, window_size*emb_size],
+                         name="emb") # batch_size x L x window_size*emb_size
 
     with tf.name_scope("mlp"):
         inputs = tf.reshape(emb, [-1, window_size*emb_size])
@@ -482,7 +503,7 @@ class EasyFirstModel():
     Neural easy-first model
     """
     def __init__(self, K, D, N, J, r, src_vocab_size, tgt_vocab_size, batch_size, optimizer, learning_rate,
-                 max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
+                 max_gradient_norm, lstm_units, buckets, window_size, src_embeddings,
                  tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0,
                  keep_prob=1, keep_prob_sketch=1, model_dir="models/",
                  bilstm=True, model="ef_single_state", activation="tanh", l1_scale=0,
@@ -524,7 +545,6 @@ class EasyFirstModel():
         self.tgt_vocab_size = tgt_vocab_size
         self.batch_size = batch_size
         self.learning_rate = learning_rate
-        self.concat = concat
         self.window_size = window_size
         self.global_step = tf.Variable(0, trainable=False)
         optimizer_map = {"sgd": tf.train.GradientDescentOptimizer, "adam": tf.train.AdamOptimizer,
@@ -546,11 +566,11 @@ class EasyFirstModel():
         self.class_weights = class_weights if class_weights is not None else [1./K]*K
 
         self.path = "%s/%s_K%d_D%d_N%d_J%d_r%d_batch%d_opt%s_lr%0.4f_gradnorm%0.2f" \
-                    "_lstm%d_concat%r_window%d_weights%s_l2r%0.4f_l1r%0.4f_dropout%0.2f_sketchdrop%0.2f_updateemb%s_srcvoc%d_tgtvoc%d.model" % \
+                    "_lstm%d_window%d_weights%s_l2r%0.4f_l1r%0.4f_dropout%0.2f_sketchdrop%0.2f_updateemb%s_srcvoc%d_tgtvoc%d.model" % \
                     (self.model_dir, model, self.K, self.D, self.N, self.J,
                      self.r, self.batch_size, optimizer,
                      self.learning_rate, self.max_gradient_norm, self.lstm_units,
-                     self.concat, self.window_size,
+                     self.window_size,
                      "-".join([str(c) for c in class_weights]), self.l2_scale,
                      self.l1_scale, self.keep_prob, self.keep_prob_sketch,
                      self.update_emb, self.src_vocab_size, self.tgt_vocab_size)
@@ -562,11 +582,14 @@ class EasyFirstModel():
             else:
                 print "Model with uni-directional LSTM RNN encoder of %d units" % self.lstm_units
         else:
-            if self.src_embeddings.table is None and self.tgt_embeddings.table is None:
-                print "Model with simple embeddings of size %d" % self.D
+            if self.src_embeddings is None:
+                print "Only target side input"
             else:
-                print "Model with simple embeddings of size %d (src) & %d (tgt)" % \
-                      (self.src_embeddings.table.shape[0], self.tgt_embeddings.table.shape[0])
+                if self.src_embeddings.table is None and self.tgt_embeddings.table is None:
+                    print "Model with simple embeddings of size %d" % self.D
+                else:
+                    print "Model with simple embeddings of size %d (src) & %d (tgt)" % \
+                          (self.src_embeddings.table.shape[0], self.tgt_embeddings.table.shape[0])
 
         if update_emb:
             print "Updating the embeddings during training"
@@ -577,10 +600,6 @@ class EasyFirstModel():
             print "Model with %d sketches" % self.N
         else:
             print "No sketches"
-            self.concat = True
-
-        if self.concat or self.N == 0:
-            print "Concatenating H and S for predictions"
 
         if self.l2_scale > 0:
             print "L2 regularizer with weight %f" % self.l2_scale
@@ -621,6 +640,14 @@ class EasyFirstModel():
             activation_func = tf.nn.sigmoid
         print "Activation function %s" % activation_func.__name__
 
+        if self.src_embeddings is None and src_vocab_size==0:
+            print "Using only target side features"
+            self.only_tgt = True
+            self.feature_size = window_size  # features only from tgt
+        else:
+            self.only_tgt = False
+            self.feature_size = 2*window_size  # features from src and tgt
+
         # prepare input feeds
         self.inputs = []
         self.labels = []
@@ -631,7 +658,7 @@ class EasyFirstModel():
         self.predictions = []
         for j, max_len in enumerate(self.buckets):
             self.inputs.append(tf.placeholder(tf.int32,
-                                              shape=[None, max_len, 2*self.window_size],
+                                              shape=[None, max_len, self.feature_size],
                                               name="inputs{0}".format(j)))
             self.labels.append(tf.placeholder(tf.int32,
                                               shape=[None, max_len], name="labels{0}".format(j)))
@@ -647,12 +674,12 @@ class EasyFirstModel():
                     tgt_vocab_size=self.tgt_vocab_size, K=self.K,
                     D=self.D, N=max_len,  # as many sketches as words in sequence
                     J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units,
-                    concat=self.concat, window_size=self.window_size,
+                    window_size=self.window_size,
                     src_embeddings=self.src_embeddings, tgt_embeddings=self.tgt_embeddings,
                     class_weights=self.class_weights, update_emb=update_emb,
                     keep_prob=self.keep_prob, keep_prob_sketch=self.keep_prob_sketch,
                     l2_scale=self.l2_scale, l1_scale=self.l1_scale,
-                    bilstm=self.bilstm, activation=activation_func)
+                    bilstm=self.bilstm, activation=activation_func, only_tgt=self.only_tgt)
 
                 self.losses_reg.append(bucket_losses_reg)
                 self.losses.append(bucket_losses) # list of tensors, one for each bucket
@@ -733,7 +760,7 @@ def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
                            batch_size=FLAGS.batch_size,
                            optimizer=FLAGS.optimizer, learning_rate=FLAGS.learning_rate,
                            max_gradient_norm=FLAGS.max_gradient_norm, lstm_units=FLAGS.lstm_units,
-                           concat=FLAGS.concat, forward_only=forward_only, buckets=buckets,
+                           forward_only=forward_only, buckets=buckets,
                            src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
                            window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale,
                            keep_prob=FLAGS.keep_prob, keep_prob_sketch=FLAGS.keep_prob_sketch,
@@ -763,56 +790,27 @@ def train():
 
     with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
-        # load data and embeddings
-        train_dir = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags"
-        dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.basic_features_with_tags"
+        # generate train and dev data
+        train_size = FLAGS.max_train_data_size
+        dev_size = 1000
+        number_of_labels = 2
 
-        if FLAGS.src_embeddings == "":
-            src_embeddings = None
-        else:
-            src_embeddings = load_embedding(FLAGS.src_embeddings)
+        # random embeddings
+        vocab = range(0, FLAGS.tgt_vocab_size)+["PAD", "UNK", "<s>", "</s>"]  # TODO no UNKs in this dataset
+        word2id = {w:i for i, w in enumerate(vocab)}
+        id2word = {i:w for i, w in word2id.items()}
+        embeddings = embedding.Embedding(None, word2id, id2word, word2id["UNK"], word2id["PAD"], word2id["</s>"], word2id["<s>"])
 
-        if FLAGS.tgt_embeddings == "":
-            tgt_embeddings = None
-        else:
-            tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
+        print "word2id", word2id
 
-        train_feature_vectors, train_tgt_sentences, train_labels, train_label_dict, \
-        train_src_embeddings, train_tgt_embeddings = load_data(train_dir, src_embeddings,
-                                                               tgt_embeddings,
-                                                               max_sent=FLAGS.max_train_data_size,
-                                                               train=True, labeled=True)
+        sequences, labels = generate_hmm_data_random([train_size, dev_size], FLAGS.L, FLAGS.tgt_vocab_size, number_of_labels)
+        print "seq", sequences[0][:3]
+        train_feature_vectors = extract_context_features(sequences[0], start_id=word2id["<s>"], end_id=word2id["</s>"], r=FLAGS.r)
+        dev_feature_vectors = extract_context_features(sequences[1], start_id=word2id["<s>"], end_id=word2id["</s>"], r=FLAGS.r)
+        print "feats", train_feature_vectors[:3]
+        print "feats", np.asarray(train_feature_vectors)
 
-        dev_feature_vectors, dev_tgt_sentences, dev_labels, dev_label_dict = \
-            load_data(dev_dir, train_src_embeddings, train_tgt_embeddings, train=False,
-                      labeled=True)  # use training vocab for dev
-
-
-        if FLAGS.src_embeddings == "":
-            src_embeddings = embedding.Embedding(None, train_src_embeddings.word2id,
-                                                 train_src_embeddings.id2word,
-                                                 train_src_embeddings.UNK_id,
-                                                 train_src_embeddings.PAD_id,
-                                                 train_src_embeddings.end_id,
-                                                 train_src_embeddings.start_id)
-            src_vocab_size = FLAGS.src_vocab_size
-        else:
-            src_vocab_size = len(train_src_embeddings.word2id)
-
-        if FLAGS.tgt_embeddings == "":
-            tgt_embeddings = embedding.Embedding(None, train_tgt_embeddings.word2id,
-                                                 train_tgt_embeddings.id2word,
-                                                 train_tgt_embeddings.UNK_id,
-                                                 train_tgt_embeddings.PAD_id,
-                                                 train_tgt_embeddings.end_id,
-                                                 train_tgt_embeddings.start_id)
-            tgt_vocab_size = FLAGS.tgt_vocab_size
-        else:
-            tgt_vocab_size = len(train_tgt_embeddings.word2id)
-
-
-        print "src vocab size", src_vocab_size
-        print "tgt vocab size", tgt_vocab_size
+        train_labels, dev_labels = labels
 
         print "Training on %d instances" % len(train_labels)
         print "Validating on %d instances" % len(dev_labels)
@@ -838,9 +836,9 @@ def train():
                                                              np.asarray(dev_labels),
                                                              buckets=bucket_edges)
 
-        # create the model
-        model = create_model(sess, bucket_edges, src_vocab_size, tgt_vocab_size,
-                             False, src_embeddings, tgt_embeddings,class_weights)
+        # create the model (synthetic data is "target only")
+        model = create_model(sess, bucket_edges, 0, len(vocab),
+                             False, None, embeddings, class_weights)
 
         train_buckets_sizes = {i: len(indx) for i, indx in train_reordering_indexes.items()}
         dev_buckets_sizes = {i: len(indx) for i, indx in dev_reordering_indexes.items()}
@@ -853,6 +851,8 @@ def train():
             print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
                   "%d number of PADS in total" % (i, bucket_edges[i], train_buckets_sizes[i],
                                                   np.average(train_seq_lens), total_number_of_pads)
+
+            print "padded", X_train_padded[:3]
 
         print "Creating buckets for dev data:"
         for i in dev_buckets.keys():
