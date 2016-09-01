@@ -33,13 +33,14 @@ tf.app.flags.DEFINE_integer("tgt_vocab_size", 10000, "Vocabulary size.")
 tf.app.flags.DEFINE_string("train_file", "../data/WMT2016/task2_en-de_training/train.basic_features_with_tags", "train data")
 tf.app.flags.DEFINE_string("dev_file", "../data/WMT2016/task2_en-de_dev/dev.basic_features_with_tags", "dev data")
 tf.app.flags.DEFINE_string("test_file", "../data/WMT2016/task2_en-de_test/test.corrected_full_parsed_features_with_tags", "test data")
-tf.app.flags.DEFINE_string("save_pBAD", False, "During test, store BAD token probabilities for ensembling")
+tf.app.flags.DEFINE_boolean("save_pBAD", False, "During test, store BAD token probabilities for ensembling")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 58, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
+tf.app.flags.DEFINE_integer("bucket_random_seed", 1234, "Random seed for bucket shuffling")
 tf.app.flags.DEFINE_string("src_embeddings", "../data/embeddings/polyglot-en.train.features_with_tags.0.min0.extended.pkl", "path to source language embeddings")
 tf.app.flags.DEFINE_string("tgt_embeddings", "../data/embeddings/polyglot-de.train.features_with_tags.0.min0.extended.pkl", "path to target language embeddings")
 #tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
@@ -830,9 +831,10 @@ def train():
     print_config()
     print "Training on %d thread(s)" % FLAGS.threads
 
-    with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
+    # Use log_device_placement=True for debugging
+    with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads, log_device_placement=False)) as sess:
 
-        # load data and embeddings
+
         train_file = FLAGS.train_file
         dev_file = FLAGS.dev_file
 
@@ -851,8 +853,6 @@ def train():
                                                                tgt_embeddings,
                                                                max_sent=FLAGS.max_train_data_size,
                                                                train=True, labeled=True)
-
-        set_trace()
 
         dev_feature_vectors, dev_tgt_sentences, dev_labels, dev_label_dict = \
             load_data(dev_file, train_src_embeddings, train_tgt_embeddings, train=False,
@@ -945,7 +945,8 @@ def train():
             start_time_epoch = time.time()
 
             # random bucket order
-            bucket_ids = np.random.permutation(train_buckets.keys())
+            rng = np.random.RandomState(FLAGS.bucket_random_seed)
+            bucket_ids = rng.permutation(train_buckets.keys())
 
             for bucket_id in bucket_ids:
                 bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = train_buckets[bucket_id]
@@ -1111,7 +1112,7 @@ def test():
                         fid.write("%1.12f\n" % num)
                     fid.write("\n")
                 print "pBADs stored on %s" % pBAD_file
-        
+
         test_accuracy = accuracy(test_true, test_predictions)
         test_f1_1, test_f1_2 = f1s_binary(test_true, test_predictions)
         print "Test time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
