@@ -46,7 +46,7 @@ tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
 tf.app.flags.DEFINE_integer("J", 20, "dimensionality of hidden layer")
 tf.app.flags.DEFINE_integer("r", 2, "context size")
-tf.app.flags.DEFINE_float("bad_weight", 3.0, "weight for BAD instances" )
+tf.app.flags.DEFINE_float("bad_weight", 1.0, "weight for BAD instances" )
 tf.app.flags.DEFINE_boolean("train", True, "training model")
 tf.app.flags.DEFINE_integer("epochs", 500, "training epochs")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 100, "save model every x epochs")
@@ -790,27 +790,22 @@ def train():
 
     with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
-        # generate train and dev data
-        train_size = FLAGS.max_train_data_size
-        dev_size = 1000
-        number_of_labels = 2
-
         # random embeddings
-        vocab = range(0, FLAGS.tgt_vocab_size)+["PAD", "UNK", "<s>", "</s>"]  # TODO no UNKs in this dataset
+        vocab = range(0, FLAGS.tgt_vocab_size-4)+["PAD", "UNK", "<s>", "</s>"]  # TODO no UNKs in this dataset
         word2id = {w:i for i, w in enumerate(vocab)}
         id2word = {i:w for i, w in word2id.items()}
         embeddings = embedding.Embedding(None, word2id, id2word, word2id["UNK"], word2id["PAD"], word2id["</s>"], word2id["<s>"])
 
-        print "word2id", word2id
-
-        sequences, labels = generate_hmm_data_random([train_size, dev_size], FLAGS.L, FLAGS.tgt_vocab_size, number_of_labels)
-        print "seq", sequences[0][:3]
-        train_feature_vectors = extract_context_features(sequences[0], start_id=word2id["<s>"], end_id=word2id["</s>"], r=FLAGS.r)
-        dev_feature_vectors = extract_context_features(sequences[1], start_id=word2id["<s>"], end_id=word2id["</s>"], r=FLAGS.r)
+        # load data
+        train_sequences, train_labels = pkl.load(open("../data/hmm/equal.labels2.vocab200.train.pkl", "rb"))
+        train_sequences = train_sequences[:FLAGS.max_train_data_size]
+        train_labels = train_labels[:FLAGS.max_train_data_size]
+        print "train seq", train_sequences[:3]
+        train_feature_vectors = extract_context_features(train_sequences, start_id=word2id["<s>"], end_id=word2id["</s>"], r=FLAGS.r)
         print "feats", train_feature_vectors[:3]
-        print "feats", np.asarray(train_feature_vectors)
 
-        train_labels, dev_labels = labels
+        dev_sequences, dev_labels = pkl.load(open("../data/hmm/equal.labels2.vocab200.dev.pkl","rb"))
+        dev_feature_vectors = extract_context_features(dev_sequences, start_id=word2id["<s>"], end_id=word2id["</s>"], r=FLAGS.r)
 
         print "Training on %d instances" % len(train_labels)
         print "Validating on %d instances" % len(dev_labels)
