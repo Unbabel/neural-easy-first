@@ -203,7 +203,6 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                                 initializer=tf.random_uniform_initializer(dtype=tf.float32))
             W_hsz = tf.get_variable(name="W_hsz", shape=[2*state_size*(2*r+1), J],
                                        initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-            print tf.get_variable_scope().reuse
 
             if keep_prob_sketch < 1:
                 # create mask
@@ -258,10 +257,9 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 batch_major_contexts = tf.transpose(contexts, [2, 0, 1]) # switch back: batch_size x L x (2*r+1)*2(state_size) (batch-major)
                 return batch_major_contexts
 
-            def sketch_step(n_counter, sketch_embedding_matrix):
+            def sketch_step(sketch_embedding_matrix):
                 """
                 Compute the sketch vector and update the sketch according to attention over words
-                :param n_counter:
                 :param sketch_embedding_matrix: batch_size x L x 2*state_size (concatenation of S and H)
                 :return:
                 """
@@ -283,22 +281,35 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 embedding_update = tf.zeros(shape=[batch_size, L, state_size])  # batch_size x L x state_size
                 sketch_embedding_matrix_update = tf.concat(2, [embedding_update, sketch_update])
                 sketch_embedding_matrix_n = sketch_embedding_matrix + sketch_embedding_matrix_update  # only update the S part of the concatenated matrix
-                return n_counter+1, sketch_embedding_matrix_n
+
+                return sketch_embedding_matrix_n
 
             n = tf.constant(1, dtype=tf.int32, name="n")
             S = tf.zeros(shape=[batch_size, L, state_size], dtype=tf.float32)
-            HS = tf.concat(2, [H, S])  # [batch_size, L, 2*state_size]
+            HS = tf.concat(2, [H, S])
+            all_sketches = [HS]
+
+
             padding_hs_col = tf.constant([[0, 0], [r, r], [0, 0]], name="padding_hs_col")
 
+            # TODO do simple for in loop?
 
             if N > 0:
-                (final_n, final_HS) = tf.while_loop(
-                    cond=lambda n_counter, _1: n_counter <= N,
-                    body=sketch_step,
-                    loop_vars=(n, HS)
-                )
-            else:
-                final_HS = HS
+                for i in range(N):
+                    HS = sketch_step(HS)
+                    all_sketches.append(HS)
+            all_sketches_tf = tf.pack(all_sketches)
+
+
+            #if N > 0:
+            #    (final_n, final_HS, all_sketches_tf) = tf.while_loop(
+            #        cond=lambda n_counter, _1, _2: n_counter <= N,
+            #        body=sketch_step,
+            #        loop_vars=(n, HS, all_sketches_tf)
+            #    )
+            #else:
+            #    final_HS = HS
+
 
         with tf.name_scope("scoring"):
 
@@ -325,7 +336,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 class_weights = tf.constant(class_weights, name="class_weights")
 
             for i in np.arange(L):  # compute score, probs and losses per word for whole batch
-                word_label_score = score(i, final_HS)
+                word_label_score = score(i, HS)
                 word_label_probs = tf.nn.softmax(word_label_score)
                 word_preds = tf.argmax(word_label_probs, 1)
                 pred_labels.append(word_preds)
@@ -355,10 +366,10 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                     tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
                 losses_reg += l1_loss
 
-        return losses, losses_reg, pred_labels, M_src, M_tgt
+        return losses, losses_reg, pred_labels, M_src, M_tgt, tf.concat(2, [H, S]), HS, all_sketches_tf
 
-    losses, losses_reg, predictions, M_src, M_tgt = forward(inputs, labels, masks, seq_lens, class_weights)
-    return losses, losses_reg, predictions, M_src, M_tgt
+    losses, losses_reg, predictions, M_src, M_tgt, initial_HS, final_HS, all_sketches_tf = forward(inputs, labels, masks, seq_lens, class_weights)
+    return losses, losses_reg, predictions, M_src, M_tgt, initial_HS, final_HS, all_sketches_tf
 
 
 def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, window_size,
@@ -635,6 +646,9 @@ class EasyFirstModel():
         self.losses = []
         self.losses_reg = []
         self.predictions = []
+        self.initial_HSs = []
+        self.final_HSs = []
+        self.all_sketches_tfs = []
         for j, max_len in enumerate(self.buckets):
             self.inputs.append(tf.placeholder(tf.int32,
                                               shape=[None, max_len, 2*self.window_size],
@@ -647,7 +661,7 @@ class EasyFirstModel():
                                                 shape=[None], name="seq_lens{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 logger.info("Initializing parameters for bucket with max len %d" % max_len)
-                bucket_losses, bucket_losses_reg, bucket_predictions, src_table, tgt_table = model_func(
+                bucket_losses, bucket_losses_reg, bucket_predictions, src_table, tgt_table,  initial_HS, final_HS, all_sketches_tf = model_func(
                     inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j],
                     seq_lens=self.seq_lens[j], src_vocab_size=self.src_vocab_size,
                     tgt_vocab_size=self.tgt_vocab_size, K=self.K,
@@ -665,6 +679,9 @@ class EasyFirstModel():
                 self.predictions.append(bucket_predictions)  # list of tensors, one for each bucket
                 self.src_table = src_table  # shared for all buckets
                 self.tgt_table = tgt_table
+                self.initial_HSs.append(initial_HS)
+                self.final_HSs.append(final_HS)
+                self.all_sketches_tfs.append(all_sketches_tf)
 
         # gradients and update operation for training the model
         if not forward_only:
@@ -710,7 +727,10 @@ class EasyFirstModel():
                            self.predictions[bucket_id],
                            self.losses_reg[bucket_id],
                            self.updates[bucket_id],
-                           self.gradient_norms[bucket_id]]
+                           self.gradient_norms[bucket_id],
+                           self.initial_HSs[bucket_id],
+                           self.final_HSs[bucket_id],
+                           self.all_sketches_tfs[bucket_id]]
         else:
             output_feed = [self.losses[bucket_id], self.predictions[bucket_id], self.losses_reg[bucket_id]]
         #print "output_feed", output_feed
@@ -722,7 +742,7 @@ class EasyFirstModel():
         for seq_len, pred in zip(seq_lens, outputs[1]):
                 predictions.append(pred[:seq_len].tolist())
 
-        return outputs[0], predictions, outputs[2]  # loss, predictions, regularized loss
+        return outputs[0], predictions, outputs[2], outputs[5], outputs[6], outputs[7]  # loss, predictions, regularized loss
 
 
 def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
@@ -745,7 +765,7 @@ def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
                            keep_prob=FLAGS.keep_prob, keep_prob_sketch=FLAGS.keep_prob_sketch,
                            model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm, update_emb=FLAGS.update_emb,
                            model=FLAGS.model, activation=FLAGS.activation, l1_scale=FLAGS.l1_scale)
-    checkpoint = tf.train.get_checkpoint_state("models")
+    checkpoint = tf.train.get_checkpoint_state(FLAGS.model_dir)
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
         logger.info("Reading model parameters from %s" % checkpoint.model_checkpoint_path)
         model.saver.restore(session, checkpoint.model_checkpoint_path)
@@ -898,7 +918,7 @@ def train():
                     y_batch = bucket_ys[batch_samples]
                     mask_batch = bucket_masks[batch_samples]
                     seq_lens_batch = bucket_seq_lens[batch_samples]
-                    step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
+                    step_loss, predictions, step_loss_reg, initial_sketches, final_sketches, all_sketches  = model.batch_update(sess, bucket_id,
                                                                                x_batch, y_batch,
                                                                                mask_batch,
                                                                                seq_lens_batch,
@@ -910,6 +930,12 @@ def train():
                     train_predictions.extend(predictions)
                     train_true.extend(y_batch)  # needs to be stored because of random order
                     current_sample += len(x_batch)
+
+                    print final_sketches[0]
+                    print initial_sketches[0]
+                    print all_sketches[0]
+
+
                 logger.info("bucket %d - loss %0.2f - loss+reg %0.2f" % (bucket_id,
                                                                    bucket_loss/len(bucket_xs),
                                                                    bucket_loss_reg/len(bucket_xs)))
@@ -947,12 +973,11 @@ def train():
                 logger.info("NEW BEST!")
                 best_valid = dev_f1_1*dev_f1_2
                 best_valid_epoch = epoch+1
+                # save checkpoint
+                model.saver.save(sess, model.path, global_step=model.global_step, write_meta_graph=True)
             else:
                 logger.info("current best: %f at epoch %d" % (best_valid, best_valid_epoch))
 
-            if epoch % FLAGS.checkpoint_freq == 0:
-                # save checkpoint
-                model.saver.save(sess, model.path, global_step=model.global_step, write_meta_graph=True)
 
         logger.info("Training finished after %d epochs. Best validation result: %f at epoch %d." \
               % (epoch+1, best_valid, best_valid_epoch))
