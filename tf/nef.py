@@ -260,7 +260,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             def sketch_step(sketch_embedding_matrix):
                 """
                 Compute the sketch vector and update the sketch according to attention over words
-                :param sketch_embedding_matrix: batch_size x L x 2*state_size (concatenation of S and H)
+                :param sketch_embedding_matrix: batch_size x L x 2*state_size (concatenation of H and S)
                 :return:
                 """
                 sketch_embedding_matrix_padded = tf.pad(sketch_embedding_matrix, padding_hs_col, "CONSTANT", name="HS_padded")  # add column on right and left
@@ -278,38 +278,22 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 hs_n = activation(a + w_s)  # batch_size x state_size
 
                 sketch_update = tf.batch_matmul(tf.expand_dims(a_n, [2]), tf.expand_dims(hs_n, [1]))  # batch_size x L x state_size
-                embedding_update = tf.zeros(shape=[batch_size, L, state_size])  # batch_size x L x state_size
-                sketch_embedding_matrix_update = tf.concat(2, [embedding_update, sketch_update])
-                sketch_embedding_matrix_n = sketch_embedding_matrix + sketch_embedding_matrix_update  # only update the S part of the concatenated matrix
-
-                return sketch_embedding_matrix_n
+                return sketch_update
 
             n = tf.constant(1, dtype=tf.int32, name="n")
             S = tf.zeros(shape=[batch_size, L, state_size], dtype=tf.float32)
             HS = tf.concat(2, [H, S])
-            all_sketches = [HS]
-
+            sketches = [S]
 
             padding_hs_col = tf.constant([[0, 0], [r, r], [0, 0]], name="padding_hs_col")
-
-            # TODO do simple for in loop?
+            embedding_update = tf.zeros(shape=[batch_size, L, state_size])  # batch_size x L x state_size
 
             if N > 0:
-                for i in range(N):
-                    HS = sketch_step(HS)
-                    all_sketches.append(HS)
-            all_sketches_tf = tf.pack(all_sketches)
-
-
-            #if N > 0:
-            #    (final_n, final_HS, all_sketches_tf) = tf.while_loop(
-            #        cond=lambda n_counter, _1, _2: n_counter <= N,
-            #        body=sketch_step,
-            #        loop_vars=(n, HS, all_sketches_tf)
-            #    )
-            #else:
-            #    final_HS = HS
-
+                for i in np.arange(N):
+                    sketch_update = sketch_step(HS)
+                    HS += tf.concat(2, [embedding_update, sketch_update])
+                    sketches.append(HS)
+            sketches_tf = tf.pack(sketches)
 
         with tf.name_scope("scoring"):
 
@@ -366,10 +350,10 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                     tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
                 losses_reg += l1_loss
 
-        return losses, losses_reg, pred_labels, M_src, M_tgt, tf.concat(2, [H, S]), HS, all_sketches_tf
+        return losses, losses_reg, pred_labels, M_src, M_tgt, sketches_tf
 
-    losses, losses_reg, predictions, M_src, M_tgt, initial_HS, final_HS, all_sketches_tf = forward(inputs, labels, masks, seq_lens, class_weights)
-    return losses, losses_reg, predictions, M_src, M_tgt, initial_HS, final_HS, all_sketches_tf
+    losses, losses_reg, predictions, M_src, M_tgt, sketches_tf = forward(inputs, labels, masks, seq_lens, class_weights)
+    return losses, losses_reg, predictions, M_src, M_tgt, sketches_tf
 
 
 def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, window_size,
@@ -646,9 +630,7 @@ class EasyFirstModel():
         self.losses = []
         self.losses_reg = []
         self.predictions = []
-        self.initial_HSs = []
-        self.final_HSs = []
-        self.all_sketches_tfs = []
+        self.sketches_tfs = []
         for j, max_len in enumerate(self.buckets):
             self.inputs.append(tf.placeholder(tf.int32,
                                               shape=[None, max_len, 2*self.window_size],
@@ -661,7 +643,7 @@ class EasyFirstModel():
                                                 shape=[None], name="seq_lens{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 logger.info("Initializing parameters for bucket with max len %d" % max_len)
-                bucket_losses, bucket_losses_reg, bucket_predictions, src_table, tgt_table,  initial_HS, final_HS, all_sketches_tf = model_func(
+                bucket_losses, bucket_losses_reg, bucket_predictions, src_table, tgt_table, sketches = model_func(
                     inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j],
                     seq_lens=self.seq_lens[j], src_vocab_size=self.src_vocab_size,
                     tgt_vocab_size=self.tgt_vocab_size, K=self.K,
@@ -679,9 +661,7 @@ class EasyFirstModel():
                 self.predictions.append(bucket_predictions)  # list of tensors, one for each bucket
                 self.src_table = src_table  # shared for all buckets
                 self.tgt_table = tgt_table
-                self.initial_HSs.append(initial_HS)
-                self.final_HSs.append(final_HS)
-                self.all_sketches_tfs.append(all_sketches_tf)
+                self.sketches_tfs.append(sketches)
 
         # gradients and update operation for training the model
         if not forward_only:
@@ -728,9 +708,7 @@ class EasyFirstModel():
                            self.losses_reg[bucket_id],
                            self.updates[bucket_id],
                            self.gradient_norms[bucket_id],
-                           self.initial_HSs[bucket_id],
-                           self.final_HSs[bucket_id],
-                           self.all_sketches_tfs[bucket_id]]
+                           self.sketches_tfs[bucket_id]]
         else:
             output_feed = [self.losses[bucket_id], self.predictions[bucket_id], self.losses_reg[bucket_id]]
         #print "output_feed", output_feed
@@ -742,8 +720,10 @@ class EasyFirstModel():
         for seq_len, pred in zip(seq_lens, outputs[1]):
                 predictions.append(pred[:seq_len].tolist())
 
-        return outputs[0], predictions, outputs[2], outputs[5], outputs[6], outputs[7]  # loss, predictions, regularized loss
-
+        if not forward_only:
+            return outputs[0], predictions, outputs[2], outputs[5]  # loss, predictions, regularized loss, sketches
+        else:
+            return outputs[0], predictions, outputs[2]
 
 def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
                  forward_only=False, src_embeddings=None, tgt_embeddings=None,
@@ -918,7 +898,7 @@ def train():
                     y_batch = bucket_ys[batch_samples]
                     mask_batch = bucket_masks[batch_samples]
                     seq_lens_batch = bucket_seq_lens[batch_samples]
-                    step_loss, predictions, step_loss_reg, initial_sketches, final_sketches, all_sketches  = model.batch_update(sess, bucket_id,
+                    step_loss, predictions, step_loss_reg, all_sketches  = model.batch_update(sess, bucket_id,
                                                                                x_batch, y_batch,
                                                                                mask_batch,
                                                                                seq_lens_batch,
@@ -931,8 +911,6 @@ def train():
                     train_true.extend(y_batch)  # needs to be stored because of random order
                     current_sample += len(x_batch)
 
-                    print final_sketches[0]
-                    print initial_sketches[0]
                     print all_sketches[0]
 
 
@@ -974,7 +952,7 @@ def train():
                 best_valid = dev_f1_1*dev_f1_2
                 best_valid_epoch = epoch+1
                 # save checkpoint
-                model.saver.save(sess, model.path, global_step=model.global_step, write_meta_graph=True)
+                model.saver.save(sess, model.path, global_step=model.global_step, write_meta_graph=False)
             else:
                 logger.info("current best: %f at epoch %d" % (best_valid, best_valid_epoch))
 
