@@ -347,7 +347,7 @@ def pad_data(X, Y, max_len, PAD_symbol=0):
     return X_padded, Y_padded, masks, np.asarray(seq_lens)
 
 
-def buckets_by_length(data, labels, buckets=20, max_len=0, mode='pad'):
+def buckets_by_length(data, labels, buckets=20, max_len=50, mode='pad'):
     """
     :param data: numpy arrays of data
     :param labels: numpy arrays of labels
@@ -369,7 +369,7 @@ def buckets_by_length(data, labels, buckets=20, max_len=0, mode='pad'):
     bucket_size = int(np.ceil(len(data)/float(buckets)))
     logging.info("Creating %d Buckets of size %d" % (buckets, bucket_size))
     buckets_data = [sorted_data_lengths_with_idx[i:i+bucket_size] for i in xrange(0, len(sorted_data_lengths_with_idx), bucket_size)]
-    bin_edges = [bucket[-1][0] for bucket in buckets_data]  # max len of sequence in bucket
+    bin_edges = [min(bucket[-1][0], max_len) for bucket in buckets_data]  # max len of sequence in bucket
     logging.info("bin_edges %s" % str(bin_edges))
     if bin_edges[-1] < maxlen:
         bin_edges[-1] = maxlen
