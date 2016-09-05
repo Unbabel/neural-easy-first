@@ -62,6 +62,7 @@ tf.app.flags.DEFINE_float("keep_prob_sketch", 1, "keep probability for dropout d
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
 tf.app.flags.DEFINE_integer("threads", 8, "number of threads")
+tf.app.flags.DEFINE_boolean("track_sketches", False, "keep track of the sketches during learning")
 FLAGS = tf.app.flags.FLAGS
 
 logging.basicConfig(filename=FLAGS.model_dir+str(datetime.datetime.now()).replace(" ", "-")+".training.log")
@@ -73,7 +74,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                     lstm_units, concat, window_size, keep_prob, keep_prob_sketch,
                     l2_scale, l1_scale, src_embeddings=None, tgt_embeddings=None,
                     class_weights=None, bilstm=True, activation=tf.nn.tanh,
-                    update_emb=True):
+                    update_emb=True, track_sketches=False):
     """
     Single-state easy-first model with embeddings and optional LSTM-RNN encoder
     :param inputs:
@@ -293,7 +294,8 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 for i in np.arange(N):
                     sketch_update = sketch_step(HS)
                     HS += tf.concat(2, [embedding_update, sketch_update])
-                    sketches.append(tf.split(2, 2, HS)[1])
+                    if track_sketches:
+                        sketches.append(tf.split(2, 2, HS)[1])
             sketches_tf = tf.pack(sketches)
 
         with tf.name_scope("scoring"):
@@ -361,7 +363,7 @@ def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, wi
            src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob, l1_scale,
            keep_prob_sketch=1,
            lstm_units=0, bilstm=False, concat=False, r=0, N=0, seq_lens=None,
-           activation=tf.nn.tanh, update_emb=True):
+           activation=tf.nn.tanh, update_emb=True, track_sketches=False):
     """
     QUETCH model for word-level QE predictions  (MLP based on embeddings)
     :param inputs:
@@ -487,7 +489,7 @@ class EasyFirstModel():
                  tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0,
                  keep_prob=1, keep_prob_sketch=1, model_dir="models/",
                  bilstm=True, model="ef_single_state", activation="tanh", l1_scale=0,
-                 update_emb=True):
+                 update_emb=True, track_sketches=False):
         """
         Initialize the model
         :param K:
@@ -623,6 +625,10 @@ class EasyFirstModel():
             activation_func = tf.nn.sigmoid
         logger.info("Activation function %s" % activation_func.__name__)
 
+        self.track_sketches = track_sketches
+        if track_sketches:
+            logger.info("Tracking sketches")
+
         # prepare input feeds
         self.inputs = []
         self.labels = []
@@ -655,14 +661,16 @@ class EasyFirstModel():
                     class_weights=self.class_weights, update_emb=update_emb,
                     keep_prob=self.keep_prob, keep_prob_sketch=self.keep_prob_sketch,
                     l2_scale=self.l2_scale, l1_scale=self.l1_scale,
-                    bilstm=self.bilstm, activation=activation_func)
+                    bilstm=self.bilstm, activation=activation_func,
+                    track_sketches=self.track_sketches)
 
                 self.losses_reg.append(bucket_losses_reg)
                 self.losses.append(bucket_losses) # list of tensors, one for each bucket
                 self.predictions.append(bucket_predictions)  # list of tensors, one for each bucket
                 self.src_table = src_table  # shared for all buckets
                 self.tgt_table = tgt_table
-                self.sketches_tfs.append(sketches)
+                if self.track_sketches:  # else sketches are just empty
+                    self.sketches_tfs.append(sketches)
 
         # gradients and update operation for training the model
         if not forward_only:
@@ -756,7 +764,8 @@ def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
                            window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale,
                            keep_prob=FLAGS.keep_prob, keep_prob_sketch=FLAGS.keep_prob_sketch,
                            model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm, update_emb=FLAGS.update_emb,
-                           model=FLAGS.model, activation=FLAGS.activation, l1_scale=FLAGS.l1_scale)
+                           model=FLAGS.model, activation=FLAGS.activation, l1_scale=FLAGS.l1_scale,
+                           track_sketches=FLAGS.track_sketches)
     checkpoint = tf.train.get_checkpoint_state(FLAGS.model_dir)
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
         logger.info("Reading model parameters from %s" % checkpoint.model_checkpoint_path)
@@ -880,10 +889,11 @@ def train():
                                                   np.average(dev_seq_lens), total_number_of_pads))
 
         # choose a training sample to analyse during sketching
-        train_corpus_id = 38
-        sample_bucket_id = np.nonzero([train_corpus_id in train_reordering_indexes[b] for b in train_reordering_indexes.keys()])[0][0]
-        sample_in_bucket_index = np.nonzero([i == train_corpus_id for i in train_reordering_indexes[sample_bucket_id]])[0]  # position of sample within bucket
-        print "Chose sketch sample: corpus id %d, bucket %d, index in bucket %d" % (train_corpus_id, sample_bucket_id, sample_in_bucket_index)
+        if FLAGS.track_sketches:
+            train_corpus_id = 38
+            sample_bucket_id = np.nonzero([train_corpus_id in train_reordering_indexes[b] for b in train_reordering_indexes.keys()])[0][0]
+            sample_in_bucket_index = np.nonzero([i == train_corpus_id for i in train_reordering_indexes[sample_bucket_id]])[0]  # position of sample within bucket
+            logger.info("Chosen sketch sample: corpus id %d, bucket %d, index in bucket %d" % (train_corpus_id, sample_bucket_id, sample_in_bucket_index))
 
         # training in epochs
         best_valid = 0
@@ -930,7 +940,7 @@ def train():
                     train_true.extend(y_batch)  # needs to be stored because of random order
                     current_sample += len(x_batch)
 
-                    if FLAGS.model == "ef_single_state":
+                    if FLAGS.model == "ef_single_state" and FLAGS.track_sketches:
                         if bucket_id == sample_bucket_id and sample_in_bucket_index in batch_samples:
                             sample_in_batch_index = np.nonzero([i == sample_in_bucket_index for i in batch_samples])[0][0]
                             all_sketches = model.get_sketches_for_single_sample(
