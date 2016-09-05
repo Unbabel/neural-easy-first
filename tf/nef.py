@@ -29,6 +29,7 @@ tf.app.flags.DEFINE_integer("src_vocab_size", 10000, "Vocabulary size.")
 tf.app.flags.DEFINE_integer("tgt_vocab_size", 10000, "Vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
+tf.app.flags.DEFINE_string("sketch_dir", "sketches/", "Directory where sketch dumps are stored")
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
@@ -232,8 +233,9 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 z = []
                 for j in np.arange(sequence_len):
                     z.append(z_j(j, padded_matrix))
-                z_packed = tf.pack(z)
-                rz = tf.reshape(z_packed, [batch_size, sequence_len])
+                z_packed = tf.pack(z)  # seq_len, batch_size, 1
+                rz = tf.transpose(z_packed, [1, 0, 2])  # batch-major
+                rz = tf.reshape(rz, [batch_size, sequence_len])
                 a_n = tf.nn.softmax(rz)
                 return a_n
 
@@ -280,10 +282,9 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 sketch_update = tf.batch_matmul(tf.expand_dims(a_n, [2]), tf.expand_dims(hs_n, [1]))  # batch_size x L x state_size
                 return sketch_update
 
-            n = tf.constant(1, dtype=tf.int32, name="n")
             S = tf.zeros(shape=[batch_size, L, state_size], dtype=tf.float32)
             HS = tf.concat(2, [H, S])
-            sketches = [S]
+            sketches = []
 
             padding_hs_col = tf.constant([[0, 0], [r, r], [0, 0]], name="padding_hs_col")
             embedding_update = tf.zeros(shape=[batch_size, L, state_size])  # batch_size x L x state_size
@@ -292,7 +293,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 for i in np.arange(N):
                     sketch_update = sketch_step(HS)
                     HS += tf.concat(2, [embedding_update, sketch_update])
-                    sketches.append(HS)
+                    sketches.append(tf.split(2, 2, HS)[1])
             sketches_tf = tf.pack(sketches)
 
         with tf.name_scope("scoring"):
@@ -683,7 +684,6 @@ class EasyFirstModel():
 
         self.saver = tf.train.Saver(tf.all_variables())
 
-
     def batch_update(self, session, bucket_id, inputs, labels, masks, seq_lens, forward_only=False):
         """
         Training step
@@ -707,8 +707,7 @@ class EasyFirstModel():
                            self.predictions[bucket_id],
                            self.losses_reg[bucket_id],
                            self.updates[bucket_id],
-                           self.gradient_norms[bucket_id],
-                           self.sketches_tfs[bucket_id]]
+                           self.gradient_norms[bucket_id]]
         else:
             output_feed = [self.losses[bucket_id], self.predictions[bucket_id], self.losses_reg[bucket_id]]
         #print "output_feed", output_feed
@@ -720,10 +719,23 @@ class EasyFirstModel():
         for seq_len, pred in zip(seq_lens, outputs[1]):
                 predictions.append(pred[:seq_len].tolist())
 
-        if not forward_only:
-            return outputs[0], predictions, outputs[2], outputs[5]  # loss, predictions, regularized loss, sketches
-        else:
-            return outputs[0], predictions, outputs[2]
+        return outputs[0], predictions, outputs[2]  # loss, predictions, regularized loss
+
+    def get_sketches_for_single_sample(self, session, bucket_id, input, label, mask, seq_len):
+        """
+        fetch the sketches for a single sample from the graph
+        """
+        input_feed = {}
+        input_feed[self.inputs[bucket_id].name] = np.expand_dims(input, 0)  # batch_size = 1
+        input_feed[self.labels[bucket_id].name] = np.expand_dims(label, 0)
+        input_feed[self.masks[bucket_id].name] = np.expand_dims(mask, 0)
+        input_feed[self.seq_lens[bucket_id].name] = np.expand_dims(seq_len, 0)
+
+        output_feed = [self.sketches_tfs[bucket_id]]
+        outputs = session.run(output_feed, input_feed)
+
+        return outputs[0]
+
 
 def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
                  forward_only=False, src_embeddings=None, tgt_embeddings=None,
@@ -845,7 +857,7 @@ def train():
 
         # create the model
         model = create_model(sess, bucket_edges, src_vocab_size, tgt_vocab_size,
-                             False, src_embeddings, tgt_embeddings,class_weights)
+                             False, src_embeddings, tgt_embeddings, class_weights)
 
         train_buckets_sizes = {i: len(indx) for i, indx in train_reordering_indexes.items()}
         dev_buckets_sizes = {i: len(indx) for i, indx in dev_reordering_indexes.items()}
@@ -866,6 +878,13 @@ def train():
             logger.info("Bucket no %d with max length %d: %d instances, avg length %f,  " \
                   "%d number of PADS in total" % (i, bucket_edges[i], dev_buckets_sizes[i],
                                                   np.average(dev_seq_lens), total_number_of_pads))
+
+        # choose a training sample to analyse during sketching
+        train_corpus_id = 38
+        sample_bucket_id = np.nonzero([train_corpus_id in train_reordering_indexes[b] for b in train_reordering_indexes.keys()])[0][0]
+        sample_in_bucket_index = np.nonzero([i == train_corpus_id for i in train_reordering_indexes[sample_bucket_id]])[0]  # position of sample within bucket
+        print "Chose sketch sample: corpus id %d, bucket %d, index in bucket %d" % (train_corpus_id, sample_bucket_id, sample_in_bucket_index)
+
         # training in epochs
         best_valid = 0
         best_valid_epoch = 0
@@ -898,7 +917,7 @@ def train():
                     y_batch = bucket_ys[batch_samples]
                     mask_batch = bucket_masks[batch_samples]
                     seq_lens_batch = bucket_seq_lens[batch_samples]
-                    step_loss, predictions, step_loss_reg, all_sketches  = model.batch_update(sess, bucket_id,
+                    step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
                                                                                x_batch, y_batch,
                                                                                mask_batch,
                                                                                seq_lens_batch,
@@ -911,7 +930,16 @@ def train():
                     train_true.extend(y_batch)  # needs to be stored because of random order
                     current_sample += len(x_batch)
 
-                    print all_sketches[0]
+                    if FLAGS.model == "ef_single_state":
+                        if bucket_id == sample_bucket_id and sample_in_bucket_index in batch_samples:
+                            sample_in_batch_index = np.nonzero([i == sample_in_bucket_index for i in batch_samples])[0][0]
+                            all_sketches = model.get_sketches_for_single_sample(
+                                sess, bucket_id, x_batch[sample_in_batch_index],
+                                y_batch[sample_in_batch_index],
+                                mask_batch[sample_in_batch_index],
+                                seq_lens_batch[sample_in_batch_index])
+                            sample_sketch = np.squeeze(all_sketches, 1)
+                            pkl.dump(sample_sketch, open("%s/sketches_sent%d_epoch%d.pkl" % (FLAGS.sketch_dir, train_corpus_id, epoch), "wb"))
 
 
                 logger.info("bucket %d - loss %0.2f - loss+reg %0.2f" % (bucket_id,
