@@ -33,6 +33,7 @@ tf.app.flags.DEFINE_string("dev_file", "../data/WMT2016/task2_en-de_dev/dev.basi
 tf.app.flags.DEFINE_string("test_file", "../data/WMT2016/task2_en-de_test/test.corrected_full_parsed_features_with_tags", "test data")
 tf.app.flags.DEFINE_boolean("save_pBAD", False, "During test, store BAD token probabilities for ensembling")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
+tf.app.flags.DEFINE_string("sketch_dir", "sketches/", "Directory where sketch dumps are stored")
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
@@ -68,7 +69,13 @@ tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from check
 tf.app.flags.DEFINE_integer("threads", 8, "number of threads")
 FLAGS = tf.app.flags.FLAGS
 
-logging.basicConfig(filename=FLAGS.model_dir+str(datetime.datetime.now()).replace(" ", "-")+".training.log")
+log_path = FLAGS.model_dir+str(datetime.datetime.now()).replace(" ", "-")+".training.log"
+logging.basicConfig(filename=log_path, 
+                    format='%(asctime)s %(message)s', 
+                    datefmt='%Y-%m-%d %H:%M:%S')
+
+format='%(asctime)s %(message)s'
+
 logger = logging.getLogger("NEF")
 logger.setLevel(logging.INFO)
 
