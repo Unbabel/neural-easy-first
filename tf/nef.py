@@ -1105,7 +1105,8 @@ def test():
             ordered_test_pBADs = take_from_buckets(bucketed_test_pBADs, 
                                                    test_reordering_indexes)
 
-            pBAD_file = "%s/%s.pBAD" % (FLAGS.model_dir, os.path.basename(FLAGS.test_file))
+            pBAD_file = "%s/%s.pBAD" % (FLAGS.model_dir, 
+                                        os.path.basename(FLAGS.test_file))
             with open(pBAD_file, 'w') as fid:
                 for pBAD in ordered_test_pBADs:
                     for num in pBAD:
