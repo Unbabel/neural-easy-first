@@ -131,10 +131,9 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 #print "Loading existing tgt embeddings of dimensionality %d" % D_loaded
                 emb_size += D_loaded
 
-            if keep_prob < 1:  # dropout for word embeddings ("pervasive dropout")
-                #print "Dropping out word embeddings"
-                M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
-                M_src = tf.nn.dropout(M_src, keep_prob)
+            # dropout on embeddings
+            M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
+            M_src = tf.nn.dropout(M_src, keep_prob)
 
             #print "embedding size", emb_size
             x_tgt, x_src = tf.split(2, 2, x)  # split src and tgt part of input
@@ -153,14 +152,13 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                     with tf.name_scope("bi-lstm"):
                         bw_cell = tf.nn.rnn_cell.LSTMCell(num_units=lstm_units, state_is_tuple=True)
 
-                        if keep_prob < 1:
-                            #print "Dropping out LSTM output"
-                            fw_cell = \
-                                tf.nn.rnn_cell.DropoutWrapper(
-                                    fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
-                            bw_cell = \
-                                tf.nn.rnn_cell.DropoutWrapper(
-                                    bw_cell, input_keep_prob=1, output_keep_prob=keep_prob)
+                        # dropout on lstm
+                        fw_cell = \
+                            tf.nn.rnn_cell.DropoutWrapper(
+                                fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
+                        bw_cell = \
+                            tf.nn.rnn_cell.DropoutWrapper(
+                                bw_cell, input_keep_prob=1, output_keep_prob=keep_prob)
 
                         outputs, _ = \
                             tf.nn.bidirectional_dynamic_rnn(
@@ -171,10 +169,9 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 else:
                     with tf.name_scope("lstm"):
 
-                        if keep_prob < 1:
-                            #print "Dropping out LSTM output"
-                            fw_cell = tf.nn.rnn_cell.DropoutWrapper(
-                                fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
+                        # dropout on lstm
+                        fw_cell = tf.nn.rnn_cell.DropoutWrapper(
+                            fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
 
                         outputs, _, = tf.nn.dynamic_rnn(
                             cell=fw_cell, inputs=emb, sequence_length=seq_lens,
@@ -206,13 +203,9 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             W_hsz = tf.get_variable(name="W_hsz", shape=[2*state_size*(2*r+1), J],
                                        initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
 
-            if keep_prob_sketch < 1:
-                # create mask
-                keep_prob_tensor = tf.convert_to_tensor(keep_prob_sketch, name="keep_prob_sketch")
-                # see https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/nn_ops.py#L1078 (inverted dropout)
-                #W_hss_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(W_hss)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)
-                W_hss_mask = tf.get_variable("W_hss_mask", shape=tf.shape(W_hss), initializer=tf.random_uniform_initializer())
-                W_hss_mask = tf.to_float(tf.less(W_hss_mask, keep_prob_tensor)) * tf.inv(keep_prob_tensor)
+            # dropout within sketch
+            # see https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/nn_ops.py#L1078 (inverted dropout)
+            W_hss_mask = tf.to_float(tf.less_equal(tf.random_uniform(tf.shape(W_hss)), keep_prob_sketch)) * tf.inv(keep_prob_sketch)
 
             def z_j(j, padded_matrix):
                 """
@@ -274,10 +267,8 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 hs_avg = tf.batch_matmul(tf.expand_dims(a_n, [1]), conv)  # batch_size x 1 x 2*state_size*(2*r+1)
                 hs_avg = tf.reshape(hs_avg, [batch_size, 2*state_size*(2*r+1)])
 
-                if keep_prob_sketch < 1:  # same dropout for all steps (http://arxiv.org/pdf/1512.05287v3.pdf)
-                    a = tf.matmul(hs_avg, tf.mul(W_hss, W_hss_mask))
-                else:
-                    a = tf.matmul(hs_avg, W_hss)
+                # same dropout for all steps (http://arxiv.org/pdf/1512.05287v3.pdf), mask is ones if no dropout
+                a = tf.matmul(hs_avg, tf.mul(W_hss, W_hss_mask))
                 hs_n = activation(a + w_s)  # batch_size x state_size
 
                 sketch_update = tf.batch_matmul(tf.expand_dims(a_n, [2]), tf.expand_dims(hs_n, [1]))  # batch_size x L x state_size
@@ -421,9 +412,9 @@ def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, wi
             D_loaded = len(tgt_embeddings.table[0])
             emb_size += D_loaded
 
-        #if keep_prob < 1:  # dropout for word embeddings ("pervasive dropout")
-        #    M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
-        #    M_src = tf.nn.dropout(M_src, keep_prob)
+        # dropout for word embeddings ("pervasive dropout")
+        #M_tgt = tf.nn.dropout(M_tgt, keep_prob)
+        #M_src = tf.nn.dropout(M_src, keep_prob)
 
         x_tgt, x_src = tf.split(2, 2, inputs)  # split src and tgt part of input
         emb_tgt = tf.nn.embedding_lookup(M_tgt, x_tgt, name="emg_tgt")  # batch_size x L x window_size x emb_size
@@ -431,8 +422,7 @@ def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, wi
         emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
         emb = tf.reshape(emb_comb, [batch_size, -1, window_size*emb_size], name="emb") # batch_size x L x window_size*emb_size
 
-        if keep_prob < 1:
-            emb = tf.nn.dropout(emb, keep_prob=keep_prob, name="drop_emb")
+        emb = tf.nn.dropout(emb, keep_prob=keep_prob, name="drop_emb")
 
     with tf.name_scope("mlp"):
         inputs = tf.reshape(emb, [-1, window_size*emb_size])
@@ -447,8 +437,7 @@ def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, wi
         b_2 = tf.get_variable(shape=[K], initializer=tf.random_uniform_initializer(
             dtype=tf.float32), name="b_2")
         hidden = activation(tf.matmul(inputs, W_1) + b_1)  # batch_size*emb_size, J
-        if keep_prob < 1:
-            hidden = tf.nn.dropout(hidden, keep_prob)
+        hidden = tf.nn.dropout(hidden, keep_prob)
         out = tf.matmul(hidden, W_2) + b_2  # batch_size*emb_size, K
         logits = tf.reshape(out, [batch_size, L, K])
         softmax = tf.nn.softmax(out)  # batch_size*L, K
@@ -638,6 +627,8 @@ class EasyFirstModel():
         self.losses_reg = []
         self.predictions = []
         self.sketches_tfs = []
+        self.keep_probs = []
+        self.keep_prob_sketches = []
         for j, max_len in enumerate(self.buckets):
             self.inputs.append(tf.placeholder(tf.int32,
                                               shape=[None, max_len, 2*self.window_size],
@@ -648,6 +639,8 @@ class EasyFirstModel():
                                              shape=[None, max_len], name="masks{0}".format(j)))
             self.seq_lens.append(tf.placeholder(tf.int64,
                                                 shape=[None], name="seq_lens{0}".format(j)))
+            self.keep_prob_sketches.append(tf.placeholder(tf.float32, name="keep_prob_sketch{0}".format(j)))
+            self.keep_probs.append(tf.placeholder(tf.float32, name="keep_prob{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
                 logger.info("Initializing parameters for bucket with max len %d" % max_len)
                 bucket_losses, bucket_losses_reg, bucket_predictions, src_table, tgt_table, sketches = model_func(
@@ -659,7 +652,7 @@ class EasyFirstModel():
                     concat=self.concat, window_size=self.window_size,
                     src_embeddings=self.src_embeddings, tgt_embeddings=self.tgt_embeddings,
                     class_weights=self.class_weights, update_emb=update_emb,
-                    keep_prob=self.keep_prob, keep_prob_sketch=self.keep_prob_sketch,
+                    keep_prob=self.keep_probs[j], keep_prob_sketch=self.keep_prob_sketches[j],
                     l2_scale=self.l2_scale, l1_scale=self.l1_scale,
                     bilstm=self.bilstm, activation=activation_func,
                     track_sketches=self.track_sketches)
@@ -708,6 +701,8 @@ class EasyFirstModel():
         input_feed[self.labels[bucket_id].name] = labels
         input_feed[self.masks[bucket_id].name] = masks
         input_feed[self.seq_lens[bucket_id].name] = seq_lens
+        input_feed[self.keep_probs[bucket_id].name] = 1 if forward_only else self.keep_prob
+        input_feed[self.keep_prob_sketches[bucket_id].name] = 1 if forward_only else self.keep_prob_sketch
         #print "input_feed", input_feed.keys()
 
         if not forward_only:
@@ -1064,9 +1059,11 @@ def test():
         time_valid = time.time() - start_time_valid
         test_accuracy = accuracy(test_true, test_predictions)
         test_f1_1, test_f1_2 = f1s_binary(test_true, test_predictions)
-        logger.info("Test time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
-              (time_valid, test_loss/len(test_labels), test_accuracy,
-               test_f1_1*test_f1_2, test_f1_1, test_f1_2))
+        message = "Test time %fs, loss %f, test acc. %f, f1 prod %f (%f/%f) " % \
+                  (time_valid, test_loss/len(test_labels), test_accuracy,
+                   test_f1_1*test_f1_2, test_f1_1, test_f1_2)
+        logger.info(message)
+        print message
 
 
 def demo():
