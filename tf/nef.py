@@ -56,7 +56,7 @@ tf.app.flags.DEFINE_integer("r", 2, "context size")
 tf.app.flags.DEFINE_float("bad_weight", 3.0, "weight for BAD instances" )
 tf.app.flags.DEFINE_boolean("concat", True, "concatenating s_i and h_i for prediction")
 tf.app.flags.DEFINE_boolean("train", True, "training model")
-tf.app.flags.DEFINE_integer("epochs", 500, "training epochs")
+tf.app.flags.DEFINE_integer("epochs", 30, "training epochs")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 100, "save model every x epochs")
 tf.app.flags.DEFINE_integer("lstm_units", 20, "number of LSTM-RNN encoder units")
 tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
@@ -742,7 +742,7 @@ class EasyFirstModel():
         for seq_len, pBAD in zip(seq_lens, outputs[2]):
                 pBADs.append(pBAD[:seq_len].tolist())
 
-        return outputs[0], predictions, outputs[2]  # loss, predictions, regularized loss
+        return outputs[0], predictions, pBADs, outputs[2]  # loss, predictions, regularized loss
 
     def get_sketches_for_single_sample(self, session, bucket_id, input, label, mask, seq_len):
         """
@@ -801,6 +801,10 @@ def train():
     """
     print_config()
     logger.info("Training on %d thread(s)" % FLAGS.threads)
+
+    if not os.path.isdir(FLAGS.sketch_dir):
+        logger.info("Created sketches dir %s" % FLAGS.sketch_dir)
+        os.makedirs(FLAGS.sketch_dir)
 
     with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
@@ -940,7 +944,7 @@ def train():
                     y_batch = bucket_ys[batch_samples]
                     mask_batch = bucket_masks[batch_samples]
                     seq_lens_batch = bucket_seq_lens[batch_samples]
-                    step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
+                    step_loss, predictions, _, step_loss_reg = model.batch_update(sess, bucket_id,
                                                                                x_batch, y_batch,
                                                                                mask_batch,
                                                                                seq_lens_batch,
@@ -984,7 +988,7 @@ def train():
             dev_true = []
             for bucket_id in dev_buckets.keys():
                 bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = dev_buckets[bucket_id]
-                step_loss, predictions, pBADS, step_loss_reg = \
+                step_loss, predictions, _, step_loss_reg = \
                     model.batch_update(sess, bucket_id,
                                        bucket_xs, bucket_ys,
                                        bucket_masks,
@@ -1026,6 +1030,11 @@ def test():
     :return:
     """
     logger.info("Testing")
+
+    if not os.path.isdir(FLAGS.sketch_dir):
+        logger.info("Created sketches dir %s" % FLAGS.sketch_dir)
+        os.makedirs(FLAGS.sketch_dir)
+
     FLAGS.restore = True  # has to be loaded
     with tf.Session() as sess:
 
