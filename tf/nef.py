@@ -477,7 +477,7 @@ def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, wi
                 tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
             losses_reg += l1_loss
 
-    return losses, losses_reg, pred_labels, M_src, M_tgt
+    return losses, losses_reg, pred_labels, M_src, M_tgt, None
 
 
 class EasyFirstModel():
