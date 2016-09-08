@@ -253,10 +253,10 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 batch_major_contexts = tf.transpose(contexts, [2, 0, 1]) # switch back: batch_size x L x (2*r+1)*2(state_size) (batch-major)
                 return batch_major_contexts
 
-            def sketch_step(sketch_embedding_matrix):
+            def sketch_step(n_counter, sketch_embedding_matrix):
                 """
                 Compute the sketch vector and update the sketch according to attention over words
-                :param sketch_embedding_matrix: batch_size x L x 2*state_size (concatenation of H and S)
+                :param sketch_embedding_matrix: updated sketch, batch_size x L x 2*state_size (concatenation of H and S)
                 :return:
                 """
                 sketch_embedding_matrix_padded = tf.pad(sketch_embedding_matrix, padding_hs_col, "CONSTANT", name="HS_padded")  # add column on right and left
@@ -272,21 +272,32 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 hs_n = activation(a + w_s)  # batch_size x state_size
 
                 sketch_update = tf.batch_matmul(tf.expand_dims(a_n, [2]), tf.expand_dims(hs_n, [1]))  # batch_size x L x state_size
-                return sketch_update
+                embedding_update = tf.zeros(shape=[batch_size, L, state_size], dtype=tf.float32)  # batch_size x L x state_size
+                sketch_embedding_matrix += tf.concat(2, [embedding_update, sketch_update])
+                return n_counter+1, sketch_embedding_matrix
 
             S = tf.zeros(shape=[batch_size, L, state_size], dtype=tf.float32)
             HS = tf.concat(2, [H, S])
             sketches = []
 
             padding_hs_col = tf.constant([[0, 0], [r, r], [0, 0]], name="padding_hs_col")
-            embedding_update = tf.zeros(shape=[batch_size, L, state_size])  # batch_size x L x state_size
+            n = tf.constant(1, dtype=tf.int32, name="n")
 
-            if N > 0:
-                for i in np.arange(N):
-                    sketch_update = sketch_step(HS)
-                    HS += tf.concat(2, [embedding_update, sketch_update])
-                    if track_sketches:
-                        sketches.append(tf.split(2, 2, HS)[1])
+            if track_sketches:  # use for loop (slower, because more memory)
+                if N > 0:
+                    for i in xrange(N):
+                        n, HS = sketch_step(n, HS)
+                        sketch = tf.split(2, 2, HS)[1]
+                        sketches.append(sketch)
+            else:  # use while loop
+                if N > 0:
+                    (final_n, final_HS) = tf.while_loop(
+                        cond=lambda n_counter, _1: n_counter <= N,
+                        body=sketch_step,
+                        loop_vars=(n, HS)
+                    )
+                    HS = final_HS
+
             sketches_tf = tf.pack(sketches)
 
         with tf.name_scope("scoring"):
@@ -733,6 +744,8 @@ class EasyFirstModel():
         input_feed[self.labels[bucket_id].name] = np.expand_dims(label, 0)
         input_feed[self.masks[bucket_id].name] = np.expand_dims(mask, 0)
         input_feed[self.seq_lens[bucket_id].name] = np.expand_dims(seq_len, 0)
+        input_feed[self.keep_probs[bucket_id].name] = 1.0
+        input_feed[self.keep_prob_sketches[bucket_id].name] = 1.0
 
         output_feed = [self.sketches_tfs[bucket_id]]
         outputs = session.run(output_feed, input_feed)
