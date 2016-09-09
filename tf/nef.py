@@ -253,7 +253,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 batch_major_contexts = tf.transpose(contexts, [2, 0, 1]) # switch back: batch_size x L x (2*r+1)*2(state_size) (batch-major)
                 return batch_major_contexts
 
-            def sketch_step(n_counter, sketch_embedding_matrix):
+            def sketch_step(n_counter, sketch_embedding_matrix, a):
                 """
                 Compute the sketch vector and update the sketch according to attention over words
                 :param sketch_embedding_matrix: updated sketch, batch_size x L x 2*state_size (concatenation of H and S)
@@ -274,9 +274,10 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 sketch_update = tf.batch_matmul(tf.expand_dims(a_n, [2]), tf.expand_dims(hs_n, [1]))  # batch_size x L x state_size
                 embedding_update = tf.zeros(shape=[batch_size, L, state_size], dtype=tf.float32)  # batch_size x L x state_size
                 sketch_embedding_matrix += tf.concat(2, [embedding_update, sketch_update])
-                return n_counter+1, sketch_embedding_matrix
+                return n_counter+1, sketch_embedding_matrix, a_n
 
             S = tf.zeros(shape=[batch_size, L, state_size], dtype=tf.float32)
+            a = tf.zeros(shape=[batch_size, L])
             HS = tf.concat(2, [H, S])
             sketches = []
 
@@ -286,15 +287,17 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             if track_sketches:  # use for loop (slower, because more memory)
                 if N > 0:
                     for i in xrange(N):
-                        n, HS = sketch_step(n, HS)
+                        n, HS, a_n = sketch_step(n, HS, a)
                         sketch = tf.split(2, 2, HS)[1]
-                        sketches.append(sketch)
+                        # append attention to sketch
+                        sketch_attention = tf.concat(2, [sketch, tf.expand_dims(a_n, 2)])
+                        sketches.append(sketch_attention)
             else:  # use while loop
                 if N > 0:
-                    (final_n, final_HS) = tf.while_loop(
-                        cond=lambda n_counter, _1: n_counter <= N,
+                    (final_n, final_HS, _) = tf.while_loop(
+                        cond=lambda n_counter, _1, _2: n_counter <= N,
                         body=sketch_step,
-                        loop_vars=(n, HS)
+                        loop_vars=(n, HS, a)
                     )
                     HS = final_HS
 
@@ -737,7 +740,7 @@ class EasyFirstModel():
 
     def get_sketches_for_single_sample(self, session, bucket_id, input, label, mask, seq_len):
         """
-        fetch the sketches for a single sample from the graph
+        fetch the sketches and the attention for a single sample from the graph
         """
         input_feed = {}
         input_feed[self.inputs[bucket_id].name] = np.expand_dims(input, 0)  # batch_size = 1
