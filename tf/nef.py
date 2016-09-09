@@ -27,7 +27,7 @@ tf.app.flags.DEFINE_integer("batch_size", 200,
                             "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("src_vocab_size", 10000, "Vocabulary size.")
 tf.app.flags.DEFINE_integer("tgt_vocab_size", 10000, "Vocabulary size.")
-tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
+tf.app.flags.DEFINE_string("data_dir", "/mnt/data/datasets/tacl/data/WMT2016/roundtrip_translations/", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
 tf.app.flags.DEFINE_string("sketch_dir", "sketches/", "Directory where sketch dumps are stored")
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
@@ -35,8 +35,10 @@ tf.app.flags.DEFINE_integer("max_train_data_size", 0,
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
 tf.app.flags.DEFINE_integer("L", 58, "maximum length of sequences")
 tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
-tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.train.basic_features_with_tags.7000.extended.pkl", "path to source language embeddings")
-tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.train.basic_features_with_tags.7000.extended.pkl", "path to target language embeddings")
+tf.app.flags.DEFINE_string("src_embeddings", "../embeddings/polyglot-en.train_full.features.0.min20.extended.pkl", "path to source language embeddings")
+tf.app.flags.DEFINE_string("tgt_embeddings", "../embeddings/polyglot-de.train_full.features.0.min20.extended.pkl", "path to target language embeddings")
+#tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.train.basic_features_with_tags.7000.extended.pkl", "path to source language embeddings")
+#tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.train.basic_features_with_tags.7000.extended.pkl", "path to target language embeddings")
 #tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
 #tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
 #tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
@@ -477,7 +479,7 @@ def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, wi
                 tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
             losses_reg += l1_loss
 
-    return losses, losses_reg, pred_labels, M_src, M_tgt
+    return losses, losses_reg, pred_labels, M_src, M_tgt, None
 
 
 class EasyFirstModel():
@@ -799,8 +801,8 @@ def train():
     with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
         # load data and embeddings
-        train_dir = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags"
-        dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.basic_features_with_tags"
+        train_dir = FLAGS.data_dir+"/train_full.features"
+        dev_dir = FLAGS.data_dir+"/dev.features"
 
         if FLAGS.src_embeddings == "":
             src_embeddings = None
@@ -1029,7 +1031,7 @@ def test():
         src_vocab_size = src_embeddings.table.shape[0]
         tgt_vocab_size = tgt_embeddings.table.shape[0]
 
-        test_dir = FLAGS.data_dir+"/task2_en-de_test/test.corrected_full_parsed_features_with_tags"
+        test_dir = FLAGS.data_dir+"/test.features"
         test_feature_vectors, test_tgt_sentences, test_labels, test_label_dict = \
             load_data(test_dir, src_embeddings, tgt_embeddings, train=False,
                       labeled=True)
