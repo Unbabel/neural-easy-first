@@ -207,17 +207,18 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             # see https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/nn_ops.py#L1078 (inverted dropout)
             W_hss_mask = tf.to_float(tf.less_equal(tf.random_uniform(tf.shape(W_hss)), keep_prob_sketch)) * tf.inv(keep_prob_sketch)
 
-            def softmax_with_mask(tensor, mask):
+            def softmax_with_mask(tensor, mask, tau=1.0):
                 """
                 compute the softmax including the mask
                 the mask is multiplied with exp(x), before the normalization
                 :param tensor: 2D
                 :param mask: 2D, same shape as tensor
+                :param tau: temperature, the cooler the more spiked is distribution
                 :return:
                 """
                 row_max = tf.expand_dims(tf.reduce_max(tensor, 1), 1)
                 t_shifted = tensor - row_max
-                nom = tf.exp(t_shifted)*tf.cast(mask, tf.float32)
+                nom = tf.exp(t_shifted/tau)*tf.cast(mask, tf.float32)
                 row_sum = tf.expand_dims(tf.reduce_sum(nom, 1), 1)
                 softmax = nom / row_sum
                 return softmax
@@ -245,7 +246,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 z_packed = tf.pack(z)  # seq_len, batch_size, 1
                 rz = tf.transpose(z_packed, [1, 0, 2])  # batch-major
                 rz = tf.reshape(rz, [batch_size, sequence_len])
-                a_n = softmax_with_mask(rz, mask)  # make sure that no attention is spent on padded areas
+                a_n = softmax_with_mask(rz, mask, tau=1.0)  # make sure that no attention is spent on padded areas
                 return a_n
 
             def conv_r(padded_matrix, r):
