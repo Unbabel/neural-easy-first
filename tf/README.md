@@ -17,36 +17,24 @@
       pip install -r requirements.txt
 
 
-##2. Preparing the data##
-  
-  The data has to be in the format as distributed at WMT2016.
-  Pre-trained embeddings as e.g. polyglot (pickle dumps) are merged with new vocabulary introduced by the task.
-  To construct the vocabulary and the initial lookup table, use the following script:
-  
-      python prepare_vocab.py <path to training src> <path to training tgt> <path to training feature file>  <path to src embeddings> <path to tgt embeddings> --freq_limit <freq_limit> --tgt_limit <tgt_limit> --src_limit <src_limit>
-  
-  This creates a new embedding dump including the `src_limit` and `tgt_limit` most frequent new words that occur more than `freq_limit` times on either source or target size.
+##2. Training a model##
 
-##3. Training a model##
-
-  Baseline (QUETCH) and Neural-Easy-First models are both implemented in the same code base.
+  See all options
   
-  To run them with according hyper-parameter settings, see all options:
-  
-      python nef.py -h
-
+      python ef.py -h
+    
   Train a model (and store in `models` directory)
   
       mkdir -p models
-      python nef.py --train True
+      python ef.py --train
 
 
-##4. Testing a model##
+##3. Testing a model##
 
   1. On batch data from stored model
   
-     python nef.py --train False
+    python ef.py
 
   2. Interactively
   
-     python nef.py --interactive
+    python ef.py --interactive
