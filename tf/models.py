@@ -225,6 +225,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
 
                 # cumulative attention
                 b_n = (tf.cast(n_counter, tf.float32)-1)*b + a_n
+                b_n /= tf.cast(n_counter, tf.float32)
 
                 conv = conv_r(sketch_embedding_matrix_padded, r)  # batch_size x L x 2*state_size*(2*r+1)
                 hs_avg = tf.batch_matmul(tf.expand_dims(a_n, [1]), conv)  # batch_size x 1 x 2*state_size*(2*r+1)
