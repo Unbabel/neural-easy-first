@@ -172,7 +172,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 z_i = tf.matmul(activ, v)
                 return z_i
 
-            def alpha(sequence_len, padded_matrix):
+            def alpha(sequence_len, padded_matrix, b):
                 """
                 Compute attention weight for all words in sequence in batch
                 :return:
@@ -183,6 +183,9 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 z_packed = tf.pack(z)  # seq_len, batch_size, 1
                 rz = tf.transpose(z_packed, [1, 0, 2])  # batch-major
                 rz = tf.reshape(rz, [batch_size, sequence_len])
+                # subtract cumulative attention
+                d = 0.001  # discount factor  #TODO
+                rz = rz - d*b
                 a_n = softmax_with_mask(rz, mask, tau=1.0)  # make sure that no attention is spent on padded areas
                 return a_n
 
@@ -206,7 +209,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 batch_major_contexts = tf.transpose(contexts, [2, 0, 1]) # switch back: batch_size x L x (2*r+1)*2(state_size) (batch-major)
                 return batch_major_contexts
 
-            def sketch_step(n_counter, sketch_embedding_matrix, a):
+            def sketch_step(n_counter, sketch_embedding_matrix, a, b):
                 """
                 Compute the sketch vector and update the sketch according to attention over words
                 :param sketch_embedding_matrix: updated sketch, batch_size x L x 2*state_size (concatenation of H and S)
@@ -215,10 +218,13 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 sketch_embedding_matrix_padded = tf.pad(sketch_embedding_matrix, padding_hs_col, "CONSTANT", name="HS_padded")  # add column on right and left
 
                 # beta function
-                a_n = alpha(L, sketch_embedding_matrix_padded)  # batch_size x L
+                a_n = alpha(L, sketch_embedding_matrix_padded, b)  # batch_size x L
 
                 # make "hard"
                 #a_n = softmax_to_hard(a_n)
+
+                # cumulative attention
+                b_n = (tf.cast(n_counter, tf.float32)-1)*b + a_n
 
                 conv = conv_r(sketch_embedding_matrix_padded, r)  # batch_size x L x 2*state_size*(2*r+1)
                 hs_avg = tf.batch_matmul(tf.expand_dims(a_n, [1]), conv)  # batch_size x 1 x 2*state_size*(2*r+1)
@@ -231,12 +237,14 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 sketch_update = tf.batch_matmul(tf.expand_dims(a_n, [2]), tf.expand_dims(hs_n, [1]))  # batch_size x L x state_size
                 embedding_update = tf.zeros(shape=[batch_size, L, state_size], dtype=tf.float32)  # batch_size x L x state_size
                 sketch_embedding_matrix += tf.concat(2, [embedding_update, sketch_update])
-                return n_counter+1, sketch_embedding_matrix, a_n
+                return n_counter+1, sketch_embedding_matrix, a_n, b_n
 
             S = tf.zeros(shape=[batch_size, L, state_size], dtype=tf.float32)
             a = tf.zeros(shape=[batch_size, L])
             HS = tf.concat(2, [H, S])
             sketches = []
+            b = tf.zeros(shape=[batch_size, L], dtype=tf.float32)  # cumulative attention
+            b_n = b
 
             padding_hs_col = tf.constant([[0, 0], [r, r], [0, 0]], name="padding_hs_col")
             n = tf.constant(1, dtype=tf.int32, name="n")
@@ -244,17 +252,17 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             if track_sketches:  # use for loop (slower, because more memory)
                 if N > 0:
                     for i in xrange(N):
-                        n, HS, a_n = sketch_step(n, HS, a)
+                        n, HS, a_n, b_n = sketch_step(n, HS, a, b_n)
                         sketch = tf.split(2, 2, HS)[1]
                         # append attention to sketch
                         sketch_attention = tf.concat(2, [sketch, tf.expand_dims(a_n, 2)])
                         sketches.append(sketch_attention)
             else:  # use while loop
                 if N > 0:
-                    (final_n, final_HS, _) = tf.while_loop(
-                        cond=lambda n_counter, _1, _2: n_counter <= N,
+                    (final_n, final_HS, _, _) = tf.while_loop(
+                        cond=lambda n_counter, _1, _2, _3: n_counter <= N,
                         body=sketch_step,
-                        loop_vars=(n, HS, a)
+                        loop_vars=(n, HS, a, b_n)
                     )
                     HS = final_HS
 
@@ -452,6 +460,7 @@ def seq2seq(inputs, labels, masks, is_train, src_vocab_size, tgt_vocab_size, K, 
         #encoder_inputs = tf.reverse_sequence(emb, seq_lengths=seq_lens, seq_dim=1)  # TODO make param
 
         cell = tf.nn.rnn_cell.LSTMCell(lstm_units, state_is_tuple=True)
+        cell = tf.nn.rnn_cell.DropoutWrapper(cell, input_keep_prob=1, output_keep_prob=keep_prob)
 
         encoder_outputs, encoder_state = tf.nn.dynamic_rnn(cell=cell, inputs=encoder_inputs, sequence_length=seq_lens,
                                 dtype=tf.float32, time_major=False)
