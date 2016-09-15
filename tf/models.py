@@ -338,11 +338,8 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             pBADs = []
             losses = []
 
-            if class_weights is not None:
-                class_weights = tf.constant(class_weights, name="class_weights")
-
             for i in np.arange(L):  # compute score, probs and losses per word for whole batch
-                word_label_score = score(i, HS)
+                word_label_score = score(i, HS, previous_probs=None)
                 word_label_probs = tf.nn.softmax(word_label_score)
                 pBADs.append(1-word_label_probs[:, 0])
                 word_preds = tf.argmax(word_label_probs, 1)
@@ -359,8 +356,11 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 losses.append(loss)
 
             pBADs = tf.transpose(tf.pack(pBADs), [1, 0])
-            pred_labels = mask*tf.transpose(tf.pack(pred_labels), [1, 0])  # masked, batch_size x L
-            losses = tf.reduce_mean(tf.cast(mask, tf.float32)*tf.transpose(tf.pack(losses), [1, 0]),
+            pred_labels = tf.pack(pred_labels)
+            losses = tf.pack(losses)
+
+            pred_labels = mask*tf.transpose(pred_labels, [1, 0])  # masked, batch_size x L
+            losses = tf.reduce_mean(tf.cast(mask, tf.float32)*tf.transpose(losses, [1, 0]),
                                     1)  # masked, batch_size x 1
             losses_reg = losses
             if l2_scale > 0:
@@ -378,7 +378,6 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
 
     losses, losses_reg, predictions, pBADs, M_src, M_tgt, sketches_tf = forward(inputs, labels, masks, seq_lens, class_weights)
     return losses, losses_reg, predictions, pBADs, M_src, M_tgt, sketches_tf
-
 
 def seq2seq(inputs, labels, masks, is_train, src_vocab_size, tgt_vocab_size, K, D, J, L, window_size,
            src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob, l1_scale,
@@ -536,6 +535,7 @@ def seq2seq(inputs, labels, masks, is_train, src_vocab_size, tgt_vocab_size, K, 
     final_losses = cross_entropy
 
     return final_losses, final_losses, pred_labels, M_src, M_tgt, None  # TODO regularization?
+
 
 
 def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, window_size,

@@ -75,8 +75,13 @@ log_path = FLAGS.model_dir+str(datetime.datetime.now()).replace(" ", "-")+".trai
 logging.basicConfig(filename=log_path, 
                     format='%(asctime)s %(message)s', 
                     datefmt='%Y-%m-%d %H:%M:%S')
+
+format='%(asctime)s %(message)s'
+
 logger = logging.getLogger("NEF")
 logger.setLevel(logging.INFO)
+
+
 
 class EasyFirstModel():
     """
@@ -345,6 +350,24 @@ class EasyFirstModel():
                 pBADs.append(pBAD[:seq_len].tolist())
 
         return outputs[0], predictions, pBADs, outputs[2]  # loss, predictions, regularized loss
+
+    def get_sketches_for_single_sample(self, session, bucket_id, input, label, mask, seq_len):
+        """
+        fetch the sketches and the attention for a single sample from the graph
+        """
+        input_feed = {}
+        input_feed[self.inputs[bucket_id].name] = np.expand_dims(input, 0)  # batch_size = 1
+        input_feed[self.labels[bucket_id].name] = np.expand_dims(label, 0)
+        input_feed[self.masks[bucket_id].name] = np.expand_dims(mask, 0)
+        input_feed[self.seq_lens[bucket_id].name] = np.expand_dims(seq_len, 0)
+        input_feed[self.keep_probs[bucket_id].name] = 1.0
+        input_feed[self.keep_prob_sketches[bucket_id].name] = 1.0
+        input_feed[self.is_trains[bucket_id].name] = False
+
+        output_feed = [self.sketches_tfs[bucket_id]]
+        outputs = session.run(output_feed, input_feed)
+
+        return outputs[0]
 
     def get_sketches_for_single_sample(self, session, bucket_id, input, label, mask, seq_len):
         """

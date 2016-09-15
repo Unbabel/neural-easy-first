@@ -1,42 +1,44 @@
 #!/bin/bash -e
 
-## TRAINING
-#for seed in 1234 2134 2314 2341 1324;do
-#    model_dir="models/shuffle_seed${seed}_update_emb=False/"
-#    printf "$model_dir\n"
-#    [ ! -d $model_dir ] && mkdir $model_dir
-#    #python nef.py --train_file ../data/WMT2016/task2_en-de_training_shuffled/train.shuffle${index}.basic_features_with_tags \
-#    python nef.py --train_file ../data/WMT2016/task2_en-de_training/train.features_with_tags \
-#                  --dev_file ../data/WMT2016/task2_en-de_dev/dev.basic_features_with_tags  \
-#                  --bucket_random_seed $seed \
-#                  --model_dir $model_dir \
-#                  --update_emb False \
-#                  --train 
-#
-#done              
+# TRAINING
+for seed in 1234 2134 2314 2341 1324;do
+    model_dir="models/shuffle_seed${seed}_update_emb=False/"
+    printf "$model_dir\n"
+    [ ! -d $model_dir ] && mkdir $model_dir
+    #python nef.py --train_file ../data/WMT2016/task2_en-de_training_shuffled/train.shuffle${index}.basic_features_with_tags \
+    python nef.py --train_file ../data/WMT2016/task2_en-de_training/train.features_with_tags \
+                  --dev_file ../data/WMT2016/task2_en-de_dev/dev.basic_features_with_tags  \
+                  --bucket_random_seed $seed \
+                  --model_dir $model_dir \
+                  --update_emb False \
+                  --train 
 
-### TESTING 
-##for seed in 1234 2134 2314 2341 1324;do
-#for seed in 1324;do
-#    model_dir="models/shuffle_seed${seed}_update_emb=False/"
-#    [ ! -d $model_dir ] && mkdir $model_dir
-#
-#    printf "\033[34mDEVEL $model_dir\033[0m\n"
-#    python nef.py --test_file ../data/WMT2016/task2_en-de_dev/dev.basic_features_with_tags  \
-#                  --model_dir $model_dir \
-#                  --train False  \
-#                  --update_emb False \
-#                  --save_pBAD True
-#
-#    printf "models/shuffle_seed${seed}/"
-#    python ensemble/pred_from_pBAD.py $model_dir/dev.basic_features_with_tags.pBAD \
-#                                      $model_dir/dev.basic_features_with_tags.pred
-#
-#    python ensemble/score.py \
-#        -pred_tags_in $model_dir/dev.basic_features_with_tags.pred \
-#        -gold_tags_in ../data/WMT2016/task2_en-de_dev/dev.tags  > $model_dir/dev.score
-#
-#done              
+    exit
+
+done              
+
+## TESTING 
+#for seed in 1234 2134 2314 2341 1324;do
+for seed in 1324;do
+    model_dir="models/shuffle_seed${seed}_update_emb=False/"
+    [ ! -d $model_dir ] && mkdir $model_dir
+
+    printf "\033[34mDEVEL $model_dir\033[0m\n"
+    python nef.py --test_file ../data/WMT2016/task2_en-de_dev/dev.basic_features_with_tags  \
+                  --model_dir $model_dir \
+                  --train False  \
+                  --update_emb False \
+                  --save_pBAD True
+
+    printf "models/shuffle_seed${seed}/"
+    python ensemble/pred_from_pBAD.py $model_dir/dev.basic_features_with_tags.pBAD \
+                                      $model_dir/dev.basic_features_with_tags.pred
+
+    python ensemble/score.py \
+        -pred_tags_in $model_dir/dev.basic_features_with_tags.pred \
+        -gold_tags_in ../data/WMT2016/task2_en-de_dev/dev.tags  > $model_dir/dev.score
+
+done              
 #
 # Ensembling
 # Majority voting
