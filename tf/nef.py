@@ -358,6 +358,8 @@ def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
     :param forward_only:
     :return:
     """
+    np.random.seed(123)
+    tf.set_random_seed(123)
     model = EasyFirstModel(K=FLAGS.K, D=FLAGS.D, N=FLAGS.N, J=FLAGS.J, r=FLAGS.r,
                            src_vocab_size=src_vocab_size, tgt_vocab_size=tgt_vocab_size,
                            batch_size=FLAGS.batch_size,
@@ -494,7 +496,7 @@ def train():
 
         # choose a training sample to analyse during sketching
         if FLAGS.track_sketches:
-            train_corpus_id = 38
+            train_corpus_id = 37
             sample_bucket_id = np.nonzero([train_corpus_id in train_reordering_indexes[b] for b in train_reordering_indexes.keys()])[0][0]
             sample_in_bucket_index = np.nonzero([i == train_corpus_id for i in train_reordering_indexes[sample_bucket_id]])[0]  # position of sample within bucket
             logger.info("Chosen sketch sample: corpus id %d, bucket %d, index in bucket %d" % (train_corpus_id, sample_bucket_id, sample_in_bucket_index))
@@ -553,6 +555,8 @@ def train():
                                 mask_batch[sample_in_batch_index],
                                 seq_lens_batch[sample_in_batch_index])
                             sample_sketch = np.squeeze(all_sketches, 1)
+                            logger.info("true: %s", str(y_batch[sample_in_batch_index]))
+                            logger.info("predicted: %s", str(predictions[sample_in_batch_index]))
                             pkl.dump(sample_sketch, open("%s/sketches_sent%d_epoch%d.pkl" % (FLAGS.sketch_dir, train_corpus_id, epoch), "wb"))
 
 
