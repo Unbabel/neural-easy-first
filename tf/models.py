@@ -301,6 +301,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             def decoder(feed_previous_bool):
                 # avg word-level xent
                 pred_labels = []
+                pBADs = []
                 losses = []
 
                 word_label_probs = tf.ones_like(labels, dtype=tf.float32)/K  # initial, batch_size x L
@@ -314,6 +315,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                         previous_label = softmax_to_hard(word_label_probs)  # feed previous predictions (and initial "true label")
                     word_label_score = score(i, HS, previous_label)
                     word_label_probs = tf.nn.softmax(word_label_score)
+                    pBADs.append(1-word_label_probs[:, 0])
                     word_preds = tf.argmax(word_label_probs, 1)
                     pred_labels.append(word_preds)
                     y_words = tf.reshape(tf.slice(y, [0, i], [batch_size, 1]), [batch_size])
@@ -327,7 +329,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                     loss = cross_entropy
                     losses.append(loss)
 
-                return tf.pack(losses), tf.pack(pred_labels)
+                return tf.pack(losses), tf.pack(pred_labels), tf.transpose(tf.pack(pBADs), [1, 0])
 
             feed_previous = ~is_train  # during training, feed the previous gold label, during inference use the previous prediction
             losses, pred_labels = tf.cond(feed_previous,  # feed previous predictions

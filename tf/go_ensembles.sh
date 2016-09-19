@@ -2,7 +2,8 @@
 
 # TRAINING
 for seed in 1234 2134 2314 2341 1324;do
-    model_dir="models/shuffle_seed${seed}_update_emb=False/"
+    #model_dir="models/shuffle_seed${seed}_update_emb=False/"
+    model_dir="models/debug/"
     printf "$model_dir\n"
     [ ! -d $model_dir ] && mkdir $model_dir
     #python nef.py --train_file ../data/WMT2016/task2_en-de_training_shuffled/train.shuffle${index}.basic_features_with_tags \
