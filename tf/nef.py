@@ -344,6 +344,7 @@ class EasyFirstModel():
         input_feed[self.seq_lens[bucket_id].name] = np.expand_dims(seq_len, 0)
         input_feed[self.keep_probs[bucket_id].name] = 1.0
         input_feed[self.keep_prob_sketches[bucket_id].name] = 1.0
+        input_feed[self.is_trains[bucket_id].name] = False
 
         output_feed = [self.sketches_tfs[bucket_id]]
         outputs = session.run(output_feed, input_feed)
