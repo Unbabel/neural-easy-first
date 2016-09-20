@@ -57,7 +57,7 @@ tf.app.flags.DEFINE_integer("r", 2, "context size")
 tf.app.flags.DEFINE_float("bad_weight", 3.0, "weight for BAD instances" )
 tf.app.flags.DEFINE_boolean("concat", True, "concatenating s_i and h_i for prediction")
 tf.app.flags.DEFINE_boolean("train", True, "training model")
-tf.app.flags.DEFINE_integer("epochs", 30, "training epochs")
+tf.app.flags.DEFINE_integer("epochs", 5, "training epochs")
 tf.app.flags.DEFINE_integer("checkpoint_freq", 100, "save model every x epochs")
 tf.app.flags.DEFINE_integer("lstm_units", 20, "number of LSTM-RNN encoder units")
 tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
@@ -80,8 +80,6 @@ format='%(asctime)s %(message)s'
 
 logger = logging.getLogger("NEF")
 logger.setLevel(logging.INFO)
-
-
 
 class EasyFirstModel():
     """
@@ -335,8 +333,7 @@ class EasyFirstModel():
                            self.updates[bucket_id],
                            self.gradient_norms[bucket_id]]
         else:
-            output_feed = [self.losses[bucket_id], self.predictions[bucket_id], 
-                           self.pBADs[bucket_id], self.losses_reg[bucket_id]]
+            output_feed = [self.losses[bucket_id], self.predictions[bucket_id], self.pBADs[bucket_id], self.losses_reg[bucket_id]]
         #print "output_feed", output_feed
 
         outputs = session.run(output_feed, input_feed)
@@ -350,24 +347,6 @@ class EasyFirstModel():
                 pBADs.append(pBAD[:seq_len].tolist())
 
         return outputs[0], predictions, pBADs, outputs[2]  # loss, predictions, regularized loss
-
-    def get_sketches_for_single_sample(self, session, bucket_id, input, label, mask, seq_len):
-        """
-        fetch the sketches and the attention for a single sample from the graph
-        """
-        input_feed = {}
-        input_feed[self.inputs[bucket_id].name] = np.expand_dims(input, 0)  # batch_size = 1
-        input_feed[self.labels[bucket_id].name] = np.expand_dims(label, 0)
-        input_feed[self.masks[bucket_id].name] = np.expand_dims(mask, 0)
-        input_feed[self.seq_lens[bucket_id].name] = np.expand_dims(seq_len, 0)
-        input_feed[self.keep_probs[bucket_id].name] = 1.0
-        input_feed[self.keep_prob_sketches[bucket_id].name] = 1.0
-        input_feed[self.is_trains[bucket_id].name] = False
-
-        output_feed = [self.sketches_tfs[bucket_id]]
-        outputs = session.run(output_feed, input_feed)
-
-        return outputs[0]
 
     def get_sketches_for_single_sample(self, session, bucket_id, input, label, mask, seq_len):
         """
@@ -439,6 +418,7 @@ def train():
 
     with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
+        # load data and embeddings
         train_file = FLAGS.train_file
         dev_file = FLAGS.dev_file
 
@@ -622,12 +602,11 @@ def train():
             dev_true = []
             for bucket_id in dev_buckets.keys():
                 bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = dev_buckets[bucket_id]
-                step_loss, predictions, _, step_loss_reg = \
-                    model.batch_update(sess, bucket_id,
-                                       bucket_xs, bucket_ys,
-                                       bucket_masks,
-                                       bucket_seq_lens,
-                                       True)  # loss for whole bucket
+                step_loss, predictions, _, step_loss_reg = model.batch_update(sess, bucket_id,
+                                                                           bucket_xs, bucket_ys,
+                                                                           bucket_masks,
+                                                                           bucket_seq_lens,
+                                                                           True)  # loss for whole bucket
                 dev_predictions.extend(predictions)
                 dev_true.extend(bucket_ys)
                 dev_loss += np.sum(step_loss)
@@ -723,11 +702,8 @@ def test():
         time_valid = time.time() - start_time_valid
 
         if FLAGS.save_pBAD:
-
-            # 
             ordered_test_pBADs = take_from_buckets(bucketed_test_pBADs, 
                                                    test_reordering_indexes)
-
             pBAD_file = "%s/%s.pBAD" % (FLAGS.model_dir, 
                                         os.path.basename(FLAGS.test_file))
             with open(pBAD_file, 'w') as fid:
