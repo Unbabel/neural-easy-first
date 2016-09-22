@@ -607,14 +607,6 @@ def train():
         logger.info("Training finished after %d epochs. Best validation result: %f at epoch %d." \
               % (epoch+1, best_valid, best_valid_epoch))
 
-        # dump final embeddings
-        src_lookup, tgt_lookup = sess.run([model.src_table, model.tgt_table])
-        src_embeddings.set_table(src_lookup)
-        tgt_embeddings.set_table(tgt_lookup)
-        src_embeddings.store("%s.%d.src.emb.pkl" % (model.path.split(".model")[0], epoch+1))
-        tgt_embeddings.store("%s.%d.tgt.emb.pkl" % (model.path.split(".model")[0], epoch+1))
-
-
 def test():
     """
     Test a model
@@ -782,9 +774,3 @@ def main(_):
 
 if __name__ == "__main__":
     tf.app.run()
-
-
-# TODO
-# - language als parameter
-# - modularization
-# - replace numbers by <NUM>?
