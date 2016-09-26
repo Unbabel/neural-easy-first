@@ -7,7 +7,9 @@ import sys
 from utils import *
 import math
 from embedding import *
-
+import logging
+import datetime
+from models import *
 
 """
 Tensorflow implementation of the neural easy-first model
@@ -28,6 +30,7 @@ tf.app.flags.DEFINE_integer("src_vocab_size", 10000, "Vocabulary size.")
 tf.app.flags.DEFINE_integer("tgt_vocab_size", 10000, "Vocabulary size.")
 tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
 tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
+tf.app.flags.DEFINE_string("sketch_dir", "sketches/", "Directory where sketch dumps are stored")
 tf.app.flags.DEFINE_integer("max_train_data_size", 0,
                             "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
@@ -60,429 +63,12 @@ tf.app.flags.DEFINE_float("keep_prob_sketch", 1, "keep probability for dropout d
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
 tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
 tf.app.flags.DEFINE_integer("threads", 8, "number of threads")
+tf.app.flags.DEFINE_boolean("track_sketches", False, "keep track of the sketches during learning")
 FLAGS = tf.app.flags.FLAGS
 
-
-def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_size, K, D, N, J, L, r,
-                    lstm_units, concat, window_size, keep_prob, keep_prob_sketch,
-                    l2_scale, l1_scale, src_embeddings=None, tgt_embeddings=None,
-                    class_weights=None, bilstm=True, activation=tf.nn.tanh,
-                    update_emb=True):
-    """
-    Single-state easy-first model with embeddings and optional LSTM-RNN encoder
-    :param inputs:
-    :param labels:
-    :param src_vocab_size:
-    :param tgt_vocab_size:
-    :param K:
-    :param D:
-    :param N:
-    :param J:
-    :param L:
-    :param r:
-    :param lstm_units:
-    :return:
-    """
-
-    def forward(x, y, mask, seq_lens, class_weights=None):
-        """
-        Compute a forward step for the easy first model and return loss and predictions for a batch
-        :param x:
-        :param y:
-        :return:
-        """
-        batch_size = tf.shape(x)[0]
-        with tf.name_scope("ef_model"):
-            with tf.name_scope("embedding"):
-                if src_embeddings.table is None:
-                    #print "Random src embeddings of dimensionality %d" % D
-                    M_src = tf.get_variable(name="M_src", shape=[src_vocab_size, D],
-                                    initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-                    emb_size = D
-                else:
-                    M_src = tf.get_variable(name="M_src",
-                                    shape=[src_embeddings.table.shape[0],
-                                           src_embeddings.table.shape[1]],
-                                    initializer=tf.constant_initializer(src_embeddings.table),
-                                    trainable=update_emb)
-                    D_loaded = len(tgt_embeddings.table[0])
-                    #print "Loading existing src embeddings of dimensionality %d" % D_loaded
-                    emb_size = D_loaded
-
-
-                if tgt_embeddings.table is None:
-                    #print "Random tgt embeddings of dimensionality %d" % D
-                    M_tgt = tf.get_variable(name="M_tgt", shape=[tgt_vocab_size, D],
-                                    initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-                    emb_size += D
-                else:
-                    M_tgt = tf.get_variable(name="M_tgt",
-                        shape=[tgt_embeddings.table.shape[0],
-                               tgt_embeddings.table.shape[1]],
-                        initializer=tf.constant_initializer(tgt_embeddings.table),
-                        trainable=update_emb)
-                    D_loaded = len(tgt_embeddings.table[0])
-                    #print "Loading existing tgt embeddings of dimensionality %d" % D_loaded
-                    emb_size += D_loaded
-
-                if keep_prob < 1:  # dropout for word embeddings ("pervasive dropout")
-                    #print "Dropping out word embeddings"
-                    M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
-                    M_src = tf.nn.dropout(M_src, keep_prob)
-
-                #print "embedding size", emb_size
-                x_src, x_tgt = tf.split(2, 2, x)  # split src and tgt part of input
-                emb_tgt = tf.nn.embedding_lookup(M_tgt, x_src, name="emg_tgt")  # batch_size x L x window_size x emb_size
-                emb_src = tf.nn.embedding_lookup(M_src, x_tgt, name="emb_src")  # batch_size x L x window_size x emb_size
-                emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
-                emb = tf.reshape(emb_comb, [batch_size, L, window_size*emb_size],
-                                 name="emb") # batch_size x L x window_size*emb_size
-
-            if lstm_units > 0:
-
-                fw_cell = tf.nn.rnn_cell.LSTMCell(num_units=lstm_units, state_is_tuple=True)
-
-                if bilstm:
-                    with tf.name_scope("bi-lstm"):
-                        bw_cell = tf.nn.rnn_cell.LSTMCell(num_units=lstm_units, state_is_tuple=True)
-
-                        if keep_prob < 1:
-                            #print "Dropping out LSTM output"
-                            fw_cell = \
-                                tf.nn.rnn_cell.DropoutWrapper(
-                                    fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
-                            bw_cell = \
-                                tf.nn.rnn_cell.DropoutWrapper(
-                                    bw_cell, input_keep_prob=1, output_keep_prob=keep_prob)
-
-                        outputs, _ = \
-                            tf.nn.bidirectional_dynamic_rnn(
-                                fw_cell, bw_cell, emb, sequence_length=seq_lens,
-                                dtype=tf.float32, time_major=False)
-                        outputs = tf.concat(2, outputs)
-                        state_size = 2*lstm_units  # concat of fw and bw lstm output
-                else:
-                    with tf.name_scope("lstm"):
-
-                        if keep_prob < 1:
-                            #print "Dropping out LSTM output"
-                            fw_cell = tf.nn.rnn_cell.DropoutWrapper(
-                                fw_cell, input_keep_prob=1, output_keep_prob=keep_prob)  # TODO make params, input is already dropped out
-
-                        outputs, _, = tf.nn.dynamic_rnn(
-                            cell=fw_cell, inputs=emb, sequence_length=seq_lens,
-                            dtype=tf.float32, time_major=False)
-                        state_size = lstm_units
-
-                H = outputs
-
-            else:
-                # fully-connected layer on top of embeddings to reduce size
-                remb = tf.reshape(emb, [batch_size*L, window_size*emb_size])
-                W_fc = tf.get_variable(name="W_fc", shape=[window_size*emb_size, J],  # TODO another param?
-                              initializer=tf.contrib.layers.xavier_initializer(
-                                  uniform=True, dtype=tf.float32))
-                b_fc = tf.get_variable(shape=[J], initializer=tf.random_uniform_initializer(
-                    dtype=tf.float32), name="b_fc")
-                H = tf.reshape(activation(tf.matmul(remb, W_fc)+b_fc), [batch_size, L, J])
-                state_size = J
-
-            with tf.name_scope("alpha"):
-                w_z = tf.get_variable(name="w_z", shape=[J],
-                                      initializer=tf.random_uniform_initializer(dtype=tf.float32))
-                v = tf.get_variable(name="v", shape=[J, 1],
-                                    initializer=tf.random_uniform_initializer(dtype=tf.float32))
-                W_hz = tf.get_variable(name="W_hz", shape=[state_size, J],
-                                       initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-                W_hsz = tf.get_variable(name="W_hsz", shape=[2*state_size*(2*r+1), J],
-                                       initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-
-            with tf.name_scope("beta"):
-                W_hss = tf.get_variable(name="W_hss", shape=[2*state_size*(2*r+1), state_size],
-                                       initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-                w_s = tf.get_variable(name="w_s", shape=[state_size],
-                                      initializer=tf.random_uniform_initializer(dtype=tf.float32))
-
-            with tf.name_scope("prediction"):
-                w_p = tf.get_variable(name="w_p", shape=[K],
-                                       initializer=tf.random_uniform_initializer(dtype=tf.float32))
-                wsp_size = 2*state_size
-                W_sp = tf.get_variable(name="W_sp", shape=[wsp_size, K],
-                                       initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-
-            with tf.name_scope("paddings"):
-                padding_s_col = tf.constant([[0, 0], [r, r], [0, 0]], name="padding_s_col")
-
-            with tf.name_scope("sketches"):
-                n = tf.constant(1, dtype=tf.int32, name="n")
-                S = tf.zeros(shape=[batch_size, L, state_size], dtype=tf.float32)
-                HS = tf.concat(2, [H, S])  # [batch_size, L, 2*state_size]
-
-            if keep_prob_sketch < 1:
-                with tf.name_scope("dropout"):  # the same dropout mask for all sketches
-                    # create mask
-                    keep_prob_tensor = tf.convert_to_tensor(keep_prob_sketch, name="keep_prob_sketch")
-                    # see https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/nn_ops.py#L1078 (inverted dropout)
-                    W_hss_mask = tf.to_float(tf.less(tf.random_uniform(tf.shape(W_hss)), keep_prob_tensor)) * tf.inv(keep_prob_tensor)
-
-        def z_i(i):
-            """
-            Compute attention weight
-            :param i:
-            :return:
-            """
-            HS_padded = tf.pad(HS, padding_s_col, "CONSTANT", name="HS_padded")  # add column on right and left
-            HS_sliced = tf.slice(HS_padded, [0, i, 0], [batch_size, 2*r+1, 2*state_size])
-            hs_context = tf.reshape(HS_sliced, [batch_size, 2*state_size*(2*r+1)], name="s_context")  # batch_size x 2*state_size*(2*r+1)
-            activ = activation(tf.matmul(hs_context, W_hsz) + w_z)
-            z_i = tf.matmul(activ, v)
-            return z_i
-
-        def alpha():
-            """
-            Compute attention weight for all words in sequence in batch
-            :return:
-            """
-            z = []
-            for i in np.arange(L):
-                z.append(z_i(i))
-            z_packed = tf.pack(z)
-            rz = tf.reshape(z_packed, [batch_size, L])
-            a_n = tf.nn.softmax(rz)
-            return a_n
-
-        def conv_r(HS):
-            """
-            Extract r context columns around each column and concatenate
-            :param HS: batch_size x L x 2*state_size (concatenation of S and H)
-            :return:
-            """
-            # pad
-            HS_padded = tf.pad(HS, padding_s_col, name="padded")
-            # now gather indices of padded
-            transposed_HS = tf.transpose(HS_padded, [1, 2, 0])  # time-major  -> L x 2*state_size x batch_size
-            contexts = []
-            for i in np.arange(r, L+r):
-                # extract 2r+1 rows around i for each batch
-                context_i = transposed_HS[i-r:i+r+1, :, :]  # 2*r+1 x 2*state_size x batch_size
-                # concatenate
-                context_i = tf.reshape(context_i, [(2*r+1)*2*state_size, batch_size])  # (2*r+1)*(state_size) x batch_size
-                contexts.append(context_i)
-            contexts = tf.pack(contexts)  # L x (2*r+1)* 2*(state_size) x batch_size
-            contexts = tf.transpose(contexts, [2, 0, 1]) # switch back: batch_size x L x (2*r+1)*2(state_size) (batch-major)
-            return contexts
-
-        def sketch_step(n, HS):
-            """
-            Compute the sketch vector and update the sketch according to attention over words
-            :param n:
-            :param HS: batch_size x L x 2*state_size (concatenation of S and H)
-            :return:
-            """
-            # beta function
-            a_n = alpha()  # batch_size x L
-            conv = conv_r(HS)  # batch_size x L x 2*state_size*(2*r+1)
-            hs_avg = tf.batch_matmul(tf.expand_dims(a_n, [1]), conv)  # batch_size x 1 x 2*state_size*(2*r+1)
-            hs_avg = tf.reshape(hs_avg, [batch_size, 2*state_size*(2*r+1)])
-
-            if keep_prob_sketch < 1:  # same dropout for all steps (http://arxiv.org/pdf/1512.05287v3.pdf)
-                a = tf.matmul(hs_avg, tf.mul(W_hss, W_hss_mask))
-            else:
-                a = tf.matmul(hs_avg, W_hss)
-            hs_n = activation(a + w_s)  # batch_size x state_size
-
-            S_update = tf.batch_matmul(tf.expand_dims(a_n, [2]), tf.expand_dims(hs_n, [1]))  # batch_size x L x state_size
-            H_update = tf.zeros_like(H)  # batch_size x L x state_size
-            HS_update = tf.concat(2, [H_update, S_update])
-            HS_n = HS + HS_update  # only update the S part of the concatenated matrix
-            return n+1, HS_n
-
-        with tf.name_scope("sketching"):
-
-            if N > 0:
-                (final_n, final_HS) = tf.while_loop(
-                    cond=lambda n, _1: n <= N,
-                    body=sketch_step,
-                    loop_vars=(n, HS)
-                )
-            else:
-                final_HS = HS
-
-        with tf.name_scope("scoring"):
-
-            def score(i):
-                """
-                Score the word at index i
-                """
-                # state vector for this word (column) across batch
-                hs_i = tf.slice(final_HS, [0, i, 0], [batch_size, 1, 2*state_size])
-                l = tf.matmul(tf.reshape(hs_i, [batch_size, 2*state_size]), W_sp) + w_p
-                return l  # batch_size x K
-
-            # avg word-level xent
-            pred_labels = []
-            losses = []
-
-            if class_weights is not None:
-                class_weights = tf.constant(class_weights, name="class_weights")
-
-            for i in np.arange(L):  # compute score, probs and losses per word for whole batch
-                word_label_score = score(i)
-                word_label_probs = tf.nn.softmax(word_label_score)
-                word_preds = tf.argmax(word_label_probs, 1)
-                pred_labels.append(word_preds)
-                y_words = tf.reshape(tf.slice(y, [0, i], [batch_size, 1]), [batch_size])
-                y_words_full = tf.one_hot(y_words, depth=K, on_value=1.0, off_value=0.0)
-                cross_entropy = tf.nn.softmax_cross_entropy_with_logits(word_label_score,
-                                                                                y_words_full)
-                if class_weights is not None:
-                    label_weights = tf.reduce_sum(tf.mul(y_words_full, class_weights), 1)
-                    cross_entropy = tf.mul(cross_entropy, label_weights)
-
-                loss = cross_entropy
-                losses.append(loss)
-
-            pred_labels = mask*tf.transpose(tf.pack(pred_labels), [1, 0])  # masked, batch_size x L
-            losses = tf.reduce_mean(tf.cast(mask, tf.float32)*tf.transpose(tf.pack(losses), [1, 0]),
-                                    1)  # masked, batch_size x 1
-            losses_reg = losses
-            if l2_scale > 0:
-                weights_list = [W_hss, W_sp, W_hz]  # M_src, M_tgt word embeddings not included
-                l2_loss = tf.contrib.layers.apply_regularization(
-                    tf.contrib.layers.l2_regularizer(l2_scale), weights_list=weights_list)
-                losses_reg += l2_loss
-            if l1_scale > 0:
-                weights_list = [W_hss, W_sp, W_hz]
-                l1_loss = tf.contrib.layers.apply_regularization(
-                    tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
-                losses_reg += l1_loss
-
-        return losses, losses_reg, pred_labels, M_src, M_tgt
-
-    losses, losses_reg, predictions, M_src, M_tgt = forward(inputs, labels, masks, seq_lens, class_weights)
-    return losses, losses_reg, predictions, M_src, M_tgt
-
-
-def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, window_size,
-           src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob, l1_scale,
-           keep_prob_sketch=1,
-           lstm_units=0, bilstm=False, concat=False, r=0, N=0, seq_lens=None,
-           activation=tf.nn.tanh, update_emb=True):
-    """
-    QUETCH model for word-level QE predictions  (MLP based on embeddings)
-    :param inputs:
-    :param labels:
-    :param masks:
-    :param seq_lens:
-    :param src_vocab_size:
-    :param tgt_vocab_size:
-    :param K:
-    :param D:
-    :param N:
-    :param J:
-    :param L:
-    :param r:
-    :param lstm_units:
-    :param bilstm:
-    :param concat:
-    :param window_size:
-    :param src_embeddings:
-    :param tgt_embeddings:
-    :param class_weights:
-    :param l2_scale:
-    :param l1_scale:
-    :param keep_prob:
-    :return:
-    """
-    batch_size = tf.shape(inputs)[0]
-    with tf.name_scope("embedding"):
-        if src_embeddings.table is None:
-            M_src = tf.get_variable(name="M_src", shape=[src_vocab_size, D],
-                            initializer=tf.contrib.layers.xavier_initializer(
-                                uniform=True, dtype=tf.float32))
-            emb_size = D
-        else:
-            M_src = tf.get_variable(name="M_src",
-                                    shape=[src_embeddings.table.shape[0],
-                                           src_embeddings.table.shape[1]],
-                                    initializer=tf.constant_initializer(src_embeddings.table),
-                                    trainable=update_emb)
-            D_loaded = len(tgt_embeddings.table[0])
-            emb_size = D_loaded
-
-
-        if tgt_embeddings.table is None:
-            M_tgt = tf.get_variable(name="M_tgt", shape=[tgt_vocab_size, D],
-                            initializer=tf.contrib.layers.xavier_initializer(
-                                uniform=True, dtype=tf.float32))
-            emb_size += D
-        else:
-            M_tgt = tf.get_variable(name="M_tgt",
-                                    shape=[tgt_embeddings.table.shape[0],
-                                           tgt_embeddings.table.shape[1]],
-                                    initializer=tf.constant_initializer(tgt_embeddings.table),
-                                    trainable=update_emb)
-            D_loaded = len(tgt_embeddings.table[0])
-            emb_size += D_loaded
-
-        #if keep_prob < 1:  # dropout for word embeddings ("pervasive dropout")
-        #    M_tgt = tf.nn.dropout(M_tgt, keep_prob)  # TODO make param
-        #    M_src = tf.nn.dropout(M_src, keep_prob)
-
-        x_src, x_tgt = tf.split(2, 2, inputs)  # split src and tgt part of input
-        emb_tgt = tf.nn.embedding_lookup(M_tgt, x_src, name="emg_tgt")  # batch_size x L x window_size x emb_size
-        emb_src = tf.nn.embedding_lookup(M_src, x_tgt, name="emb_src")  # batch_size x L x window_size x emb_size
-        emb_comb = tf.concat(2, [emb_src, emb_tgt], name="emb_comb") # batch_size x L x 2*window_size x emb_size
-        emb = tf.reshape(emb_comb, [batch_size, -1, window_size*emb_size], name="emb") # batch_size x L x window_size*emb_size
-
-        if keep_prob < 1:
-            emb = tf.nn.dropout(emb, keep_prob=keep_prob, name="drop_emb")
-
-    with tf.name_scope("mlp"):
-        inputs = tf.reshape(emb, [-1, window_size*emb_size])
-        W_1 = tf.get_variable(shape=[window_size*emb_size, J],
-                              initializer=tf.contrib.layers.xavier_initializer(
-                                  uniform=True, dtype=tf.float32, ), name="W_1")
-        W_2 = tf.get_variable(shape=[J, K],
-                              initializer=tf.contrib.layers.xavier_initializer(
-                                  uniform=True, dtype=tf.float32), name="W_2")
-        b_1 = tf.get_variable(shape=[J], initializer=tf.random_uniform_initializer(
-            dtype=tf.float32), name="b_1")
-        b_2 = tf.get_variable(shape=[K], initializer=tf.random_uniform_initializer(
-            dtype=tf.float32), name="b_2")
-        hidden = activation(tf.matmul(inputs, W_1) + b_1)  # batch_size*emb_size, J
-        if keep_prob < 1:
-            hidden = tf.nn.dropout(hidden, keep_prob)
-        out = tf.matmul(hidden, W_2) + b_2  # batch_size*emb_size, K
-        logits = tf.reshape(out, [batch_size, L, K])
-        softmax = tf.nn.softmax(out)  # batch_size*L, K
-        pred_labels = masks*tf.argmax(logits, 2)  # batch_size x L
-        y_full = tf.one_hot(labels, depth=K, on_value=1.0, off_value=0.0)  # batch_size x L x K
-        xent = -y_full*tf.log(tf.reshape(softmax, [batch_size, L, K]) + 1e-10)  # batch_size x L x K
-
-        if class_weights is not None:
-            class_weights = tf.constant(class_weights, name="class_weights")
-            label_weights = tf.mul(y_full, class_weights)  # batch_size x L x K
-            xent = tf.mul(xent, label_weights)
-
-        cross_entropy = tf.cast(masks, dtype=tf.float32)*tf.reduce_mean(xent, 2)  # batch_size x L
-
-        losses = cross_entropy
-        losses_reg = losses
-
-        if l2_scale > 0:
-            weights_list = [W_1, W_2]  # M_src, M_tgt,
-            l2_loss = tf.contrib.layers.apply_regularization(
-                tf.contrib.layers.l2_regularizer(l2_scale), weights_list=weights_list)
-            losses_reg += l2_loss
-        if l1_scale > 0:
-            weights_list = [W_1, W_2]  # M_src, M_tgt,
-            l1_loss = tf.contrib.layers.apply_regularization(
-                tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
-            losses_reg += l1_loss
-
-    return losses, losses_reg, pred_labels, M_src, M_tgt
-
+logging.basicConfig(filename=FLAGS.model_dir+str(datetime.datetime.now()).replace(" ", "-")+".training.log")
+logger = logging.getLogger("NEF")
+logger.setLevel(logging.INFO)
 
 class EasyFirstModel():
     """
@@ -493,7 +79,7 @@ class EasyFirstModel():
                  tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0,
                  keep_prob=1, keep_prob_sketch=1, model_dir="models/",
                  bilstm=True, model="ef_single_state", activation="tanh", l1_scale=0,
-                 update_emb=True):
+                 update_emb=True, track_sketches=False, is_train=False):
         """
         Initialize the model
         :param K:
@@ -561,72 +147,80 @@ class EasyFirstModel():
                      "-".join([str(c) for c in class_weights]), self.l2_scale,
                      self.l1_scale, self.keep_prob, self.keep_prob_sketch,
                      self.update_emb, self.src_vocab_size, self.tgt_vocab_size)
-        print "Model path:", self.path
+        logger.info("Model path: %s"  % self.path)
+
 
         if self.lstm_units > 0:
             if self.bilstm:
-                print "Model with bi-directional LSTM RNN encoder of %d units" % self.lstm_units
+                logger.info("Model with bi-directional LSTM RNN encoder of %d units" % self.lstm_units)
             else:
-                print "Model with uni-directional LSTM RNN encoder of %d units" % self.lstm_units
+                logger.info("Model with uni-directional LSTM RNN encoder of %d units" % self.lstm_units)
         else:
             if self.src_embeddings.table is None and self.tgt_embeddings.table is None:
-                print "Model with simple embeddings of size %d" % self.D
+                logger.info("Model with simple embeddings of size %d" % self.D)
             else:
-                print "Model with simple embeddings of size %d (src) & %d (tgt)" % \
-                      (self.src_embeddings.table.shape[0], self.tgt_embeddings.table.shape[0])
+                logger.info("Model with simple embeddings of size %d (src) & %d (tgt)" % \
+                      (self.src_embeddings.table.shape[0], self.tgt_embeddings.table.shape[0]))
 
         if update_emb:
-            print "Updating the embeddings during training"
+            logger.info("Updating the embeddings during training")
         else:
-            print "Keeping the embeddings fixed"
+            logger.info("Keeping the embeddings fixed")
 
         if self.N > 0:
-            print "Model with %d sketches" % self.N
+            logger.info("Model with %d sketches" % self.N)
         else:
-            print "No sketches"
+            logger.info("No sketches")
             self.concat = True
 
         if self.concat or self.N == 0:
-            print "Concatenating H and S for predictions"
+            logger.info("Concatenating H and S for predictions")
 
         if self.l2_scale > 0:
-            print "L2 regularizer with weight %f" % self.l2_scale
+            logger.info("L2 regularizer with weight %f" % self.l2_scale)
 
         if self.l1_scale > 0:
-            print "L1 regularizer with weight %f" % self.l1_scale
+            logger.info("L1 regularizer with weight %f" % self.l1_scale)
 
         if forward_only:
             self.keep_prob = 1
             self.keep_prob_sketch = 1
         if self.keep_prob < 1:
-            print "Dropout with p=%f" % self.keep_prob
+            logger.info("Dropout with p=%f" % self.keep_prob)
         if self.keep_prob_sketch < 1:
-            print "Dropout during sketching with p=%f" % self.keep_prob_sketch
+            logger.info("Dropout during sketching with p=%f" % self.keep_prob_sketch)
 
         self.buckets = buckets
 
         buckets_path = self.path.split(".model", 2)[0]+".buckets.pkl"
         if self.buckets is not None:  # store bucket edges
-            print "Dumping bucket edges in %s" % buckets_path
+            logger.info("Dumping bucket edges in %s" % buckets_path)
             pkl.dump(self.buckets, open(buckets_path, "wb"))
         else:  # load bucket edges
-            print "Loading bucket edges from %s" % buckets_path
+            logger.info("Loading bucket edges from %s" % buckets_path)
             self.buckets = pkl.load(open(buckets_path, "rb"))
-        print "Buckets:", self.buckets
+        logger.info("Buckets: %s" % str(self.buckets))
 
         if model == "quetch":
             model_func = quetch
-            print "Using QUETCH model"
+            logger.info("Using QUETCH model")
+        if model == "seq2seq":
+            model_func = seq2seq
+            logger.info("Using seq2seq model")
         else:
             model_func = ef_single_state
-            print "Using neural easy first single state model"
+            logger.info("Using neural easy first single state model")
 
         activation_func = tf.nn.tanh
         if activation == "relu":
             activation_func = tf.nn.relu
         elif activation == "sigmoid":
             activation_func = tf.nn.sigmoid
-        print "Activation function %s" % activation_func.__name__
+        logger.info("Activation function %s" % activation_func.__name__)
+
+        self.track_sketches = track_sketches
+        if track_sketches:
+            logger.info("Tracking sketches")
 
         # prepare input feeds
         self.inputs = []
@@ -636,6 +230,10 @@ class EasyFirstModel():
         self.losses = []
         self.losses_reg = []
         self.predictions = []
+        self.sketches_tfs = []
+        self.keep_probs = []
+        self.keep_prob_sketches = []
+        self.is_trains = []
         for j, max_len in enumerate(self.buckets):
             self.inputs.append(tf.placeholder(tf.int32,
                                               shape=[None, max_len, 2*self.window_size],
@@ -646,9 +244,12 @@ class EasyFirstModel():
                                              shape=[None, max_len], name="masks{0}".format(j)))
             self.seq_lens.append(tf.placeholder(tf.int64,
                                                 shape=[None], name="seq_lens{0}".format(j)))
+            self.keep_prob_sketches.append(tf.placeholder(tf.float32, name="keep_prob_sketch{0}".format(j)))
+            self.keep_probs.append(tf.placeholder(tf.float32, name="keep_prob{0}".format(j)))
+            self.is_trains.append(tf.placeholder(tf.bool, name="is_train{0}".format(j)))
             with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
-                print "Initializing parameters for bucket with max len", max_len
-                bucket_losses, bucket_losses_reg, bucket_predictions, src_table, tgt_table = model_func(
+                logger.info("Initializing parameters for bucket with max len %d" % max_len)
+                bucket_losses, bucket_losses_reg, bucket_predictions, src_table, tgt_table, sketches = model_func(
                     inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j],
                     seq_lens=self.seq_lens[j], src_vocab_size=self.src_vocab_size,
                     tgt_vocab_size=self.tgt_vocab_size, K=self.K,
@@ -657,15 +258,18 @@ class EasyFirstModel():
                     concat=self.concat, window_size=self.window_size,
                     src_embeddings=self.src_embeddings, tgt_embeddings=self.tgt_embeddings,
                     class_weights=self.class_weights, update_emb=update_emb,
-                    keep_prob=self.keep_prob, keep_prob_sketch=self.keep_prob_sketch,
+                    keep_prob=self.keep_probs[j], keep_prob_sketch=self.keep_prob_sketches[j],
                     l2_scale=self.l2_scale, l1_scale=self.l1_scale,
-                    bilstm=self.bilstm, activation=activation_func)
+                    bilstm=self.bilstm, activation=activation_func,
+                    track_sketches=self.track_sketches, is_train=self.is_trains[j])
 
                 self.losses_reg.append(bucket_losses_reg)
                 self.losses.append(bucket_losses) # list of tensors, one for each bucket
                 self.predictions.append(bucket_predictions)  # list of tensors, one for each bucket
                 self.src_table = src_table  # shared for all buckets
                 self.tgt_table = tgt_table
+                if self.track_sketches:  # else sketches are just empty
+                    self.sketches_tfs.append(sketches)
 
         # gradients and update operation for training the model
         if not forward_only:
@@ -687,7 +291,6 @@ class EasyFirstModel():
 
         self.saver = tf.train.Saver(tf.all_variables())
 
-
     def batch_update(self, session, bucket_id, inputs, labels, masks, seq_lens, forward_only=False):
         """
         Training step
@@ -704,6 +307,9 @@ class EasyFirstModel():
         input_feed[self.labels[bucket_id].name] = labels
         input_feed[self.masks[bucket_id].name] = masks
         input_feed[self.seq_lens[bucket_id].name] = seq_lens
+        input_feed[self.keep_probs[bucket_id].name] = 1 if forward_only else self.keep_prob
+        input_feed[self.keep_prob_sketches[bucket_id].name] = 1 if forward_only else self.keep_prob_sketch
+        input_feed[self.is_trains[bucket_id].name] = not forward_only
         #print "input_feed", input_feed.keys()
 
         if not forward_only:
@@ -725,6 +331,24 @@ class EasyFirstModel():
 
         return outputs[0], predictions, outputs[2]  # loss, predictions, regularized loss
 
+    def get_sketches_for_single_sample(self, session, bucket_id, input, label, mask, seq_len):
+        """
+        fetch the sketches and the attention for a single sample from the graph
+        """
+        input_feed = {}
+        input_feed[self.inputs[bucket_id].name] = np.expand_dims(input, 0)  # batch_size = 1
+        input_feed[self.labels[bucket_id].name] = np.expand_dims(label, 0)
+        input_feed[self.masks[bucket_id].name] = np.expand_dims(mask, 0)
+        input_feed[self.seq_lens[bucket_id].name] = np.expand_dims(seq_len, 0)
+        input_feed[self.keep_probs[bucket_id].name] = 1.0
+        input_feed[self.keep_prob_sketches[bucket_id].name] = 1.0
+        input_feed[self.is_trains[bucket_id].name] = False
+
+        output_feed = [self.sketches_tfs[bucket_id]]
+        outputs = session.run(output_feed, input_feed)
+
+        return outputs[0]
+
 
 def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
                  forward_only=False, src_embeddings=None, tgt_embeddings=None,
@@ -735,6 +359,8 @@ def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
     :param forward_only:
     :return:
     """
+    np.random.seed(123)
+    tf.set_random_seed(123)
     model = EasyFirstModel(K=FLAGS.K, D=FLAGS.D, N=FLAGS.N, J=FLAGS.J, r=FLAGS.r,
                            src_vocab_size=src_vocab_size, tgt_vocab_size=tgt_vocab_size,
                            batch_size=FLAGS.batch_size,
@@ -745,19 +371,20 @@ def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
                            window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale,
                            keep_prob=FLAGS.keep_prob, keep_prob_sketch=FLAGS.keep_prob_sketch,
                            model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm, update_emb=FLAGS.update_emb,
-                           model=FLAGS.model, activation=FLAGS.activation, l1_scale=FLAGS.l1_scale)
-    checkpoint = tf.train.get_checkpoint_state("models")
+                           model=FLAGS.model, activation=FLAGS.activation, l1_scale=FLAGS.l1_scale,
+                           track_sketches=FLAGS.track_sketches)
+    checkpoint = tf.train.get_checkpoint_state(FLAGS.model_dir)
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
-        print "Reading model parameters from %s" % checkpoint.model_checkpoint_path
+        logger.info("Reading model parameters from %s" % checkpoint.model_checkpoint_path)
         model.saver.restore(session, checkpoint.model_checkpoint_path)
     else:
-        print "Creating model with fresh parameters"
+        logger.info("Creating model with fresh parameters")
         session.run(tf.initialize_all_variables())
     return model
 
 
 def print_config():
-    print "Configuration:", FLAGS.__dict__["__flags"]
+    logger.info("Configuration: %s" % str(FLAGS.__dict__["__flags"]))
 
 
 def train():
@@ -766,7 +393,7 @@ def train():
     :return:
     """
     print_config()
-    print "Training on %d thread(s)" % FLAGS.threads
+    logger.info("Training on %d thread(s)" % FLAGS.threads)
 
     with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
@@ -817,18 +444,17 @@ def train():
         else:
             tgt_vocab_size = len(train_tgt_embeddings.word2id)
 
+        logger.info("src vocab size: %d" % src_vocab_size)
+        logger.info("tgt vocab size: %d" % tgt_vocab_size)
 
-        print "src vocab size", src_vocab_size
-        print "tgt vocab size", tgt_vocab_size
+        logger.info("Training on %d instances" % len(train_labels))
+        logger.info("Validating on %d instances" % len(dev_labels))
 
-        print "Training on %d instances" % len(train_labels)
-        print "Validating on %d instances" % len(dev_labels)
-
-        print "Maximum sentence length (train):", max([len(y) for y in train_labels])
-        print "Maximum sentence length (dev):", max([len(y) for y in dev_labels])
+        logger.info("Maximum sentence length (train): %d" % max([len(y) for y in train_labels]))
+        logger.info("Maximum sentence length (dev): %d" % max([len(y) for y in dev_labels]))
 
         class_weights = [1, FLAGS.bad_weight]  # TODO QE specific
-        print "Weights for classes:", class_weights
+        logger.info("Weights for classes: %s" % str(class_weights))
 
         # bucketing training and dev data
 
@@ -847,27 +473,34 @@ def train():
 
         # create the model
         model = create_model(sess, bucket_edges, src_vocab_size, tgt_vocab_size,
-                             False, src_embeddings, tgt_embeddings,class_weights)
+                             False, src_embeddings, tgt_embeddings, class_weights)
 
         train_buckets_sizes = {i: len(indx) for i, indx in train_reordering_indexes.items()}
         dev_buckets_sizes = {i: len(indx) for i, indx in dev_reordering_indexes.items()}
 
 
-        print "Creating buckets for training data:"
+        logger.info("Creating buckets for training data:")
         for i in train_buckets.keys():
             X_train_padded, Y_train_padded, train_masks, train_seq_lens = train_buckets[i]
             total_number_of_pads = sum([bucket_edges[i]-l for l in train_seq_lens])
-            print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
+            logger.info("Bucket no %d with max length %d: %d instances, avg length %f,  " \
                   "%d number of PADS in total" % (i, bucket_edges[i], train_buckets_sizes[i],
-                                                  np.average(train_seq_lens), total_number_of_pads)
+                                                  np.average(train_seq_lens), total_number_of_pads))
 
-        print "Creating buckets for dev data:"
+        logger.info("Creating buckets for dev data:")
         for i in dev_buckets.keys():
             X_dev_padded, Y_dev_padded, dev_masks, dev_seq_lens = dev_buckets[i]
             total_number_of_pads = sum([bucket_edges[i]-l for l in dev_seq_lens])
-            print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
+            logger.info("Bucket no %d with max length %d: %d instances, avg length %f,  " \
                   "%d number of PADS in total" % (i, bucket_edges[i], dev_buckets_sizes[i],
-                                                  np.average(dev_seq_lens), total_number_of_pads)
+                                                  np.average(dev_seq_lens), total_number_of_pads))
+
+        # choose a training sample to analyse during sketching
+        if FLAGS.track_sketches:
+            train_corpus_id = 37
+            sample_bucket_id = np.nonzero([train_corpus_id in train_reordering_indexes[b] for b in train_reordering_indexes.keys()])[0][0]
+            sample_in_bucket_index = np.nonzero([i == train_corpus_id for i in train_reordering_indexes[sample_bucket_id]])[0]  # position of sample within bucket
+            logger.info("Chosen sketch sample: corpus id %d, bucket %d, index in bucket %d" % (train_corpus_id, sample_bucket_id, sample_in_bucket_index))
 
         # training in epochs
         best_valid = 0
@@ -913,17 +546,32 @@ def train():
                     train_predictions.extend(predictions)
                     train_true.extend(y_batch)  # needs to be stored because of random order
                     current_sample += len(x_batch)
-                print "bucket %d - loss %0.2f - loss+reg %0.2f" % (bucket_id,
+
+                    if FLAGS.model == "ef_single_state" and FLAGS.track_sketches:
+                        if bucket_id == sample_bucket_id and sample_in_bucket_index in batch_samples:
+                            sample_in_batch_index = np.nonzero([i == sample_in_bucket_index for i in batch_samples])[0][0]
+                            all_sketches = model.get_sketches_for_single_sample(
+                                sess, bucket_id, x_batch[sample_in_batch_index],
+                                y_batch[sample_in_batch_index],
+                                mask_batch[sample_in_batch_index],
+                                seq_lens_batch[sample_in_batch_index])
+                            sample_sketch = np.squeeze(all_sketches, 1)
+                            logger.info("true: %s", str(y_batch[sample_in_batch_index]))
+                            logger.info("predicted: %s", str(predictions[sample_in_batch_index]))
+                            pkl.dump(sample_sketch, open("%s/sketches_sent%d_epoch%d.pkl" % (FLAGS.sketch_dir, train_corpus_id, epoch), "wb"))
+
+
+                logger.info("bucket %d - loss %0.2f - loss+reg %0.2f" % (bucket_id,
                                                                    bucket_loss/len(bucket_xs),
-                                                                   bucket_loss_reg/len(bucket_xs))
+                                                                   bucket_loss_reg/len(bucket_xs)))
 
             train_accuracy = accuracy(train_true, train_predictions)
             train_f1_1, train_f1_2 = f1s_binary(train_true, train_predictions)
             time_epoch = time.time() - start_time_epoch
 
-            print "EPOCH %d: epoch time %fs, loss %f, train acc. %f, f1 prod %f (%f/%f) " % \
+            logger.info("EPOCH %d: epoch time %fs, loss %f, train acc. %f, f1 prod %f (%f/%f) " % \
                   (epoch+1, time_epoch, loss/len(train_labels), train_accuracy,
-                   train_f1_1*train_f1_2, train_f1_1, train_f1_2)
+                   train_f1_1*train_f1_2, train_f1_1, train_f1_2))
 
             # eval on dev (every epoch)
             start_time_valid = time.time()
@@ -943,37 +591,28 @@ def train():
             time_valid = time.time() - start_time_valid
             dev_accuracy = accuracy(dev_true, dev_predictions)
             dev_f1_1, dev_f1_2 = f1s_binary(dev_true, dev_predictions)
-            print "EPOCH %d: validation time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
+            logger.info("EPOCH %d: validation time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
                   (epoch+1, time_valid, dev_loss/len(dev_labels), dev_accuracy,
-                   dev_f1_1*dev_f1_2, dev_f1_1, dev_f1_2)
+                   dev_f1_1*dev_f1_2, dev_f1_1, dev_f1_2))
             if dev_f1_1*dev_f1_2 > best_valid:
-                print "NEW BEST!"
+                logger.info("NEW BEST!")
                 best_valid = dev_f1_1*dev_f1_2
                 best_valid_epoch = epoch+1
-            else:
-                print "current best: %f at epoch %d" % (best_valid, best_valid_epoch)
-
-            if epoch % FLAGS.checkpoint_freq == 0:
                 # save checkpoint
-                model.saver.save(sess, model.path, global_step=model.global_step, write_meta_graph=True)
+                model.saver.save(sess, model.path, global_step=model.global_step, write_meta_graph=False)
+            else:
+                logger.info("current best: %f at epoch %d" % (best_valid, best_valid_epoch))
 
-        print "Training finished after %d epochs. Best validation result: %f at epoch %d." \
-              % (epoch+1, best_valid, best_valid_epoch)
 
-        # dump final embeddings
-        src_lookup, tgt_lookup = sess.run([model.src_table, model.tgt_table])
-        src_embeddings.set_table(src_lookup)
-        tgt_embeddings.set_table(tgt_lookup)
-        src_embeddings.store("%s.%d.src.emb.pkl" % (model.path.split(".model")[0], epoch+1))
-        tgt_embeddings.store("%s.%d.tgt.emb.pkl" % (model.path.split(".model")[0], epoch+1))
-
+        logger.info("Training finished after %d epochs. Best validation result: %f at epoch %d." \
+              % (epoch+1, best_valid, best_valid_epoch))
 
 def test():
     """
     Test a model
     :return:
     """
-    print "Testing"
+    logger.info("Testing")
     FLAGS.restore = True  # has to be loaded
     with tf.Session() as sess:
 
@@ -1000,13 +639,13 @@ def test():
                                                                buckets=bucket_edges)
         test_buckets_sizes = {i: len(indx) for i, indx in test_reordering_indexes.items()}
 
-        print "Creating buckets for test data:"
+        logger.info("Creating buckets for test data:")
         for i in test_buckets.keys():
             X_test_padded, Y_test_padded, test_masks, test_seq_lens = test_buckets[i]
             total_number_of_pads = sum([bucket_edges[i]-l for l in test_seq_lens])
-            print "Bucket no %d with max length %d: %d instances, avg length %f,  " \
+            logger.info("Bucket no %d with max length %d: %d instances, avg length %f,  " \
                   "%d number of PADS in total" % (i, bucket_edges[i], test_buckets_sizes[i],
-                                                  np.average(test_seq_lens), total_number_of_pads)
+                                                  np.average(test_seq_lens), total_number_of_pads))
 
         # eval on test
         start_time_valid = time.time()
@@ -1026,9 +665,11 @@ def test():
         time_valid = time.time() - start_time_valid
         test_accuracy = accuracy(test_true, test_predictions)
         test_f1_1, test_f1_2 = f1s_binary(test_true, test_predictions)
-        print "Test time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
-              (time_valid, test_loss/len(test_labels), test_accuracy,
-               test_f1_1*test_f1_2, test_f1_1, test_f1_2)
+        message = "Test time %fs, loss %f, test acc. %f, f1 prod %f (%f/%f) " % \
+                  (time_valid, test_loss/len(test_labels), test_accuracy,
+                   test_f1_1*test_f1_2, test_f1_1, test_f1_2)
+        logger.info(message)
+        print message
 
 
 def demo():
@@ -1133,9 +774,3 @@ def main(_):
 
 if __name__ == "__main__":
     tf.app.run()
-
-
-# TODO
-# - language als parameter
-# - modularization
-# - replace numbers by <NUM>?
