@@ -4,7 +4,10 @@ import numpy as np
 
 def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_size, K, D, N, J, L, r,
                     lstm_units, concat, window_size, keep_prob, keep_prob_sketch,
-                    l2_scale, l1_scale, src_embeddings=None, tgt_embeddings=None,
+                    l2_scale, l1_scale,
+                    attention_discount_factor=0.0,
+                    attention_temperature=1.0,
+                    src_embeddings=None, tgt_embeddings=None,
                     class_weights=None, bilstm=True, activation=tf.nn.tanh,
                     update_emb=True, track_sketches=False, is_train=False):
     """
@@ -134,7 +137,6 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                                 initializer=tf.random_uniform_initializer(dtype=tf.float32))
             W_hsz = tf.get_variable(name="W_hsz", shape=[2*state_size*(2*r+1), J],
                                        initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-
             # dropout within sketch
             # see https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/nn_ops.py#L1078 (inverted dropout)
             W_hss_mask = tf.to_float(tf.less_equal(tf.random_uniform(tf.shape(W_hss)), keep_prob_sketch)) * tf.inv(keep_prob_sketch)
@@ -143,6 +145,16 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 max_att = tf.reduce_max(tensor, 1)
                 a_n = tf.cast(tf.equal(tf.expand_dims(max_att, 1), tensor), tf.float32)
                 return a_n
+
+            def normalize(tensor):
+                """
+                turn a tensor into a probability distribution
+                :param tensor: 2D tensor
+                :return:
+                """
+                z = tf.reduce_sum(tensor, 1)
+                t = tensor / tf.expand_dims(z, 1)
+                return t
 
             def softmax_with_mask(tensor, mask, tau=1.0):
                 """
@@ -172,7 +184,8 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 z_i = tf.matmul(activ, v)
                 return z_i
 
-            def alpha(sequence_len, padded_matrix, b):
+            def alpha(sequence_len, padded_matrix, b, a_previous,
+                      discount_factor=0.0, temperature=1.0):
                 """
                 Compute attention weight for all words in sequence in batch
                 :return:
@@ -184,10 +197,19 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 rz = tf.transpose(z_packed, [1, 0, 2])  # batch-major
                 rz = tf.reshape(rz, [batch_size, sequence_len])
                 # subtract cumulative attention
-                d = 0.001  # discount factor  #TODO
-                rz = rz - d*b
-                a_n = softmax_with_mask(rz, mask, tau=1.0)  # make sure that no attention is spent on padded areas
-                return a_n
+                d = discount_factor # 5.0  # discount factor
+                tau = temperature # 0.2 # temperature.
+                #a_n = softmax_with_mask(rz, mask, tau=1.0)  # make sure that no attention is spent on padded areas
+                a_n = rz
+                a_n = a_n - d*b
+                a_n = softmax_with_mask(a_n, mask, tau=tau)
+                # interpolation gate
+                #a_n = softmax_with_mask(rz, mask, tau=1.0)
+                #g_n = tf.sigmoid(g)  # range (0,1)
+                #a_n = tf.mul(g_n, a_previous) + tf.mul((1-g_n), a_n)
+                # normalization
+                #a_n = normalize(a_n)
+                return a_n, rz
 
             def conv_r(padded_matrix, r):
                 """
@@ -218,13 +240,14 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 sketch_embedding_matrix_padded = tf.pad(sketch_embedding_matrix, padding_hs_col, "CONSTANT", name="HS_padded")  # add column on right and left
 
                 # beta function
-                a_n = alpha(L, sketch_embedding_matrix_padded, b)  # batch_size x L
-
+                a_n, _ = alpha(L, sketch_embedding_matrix_padded, b, a,
+                               discount_factor=attention_discount_factor,
+                               temperature=attention_temperature)
                 # make "hard"
                 #a_n = softmax_to_hard(a_n)
 
-                # cumulative attention
-                b_n = (tf.cast(n_counter, tf.float32)-1)*b + a_n
+                # cumulative attention scores
+                b_n = (tf.cast(n_counter, tf.float32)-1)*b + a_n #rz
                 b_n /= tf.cast(n_counter, tf.float32)
 
                 conv = conv_r(sketch_embedding_matrix_padded, r)  # batch_size x L x 2*state_size*(2*r+1)
@@ -241,11 +264,12 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 return n_counter+1, sketch_embedding_matrix, a_n, b_n
 
             S = tf.zeros(shape=[batch_size, L, state_size], dtype=tf.float32)
-            a = tf.zeros(shape=[batch_size, L])
+            a_n = tf.zeros(shape=[batch_size, L])
             HS = tf.concat(2, [H, S])
             sketches = []
-            b = tf.zeros(shape=[batch_size, L], dtype=tf.float32)  # cumulative attention
+            b = tf.ones(shape=[batch_size, L], dtype=tf.float32)/L  # cumulative attention
             b_n = b
+            g = tf.Variable(tf.zeros(shape=[L]))
 
             padding_hs_col = tf.constant([[0, 0], [r, r], [0, 0]], name="padding_hs_col")
             n = tf.constant(1, dtype=tf.int32, name="n")
@@ -253,17 +277,19 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             if track_sketches:  # use for loop (slower, because more memory)
                 if N > 0:
                     for i in xrange(N):
-                        n, HS, a_n, b_n = sketch_step(n, HS, a, b_n)
+                        n, HS, a_n, b_n = sketch_step(n, HS, a_n, b_n)
                         sketch = tf.split(2, 2, HS)[1]
                         # append attention to sketch
-                        sketch_attention = tf.concat(2, [sketch, tf.expand_dims(a_n, 2)])
-                        sketches.append(sketch_attention)
+                        #sketch_attention = tf.concat(2, [sketch, tf.expand_dims(a_n, 2)])
+                        #sketch_attention_cumulative = tf.concat(2, [sketch, tf.expand_dims(a_n, 2), tf.expand_dims(b_n, 2)])
+                        sketch_attention_cumulative = tf.concat(2, [tf.expand_dims(a_n, 2), tf.expand_dims(b_n, 2)])
+                        sketches.append(sketch_attention_cumulative)
             else:  # use while loop
                 if N > 0:
                     (final_n, final_HS, _, _) = tf.while_loop(
                         cond=lambda n_counter, _1, _2, _3: n_counter <= N,
                         body=sketch_step,
-                        loop_vars=(n, HS, a, b_n)
+                        loop_vars=(n, HS, a_n, b_n)
                     )
                     HS = final_HS
 
@@ -273,88 +299,52 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
 
             w_p = tf.get_variable(name="w_p", shape=[K],
                                    initializer=tf.random_uniform_initializer(dtype=tf.float32))
-            wsp_size = 2*state_size
+            if concat:
+                wsp_size = 2*state_size
+            else:
+                wsp_size = state_size
             W_sp = tf.get_variable(name="W_sp", shape=[wsp_size, K],
                                    initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-            W_prev = tf.get_variable(name="W_prev", initializer=tf.ones_initializer(shape=[K, K]), dtype=tf.float32)
-            w_pp = tf.get_variable(name="w_pp", shape=[K],
-                                   initializer=tf.random_uniform_initializer(dtype=tf.float32))
-
-            def score(j, sketch_embedding_matrix, previous_probs=None):
-                """
-                Score the word at index j
-                """
-                # state vector for this word (column) across batch
-                hs_j = tf.slice(sketch_embedding_matrix, [0, j, 0], [batch_size, 1, 2*state_size])
-                if previous_probs is not None:  # condition on some previous scores
-                    prev = tf.matmul(previous_probs, W_prev) + w_pp
-                    l = tf.matmul(tf.reshape(hs_j, [batch_size, 2*state_size]), W_sp) + w_p + prev
-                else:
-                    l = tf.matmul(tf.reshape(hs_j, [batch_size, 2*state_size]), W_sp) + w_p
-                return l  # batch_size x K
 
             if class_weights is not None:
                 class_weights = tf.constant(class_weights, name="class_weights")
 
-            """
-            # condition predictions on previous predictions (messes with ef-idea though)
-            def decoder(feed_previous_bool):
-                # avg word-level xent
-                pred_labels = []
-                losses = []
+            def score(hs_j):
+                """
+                Score the word at index j, returns state vector for this word (column) across batch
+                """
+                if concat:
+                    l = tf.matmul(tf.reshape(hs_j, [batch_size, 2*state_size]), W_sp) + w_p
+                else:
+                    l = tf.matmul(tf.reshape(hs_j, [batch_size, state_size]), W_sp) + w_p
+                return l  # batch_size x K
 
-                word_label_probs = tf.ones_like(labels, dtype=tf.float32)/K  # initial, batch_size x L
-                word_label_probs = tf.slice(word_label_probs, [0, 0], size=[batch_size, K])  # hack to get batch_size x K tensor
-
-                for i in np.arange(L):  # compute score, probs and losses per word for whole batch
-                    if not feed_previous_bool and i > 0:  # feed previous labels
-                        previous_label = tf.one_hot(tf.slice(labels, [0, i-1], size=[batch_size, 1]), K, on_value=1.0, off_value=0.0, axis=1, dtype=tf.float32, name="previous_label") # TODO prediction or true label
-                        previous_label = tf.squeeze(previous_label, [2])
-                    else:
-                        previous_label = softmax_to_hard(word_label_probs)  # feed previous predictions (and initial "true label")
-                    word_label_score = score(i, HS, previous_label)
-                    word_label_probs = tf.nn.softmax(word_label_score)
-                    word_preds = tf.argmax(word_label_probs, 1)
-                    pred_labels.append(word_preds)
-                    y_words = tf.reshape(tf.slice(y, [0, i], [batch_size, 1]), [batch_size])
-                    y_words_full = tf.one_hot(y_words, depth=K, on_value=1.0, off_value=0.0)
-                    cross_entropy = tf.nn.softmax_cross_entropy_with_logits(word_label_score,
-                                                                                    y_words_full)
-                    if class_weights is not None:
-                        label_weights = tf.reduce_sum(tf.mul(y_words_full, class_weights), 1)
-                        cross_entropy = tf.mul(cross_entropy, label_weights)
-
-                    loss = cross_entropy
-                    losses.append(loss)
-
-                return tf.pack(losses), tf.pack(pred_labels)
-
-            feed_previous = ~is_train  # during training, feed the previous gold label, during inference use the previous prediction
-            losses, pred_labels = tf.cond(feed_previous,  # feed previous predictions
-                                              lambda: decoder(True),
-                                              lambda: decoder(False))
-            """
-            pred_labels = []
-            losses = []
-
-            for i in np.arange(L):  # compute score, probs and losses per word for whole batch
-                word_label_score = score(i, HS, previous_probs=None)
+            def score_predict_loss(score_input):
+                """
+                Predict a label for an input, compute the loss and return label and loss
+                """
+                [hs_i, y_words] = score_input
+                word_label_score = score(hs_i)
                 word_label_probs = tf.nn.softmax(word_label_score)
                 word_preds = tf.argmax(word_label_probs, 1)
-                pred_labels.append(word_preds)
-                y_words = tf.reshape(tf.slice(y, [0, i], [batch_size, 1]), [batch_size])
-                y_words_full = tf.one_hot(y_words, depth=K, on_value=1.0, off_value=0.0)
+                y_words_full = tf.one_hot(tf.squeeze(y_words), depth=K, on_value=1.0, off_value=0.0)
                 cross_entropy = tf.nn.softmax_cross_entropy_with_logits(word_label_score,
                                                                                 y_words_full)
                 if class_weights is not None:
                     label_weights = tf.reduce_sum(tf.mul(y_words_full, class_weights), 1)
                     cross_entropy = tf.mul(cross_entropy, label_weights)
+                return [word_preds, cross_entropy]
 
-                loss = cross_entropy
-                losses.append(loss)
+            if concat:
+                S = HS
+            else:
+                S = tf.slice(HS, [0, 0, state_size], [batch_size, L, state_size])
 
-            pred_labels = tf.pack(pred_labels)
-            losses = tf.pack(losses)
+            scores_pred = tf.map_fn(score_predict_loss,
+                                    [tf.transpose(S, [1, 0, 2]), tf.transpose(y, [1,0])],
+                                    dtype=[tf.int64, tf.float32])  # elems are unpacked along dim 0 -> L
+            pred_labels = scores_pred[0]
+            losses = scores_pred[1]
 
             pred_labels = mask*tf.transpose(pred_labels, [1, 0])  # masked, batch_size x L
             losses = tf.reduce_mean(tf.cast(mask, tf.float32)*tf.transpose(losses, [1, 0]),
@@ -375,6 +365,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
 
     losses, losses_reg, predictions, M_src, M_tgt, sketches_tf = forward(inputs, labels, masks, seq_lens, class_weights)
     return losses, losses_reg, predictions, M_src, M_tgt, sketches_tf
+
 
 def seq2seq(inputs, labels, masks, is_train, src_vocab_size, tgt_vocab_size, K, D, J, L, window_size,
            src_embeddings, tgt_embeddings, class_weights, l2_scale, keep_prob, l1_scale,
@@ -507,7 +498,7 @@ def seq2seq(inputs, labels, masks, is_train, src_vocab_size, tgt_vocab_size, K, 
 
         #print "decoder outputs", decoder_outputs  # output projections: list of batch_size x K items
         #print "decoder state", decoder_state  # tuple: c; batch_size x lstm_units, batch_size x lstm_units
-        decoder_packed = tf.pack(decoder_outputs, 0)  # time-major: L+1 x batch_size x K
+        decoder_packed = tf.pack(decoder_outputs, 0)  # time-major: L x batch_size x K
 
     logits = tf.transpose(decoder_packed, [1, 0, 2])  # batch-major
     #print "logits", logits
@@ -611,6 +602,8 @@ def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, wi
 
     with tf.name_scope("mlp"):
         inputs = tf.reshape(emb, [-1, window_size*emb_size])
+        """
+        # 1 hidden layer
         W_1 = tf.get_variable(shape=[window_size*emb_size, J],
                               initializer=tf.contrib.layers.xavier_initializer(
                                   uniform=True, dtype=tf.float32, ), name="W_1")
@@ -624,6 +617,30 @@ def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, wi
         hidden = activation(tf.matmul(inputs, W_1) + b_1)  # batch_size*emb_size, J
         hidden = tf.nn.dropout(hidden, keep_prob)
         out = tf.matmul(hidden, W_2) + b_2  # batch_size*emb_size, K
+        """
+
+        # 2 hidden layers
+        J2 = 96
+        W_1 = tf.get_variable(shape=[window_size*emb_size, J2],
+                              initializer=tf.contrib.layers.xavier_initializer(
+                                  uniform=True, dtype=tf.float32, ), name="W_1")
+        W_2 = tf.get_variable(shape=[J2, J],
+                              initializer=tf.contrib.layers.xavier_initializer(
+                                  uniform=True, dtype=tf.float32), name="W_2")
+        W_3 = tf.get_variable(shape=[J, K],
+                              initializer=tf.contrib.layers.xavier_initializer(
+                                  uniform=True, dtype=tf.float32), name="W_3")
+        b_1 = tf.get_variable(shape=[J2], initializer=tf.random_uniform_initializer(
+            dtype=tf.float32), name="b_1")
+        b_2 = tf.get_variable(shape=[J], initializer=tf.random_uniform_initializer(
+            dtype=tf.float32), name="b_2")
+        b_3 = tf.get_variable(shape=[K], initializer=tf.random_uniform_initializer(
+            dtype=tf.float32), name="b_3")
+        hidden1 = activation(tf.matmul(inputs, W_1) + b_1)  # batch_size*emb_size, J2
+        hidden = activation(tf.matmul(hidden1, W_2) + b_2)  # batch_size*emb_size, J
+        hidden = tf.nn.dropout(hidden, keep_prob)
+        out = tf.matmul(hidden, W_3) + b_3  # batch_size*emb_size, K
+
         logits = tf.reshape(out, [batch_size, L, K])
         softmax = tf.nn.softmax(out)  # batch_size*L, K
         pred_labels = masks*tf.argmax(logits, 2)  # batch_size x L
@@ -652,4 +669,3 @@ def quetch(inputs, labels, masks, src_vocab_size, tgt_vocab_size, K, D, J, L, wi
             losses_reg += l1_loss
 
     return losses, losses_reg, pred_labels, M_src, M_tgt, None
-
