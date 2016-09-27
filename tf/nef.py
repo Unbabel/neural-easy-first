@@ -58,6 +58,8 @@ tf.app.flags.DEFINE_integer("lstm_units", 20, "number of LSTM-RNN encoder units"
 tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
 tf.app.flags.DEFINE_float("l2_scale", 0, "L2 regularization constant")
 tf.app.flags.DEFINE_float("l1_scale", 0, "L1 regularization constant")
+tf.app.flags.DEFINE_float("attention_discount_factor", 0.0, "Attention discount factor")
+tf.app.flags.DEFINE_float("attention_temperature", 1.0, "Attention temperature")
 tf.app.flags.DEFINE_float("keep_prob", 1 , "keep probability for dropout during training (1: no dropout)")
 tf.app.flags.DEFINE_float("keep_prob_sketch", 1, "keep probability for dropout during sketching (1: no dropout)")
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
@@ -260,6 +262,8 @@ class EasyFirstModel():
                     class_weights=self.class_weights, update_emb=update_emb,
                     keep_prob=self.keep_probs[j], keep_prob_sketch=self.keep_prob_sketches[j],
                     l2_scale=self.l2_scale, l1_scale=self.l1_scale,
+                    attention_discount_factor=FLAGS.attention_discount_factor,
+                    attention_temperature=FLAGS.attention_temperature,
                     bilstm=self.bilstm, activation=activation_func,
                     track_sketches=self.track_sketches, is_train=self.is_trains[j])
 
@@ -398,8 +402,10 @@ def train():
     with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
         # load data and embeddings
-        train_dir = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags"
-        dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.basic_features_with_tags"
+        #train_dir = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags"
+        #dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.basic_features_with_tags"
+        train_dir = FLAGS.data_dir+"/task2_en-de_training/train.features"
+        dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.features"
 
         if FLAGS.src_embeddings == "":
             src_embeddings = None
