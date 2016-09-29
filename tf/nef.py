@@ -81,9 +81,9 @@ class EasyFirstModel():
     def __init__(self, K, D, N, J, r, src_vocab_size, tgt_vocab_size, batch_size, optimizer, learning_rate,
                  max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
                  tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0,
-                 keep_prob=1, keep_prob_sketch=1, model_dir="models/",
+                 keep_prob=1, keep_prob_sketch=1, model_dir="models/", 
                  bilstm=True, model="ef_single_state", activation="tanh", l1_scale=0,
-                 update_emb=True, track_sketches=False, is_train=False):
+                 update_emb=True, track_sketches=False, is_train=False, attention_discount_factor=0.0, attention_temperature=1.0):
         """
         Initialize the model
         :param K:
@@ -139,6 +139,8 @@ class EasyFirstModel():
         self.max_gradient_norm = max_gradient_norm
         self.update_emb = update_emb
         self.model_dir = model_dir
+        self.attention_temperature = attention_temperature
+        self.attention_discount_factor = attention_discount_factor
 
         self.class_weights = class_weights if class_weights is not None else [1./K]*K
 
@@ -264,8 +266,8 @@ class EasyFirstModel():
                     class_weights=self.class_weights, update_emb=update_emb,
                     keep_prob=self.keep_probs[j], keep_prob_sketch=self.keep_prob_sketches[j],
                     l2_scale=self.l2_scale, l1_scale=self.l1_scale,
-                    attention_discount_factor=FLAGS.attention_discount_factor,
-                    attention_temperature=FLAGS.attention_temperature,
+                    attention_discount_factor=self.attention_discount_factor,
+                    attention_temperature=self.attention_temperature,
                     bilstm=self.bilstm, activation=activation_func,
                     track_sketches=self.track_sketches, is_train=self.is_trains[j])
 
@@ -378,7 +380,7 @@ def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
                            keep_prob=FLAGS.keep_prob, keep_prob_sketch=FLAGS.keep_prob_sketch,
                            model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm, update_emb=FLAGS.update_emb,
                            model=FLAGS.model, activation=FLAGS.activation, l1_scale=FLAGS.l1_scale,
-                           track_sketches=FLAGS.track_sketches)
+                           track_sketches=FLAGS.track_sketches, attention_temperature=FLAGS.attention_temperature, attention_discount_factor=FLAGS.attention_discount_factor)
     checkpoint = tf.train.get_checkpoint_state(FLAGS.model_dir)
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
         logger.info("Reading model parameters from %s" % checkpoint.model_checkpoint_path)
@@ -404,7 +406,7 @@ def train():
     with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
         # load data and embeddings
-        train_dir = FLAGS.data_dir+"/train_full.features"
+        train_dir = FLAGS.data_dir+"/train.features"
         dev_dir = FLAGS.data_dir+"/dev.features"
         #train_dir = FLAGS.data_dir+"/task2_en-de_training/train.features"
         #dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.features"
@@ -630,7 +632,8 @@ def test():
         src_vocab_size = src_embeddings.table.shape[0]
         tgt_vocab_size = tgt_embeddings.table.shape[0]
 
-        test_dir = FLAGS.data_dir+"/test.features"
+        #test_dir = FLAGS.data_dir+"/test.features"
+        test_dir = FLAGS.data_dir+"/dev.features"      
         test_feature_vectors, test_tgt_sentences, test_labels, test_label_dict = \
             load_data(test_dir, src_embeddings, tgt_embeddings, train=False,
                       labeled=True)
@@ -660,6 +663,7 @@ def test():
         test_loss = 0.0
         test_predictions = []
         test_true = []
+        predictions_with_id = {}
         for bucket_id in test_buckets.keys():
             bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = test_buckets[bucket_id]
             step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
@@ -667,7 +671,10 @@ def test():
                                                                        bucket_masks,
                                                                        bucket_seq_lens,
                                                                        True)  # loss for whole bucket
+            sample_indices = test_reordering_indexes[bucket_id]
             test_predictions.extend(predictions)
+            for i, p in enumerate(predictions):
+                predictions_with_id[sample_indices[i]] = p  # get back the order of the inputs  
             test_true.extend(bucket_ys)
             test_loss += np.sum(step_loss)
         time_valid = time.time() - start_time_valid
@@ -678,7 +685,10 @@ def test():
                    test_f1_1*test_f1_2, test_f1_1, test_f1_2)
         logger.info(message)
         print message
-
+	prediction_file = model.path+".dev.predict.txt"
+        with open(prediction_file, "w") as pf:
+            for sample_id in sorted(predictions_with_id):
+                pf.write(str(predictions_with_id[sample_id])+"\n")
 
 def demo():
     """
