@@ -242,6 +242,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 a_j = alpha(L, sketch_embedding_matrix_padded, #b, a,  # TODO a_j, _ = alpha(...)
                                discount_factor=attention_discount_factor,
                                temperature=attention_temperature)
+
                 # make "hard"
                 #a_j = softmax_to_hard(a_j)
 
