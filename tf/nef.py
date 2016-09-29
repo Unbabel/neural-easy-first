@@ -9,7 +9,7 @@ import math
 from embedding import *
 import logging
 import datetime
-from models import *
+from easy_first_model import *
 
 """
 Tensorflow implementation of the neural easy-first model
@@ -20,338 +20,72 @@ Baseline model
 """
 
 # Flags
-tf.app.flags.DEFINE_string("model", "ef_single_state", "Model for training: quetch or ef_single_state")
-tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
-tf.app.flags.DEFINE_string("optimizer", "adam", "Optimizer [sgd, adam, adagrad, adadelta, "
-                                                    "momentum]")
-tf.app.flags.DEFINE_integer("batch_size", 200,
-                            "Batch size to use during training.")
-tf.app.flags.DEFINE_integer("src_vocab_size", 10000, "Vocabulary size.")
-tf.app.flags.DEFINE_integer("tgt_vocab_size", 10000, "Vocabulary size.")
-tf.app.flags.DEFINE_string("data_dir", "../data/WMT2016/WMT2016", "Data directory")
-tf.app.flags.DEFINE_string("model_dir", "models/", "Model directory")
-tf.app.flags.DEFINE_string("sketch_dir", "sketches/", "Directory where sketch dumps are stored")
-tf.app.flags.DEFINE_integer("max_train_data_size", 0,
-                            "Limit on the size of training data (0: no limit).")
-tf.app.flags.DEFINE_float("max_gradient_norm", -1, "maximum gradient norm for clipping (-1: no clipping)")
-tf.app.flags.DEFINE_integer("L", 58, "maximum length of sequences")
-tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
-tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.train.basic_features_with_tags.7000.extended.pkl", "path to source language embeddings")
-tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.train.basic_features_with_tags.7000.extended.pkl", "path to target language embeddings")
-#tf.app.flags.DEFINE_string("src_embeddings", "../data/WMT2016/embeddings/polyglot-en.pkl", "path to source language embeddings")
-#tf.app.flags.DEFINE_string("tgt_embeddings", "../data/WMT2016/embeddings/polyglot-de.pkl", "path to target language embeddings")
-#tf.app.flags.DEFINE_string("src_embeddings", "", "path to source language embeddings")
-#tf.app.flags.DEFINE_string("tgt_embeddings", "", "path to target language embeddings")
-tf.app.flags.DEFINE_boolean("update_emb", True, "update the embeddings")
-tf.app.flags.DEFINE_string("activation", "tanh", "activation function")
-tf.app.flags.DEFINE_integer("K", 2, "number of labels")
-tf.app.flags.DEFINE_integer("D", 64, "dimensionality of embeddings")
-tf.app.flags.DEFINE_integer("N", 50, "number of sketches")
-tf.app.flags.DEFINE_integer("J", 20, "dimensionality of hidden layer")
-tf.app.flags.DEFINE_integer("r", 2, "context size")
-tf.app.flags.DEFINE_float("bad_weight", 3.0, "weight for BAD instances" )
-tf.app.flags.DEFINE_boolean("concat", True, "concatenating s_i and h_i for prediction")
+tf.app.flags.DEFINE_string("model", "ef_single_state",
+                           "Model for training: rnn or ef_single_state")
+
 tf.app.flags.DEFINE_boolean("train", True, "training model")
 tf.app.flags.DEFINE_integer("epochs", 500, "training epochs")
-tf.app.flags.DEFINE_integer("checkpoint_freq", 100, "save model every x epochs")
-tf.app.flags.DEFINE_integer("lstm_units", 20, "number of LSTM-RNN encoder units")
-tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
+tf.app.flags.DEFINE_integer("checkpoint_frequency", 100, "save model every x epochs")
 tf.app.flags.DEFINE_float("l2_scale", 0, "L2 regularization constant")
 tf.app.flags.DEFINE_float("l1_scale", 0, "L1 regularization constant")
-tf.app.flags.DEFINE_float("attention_discount_factor", 0.0, "Attention discount factor")
-tf.app.flags.DEFINE_float("attention_temperature", 1.0, "Attention temperature")
-tf.app.flags.DEFINE_float("keep_prob", 1 , "keep probability for dropout during training (1: no dropout)")
-tf.app.flags.DEFINE_float("keep_prob_sketch", 1, "keep probability for dropout during sketching (1: no dropout)")
+
+tf.app.flags.DEFINE_string("optimizer", "adam",
+                           "Optimizer [sgd, adam, adagrad, adadelta, momentum]")
+tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
+tf.app.flags.DEFINE_integer("batch_size", 200,
+                            "Batch size to use during training.")
+
+tf.app.flags.DEFINE_integer("word_cutoff", 1, "Word cutoff.")
+
+tf.app.flags.DEFINE_string("data_dir", "pos_tagging/data", "Data directory")
+tf.app.flags.DEFINE_string("model_dir", "pos_tagging/models", "Model directory")
+tf.app.flags.DEFINE_string("sketch_dir", "pos_tagging/sketches",
+                           "Directory where sketch dumps are stored")
+
+tf.app.flags.DEFINE_float("max_gradient_norm", -1,
+                          "max gradient norm for clipping (-1: no clipping)")
+
+tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
+tf.app.flags.DEFINE_string("embeddings",
+                           "../data/WMT2016/embeddings/polyglot-en.train.basic_features_with_tags.7000.extended.pkl",
+                           "path to word embeddings")
+
+tf.app.flags.DEFINE_boolean("update_embeddings", False, "update the embeddings")
+tf.app.flags.DEFINE_string("activation", "tanh", "activation function")
+tf.app.flags.DEFINE_integer("embedding_size", 64,
+                            "dimensionality of embeddings")
+tf.app.flags.DEFINE_integer("hidden_size", 20, "dimensionality of hidden layer")
+tf.app.flags.DEFINE_integer("lstm_size", 20, "number of LSTM-RNN encoder units")
+tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
+tf.app.flags.DEFINE_integer("context_size", 2, "context size")
+
+tf.app.flags.DEFINE_boolean("concatenate", True,
+                            "concatenating s_i and h_i for prediction")
+tf.app.flags.DEFINE_float("attention_discount_factor", 0.0,
+                          "Attention discount factor")
+tf.app.flags.DEFINE_float("attention_temperature", 1.0,
+                          "Attention temperature")
+tf.app.flags.DEFINE_float("keep_prob", 1.0,
+                          "keep probability for dropout during training "
+                          "(1: no dropout)")
+tf.app.flags.DEFINE_float("keep_prob_sketch", 1.0,
+                          "keep probability for dropout during sketching "
+                          "(1: no dropout)")
+
 tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
-tf.app.flags.DEFINE_boolean("restore", False, "restoring last session from checkpoint")
+tf.app.flags.DEFINE_boolean("restore", False,
+                            "restoring last session from checkpoint")
 tf.app.flags.DEFINE_integer("threads", 8, "number of threads")
-tf.app.flags.DEFINE_boolean("track_sketches", False, "keep track of the sketches during learning")
+tf.app.flags.DEFINE_boolean("track_sketches", False,
+                            "keep track of the sketches during learning")
 FLAGS = tf.app.flags.FLAGS
 
-logging.basicConfig(filename=FLAGS.model_dir+str(datetime.datetime.now()).replace(" ", "-")+".training.log")
+log_file_path = FLAGS.model_dir + \
+                str(datetime.datetime.now()).replace(" ", "-") + ".training.log"
+logging.basicConfig(filename=log_file_path)
 logger = logging.getLogger("NEF")
 logger.setLevel(logging.INFO)
 
-class EasyFirstModel():
-    """
-    Neural easy-first model
-    """
-    def __init__(self, K, D, N, J, r, src_vocab_size, tgt_vocab_size, batch_size, optimizer, learning_rate,
-                 max_gradient_norm, lstm_units, concat, buckets, window_size, src_embeddings,
-                 tgt_embeddings, forward_only=False, class_weights=None, l2_scale=0,
-                 keep_prob=1, keep_prob_sketch=1, model_dir="models/",
-                 bilstm=True, model="ef_single_state", activation="tanh", l1_scale=0,
-                 update_emb=True, track_sketches=False, is_train=False):
-        """
-        Initialize the model
-        :param K:
-        :param D:
-        :param N:
-        :param J:
-        :param r:
-        :param lstm_units:
-        :param src_vocab_size:
-        :param tgt_vocab_size:
-        :param batch_size:
-        :param optimizer:
-        :param learning_rate:
-        :param max_gradient_norm:
-        :param forward_only:
-        :param buckets:
-        :param src_embeddings
-        :param tgt_embeddings
-        :param l2_scale
-        :param l1_scale
-        :param keep_prob
-        :param keep_prob_sketch
-        :param bilstm
-        :param model
-        :param update_emb
-        :return:
-        """
-        self.K = K
-        self.D = D
-        self.N = N
-        self.J = J
-        self.r = r
-        self.lstm_units = lstm_units
-        self.src_vocab_size = src_vocab_size
-        self.tgt_vocab_size = tgt_vocab_size
-        self.batch_size = batch_size
-        self.learning_rate = learning_rate
-        self.concat = concat
-        self.window_size = window_size
-        self.global_step = tf.Variable(0, trainable=False)
-        optimizer_map = {"sgd": tf.train.GradientDescentOptimizer, "adam": tf.train.AdamOptimizer,
-                        "adagrad": tf.train.AdagradOptimizer, "adadelta": tf.train.AdadeltaOptimizer,
-                        "rmsprop": tf.train.RMSPropOptimizer, "momemtum": tf.train.MomentumOptimizer}
-        self.optimizer = optimizer_map.get(optimizer,
-                                           tf.train.GradientDescentOptimizer)(self.learning_rate)
-        self.src_embeddings = src_embeddings
-        self.tgt_embeddings = tgt_embeddings
-        self.l2_scale = l2_scale
-        self.l1_scale = l1_scale
-        self.keep_prob = keep_prob
-        self.keep_prob_sketch = keep_prob_sketch
-        self.bilstm = bilstm
-        self.max_gradient_norm = max_gradient_norm
-        self.update_emb = update_emb
-        self.model_dir = model_dir
-
-        self.class_weights = class_weights if class_weights is not None else [1./K]*K
-
-        self.path = "%s/%s_K%d_D%d_N%d_J%d_r%d_batch%d_opt%s_lr%0.4f_gradnorm%0.2f" \
-                    "_lstm%d_concat%r_window%d_weights%s_l2r%0.4f_l1r%0.4f_dropout%0.2f_sketchdrop%0.2f_updateemb%s_srcvoc%d_tgtvoc%d.model" % \
-                    (self.model_dir, model, self.K, self.D, self.N, self.J,
-                     self.r, self.batch_size, optimizer,
-                     self.learning_rate, self.max_gradient_norm, self.lstm_units,
-                     self.concat, self.window_size,
-                     "-".join([str(c) for c in class_weights]), self.l2_scale,
-                     self.l1_scale, self.keep_prob, self.keep_prob_sketch,
-                     self.update_emb, self.src_vocab_size, self.tgt_vocab_size)
-        logger.info("Model path: %s"  % self.path)
-
-
-        if self.lstm_units > 0:
-            if self.bilstm:
-                logger.info("Model with bi-directional LSTM RNN encoder of %d units" % self.lstm_units)
-            else:
-                logger.info("Model with uni-directional LSTM RNN encoder of %d units" % self.lstm_units)
-        else:
-            if self.src_embeddings.table is None and self.tgt_embeddings.table is None:
-                logger.info("Model with simple embeddings of size %d" % self.D)
-            else:
-                logger.info("Model with simple embeddings of size %d (src) & %d (tgt)" % \
-                      (self.src_embeddings.table.shape[0], self.tgt_embeddings.table.shape[0]))
-
-        if update_emb:
-            logger.info("Updating the embeddings during training")
-        else:
-            logger.info("Keeping the embeddings fixed")
-
-        if self.N > 0:
-            logger.info("Model with %d sketches" % self.N)
-        else:
-            logger.info("No sketches")
-            self.concat = True
-
-        if self.concat or self.N == 0:
-            logger.info("Concatenating H and S for predictions")
-
-        if self.l2_scale > 0:
-            logger.info("L2 regularizer with weight %f" % self.l2_scale)
-
-        if self.l1_scale > 0:
-            logger.info("L1 regularizer with weight %f" % self.l1_scale)
-
-        if forward_only:
-            self.keep_prob = 1
-            self.keep_prob_sketch = 1
-        if self.keep_prob < 1:
-            logger.info("Dropout with p=%f" % self.keep_prob)
-        if self.keep_prob_sketch < 1:
-            logger.info("Dropout during sketching with p=%f" % self.keep_prob_sketch)
-
-        self.buckets = buckets
-
-        buckets_path = self.path.split(".model", 2)[0]+".buckets.pkl"
-        if self.buckets is not None:  # store bucket edges
-            logger.info("Dumping bucket edges in %s" % buckets_path)
-            pkl.dump(self.buckets, open(buckets_path, "wb"))
-        else:  # load bucket edges
-            logger.info("Loading bucket edges from %s" % buckets_path)
-            self.buckets = pkl.load(open(buckets_path, "rb"))
-        logger.info("Buckets: %s" % str(self.buckets))
-
-        if model == "quetch":
-            model_func = quetch
-            logger.info("Using QUETCH model")
-        if model == "seq2seq":
-            model_func = seq2seq
-            logger.info("Using seq2seq model")
-        else:
-            model_func = ef_single_state
-            logger.info("Using neural easy first single state model")
-
-        activation_func = tf.nn.tanh
-        if activation == "relu":
-            activation_func = tf.nn.relu
-        elif activation == "sigmoid":
-            activation_func = tf.nn.sigmoid
-        logger.info("Activation function %s" % activation_func.__name__)
-
-        self.track_sketches = track_sketches
-        if track_sketches:
-            logger.info("Tracking sketches")
-
-        # prepare input feeds
-        self.inputs = []
-        self.labels = []
-        self.masks = []
-        self.seq_lens = []
-        self.losses = []
-        self.losses_reg = []
-        self.predictions = []
-        self.sketches_tfs = []
-        self.keep_probs = []
-        self.keep_prob_sketches = []
-        self.is_trains = []
-        for j, max_len in enumerate(self.buckets):
-            self.inputs.append(tf.placeholder(tf.int32,
-                                              shape=[None, max_len, 2*self.window_size],
-                                              name="inputs{0}".format(j)))
-            self.labels.append(tf.placeholder(tf.int32,
-                                              shape=[None, max_len], name="labels{0}".format(j)))
-            self.masks.append(tf.placeholder(tf.int64,
-                                             shape=[None, max_len], name="masks{0}".format(j)))
-            self.seq_lens.append(tf.placeholder(tf.int64,
-                                                shape=[None], name="seq_lens{0}".format(j)))
-            self.keep_prob_sketches.append(tf.placeholder(tf.float32, name="keep_prob_sketch{0}".format(j)))
-            self.keep_probs.append(tf.placeholder(tf.float32, name="keep_prob{0}".format(j)))
-            self.is_trains.append(tf.placeholder(tf.bool, name="is_train{0}".format(j)))
-            with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
-                logger.info("Initializing parameters for bucket with max len %d" % max_len)
-                bucket_losses, bucket_losses_reg, bucket_predictions, src_table, tgt_table, sketches = model_func(
-                    inputs=self.inputs[j], labels=self.labels[j], masks=self.masks[j],
-                    seq_lens=self.seq_lens[j], src_vocab_size=self.src_vocab_size,
-                    tgt_vocab_size=self.tgt_vocab_size, K=self.K,
-                    D=self.D, N=max_len,  # as many sketches as words in sequence
-                    J=self.J, L=max_len, r=self.r, lstm_units=self.lstm_units,
-                    concat=self.concat, window_size=self.window_size,
-                    src_embeddings=self.src_embeddings, tgt_embeddings=self.tgt_embeddings,
-                    class_weights=self.class_weights, update_emb=update_emb,
-                    keep_prob=self.keep_probs[j], keep_prob_sketch=self.keep_prob_sketches[j],
-                    l2_scale=self.l2_scale, l1_scale=self.l1_scale,
-                    attention_discount_factor=FLAGS.attention_discount_factor,
-                    attention_temperature=FLAGS.attention_temperature,
-                    bilstm=self.bilstm, activation=activation_func,
-                    track_sketches=self.track_sketches, is_train=self.is_trains[j])
-
-                self.losses_reg.append(bucket_losses_reg)
-                self.losses.append(bucket_losses) # list of tensors, one for each bucket
-                self.predictions.append(bucket_predictions)  # list of tensors, one for each bucket
-                self.src_table = src_table  # shared for all buckets
-                self.tgt_table = tgt_table
-                if self.track_sketches:  # else sketches are just empty
-                    self.sketches_tfs.append(sketches)
-
-        # gradients and update operation for training the model
-        if not forward_only:
-            params = tf.trainable_variables()
-            self.gradient_norms = []
-            self.updates = []
-            for j in xrange(len(buckets)):
-                gradients = tf.gradients(tf.reduce_mean(self.losses_reg[j], 0), params)  # batch normalization
-                if max_gradient_norm > -1:
-                    clipped_gradients, norm = tf.clip_by_global_norm(gradients, max_gradient_norm)
-                    self.gradient_norms.append(norm)
-                    update = self.optimizer.apply_gradients(zip(clipped_gradients, params))
-                    self.updates.append(update)
-
-                else:
-                    self.gradient_norms.append(tf.global_norm(gradients))
-                    update = self.optimizer.apply_gradients(zip(gradients, params))
-                    self.updates.append(update)
-
-        self.saver = tf.train.Saver(tf.all_variables())
-
-    def batch_update(self, session, bucket_id, inputs, labels, masks, seq_lens, forward_only=False):
-        """
-        Training step
-        :param session:
-        :param bucket_id:
-        :param inputs:
-        :param labels:
-        :param forward_only:
-        :return:
-        """
-        # get input feed for bucket
-        input_feed = {}
-        input_feed[self.inputs[bucket_id].name] = inputs
-        input_feed[self.labels[bucket_id].name] = labels
-        input_feed[self.masks[bucket_id].name] = masks
-        input_feed[self.seq_lens[bucket_id].name] = seq_lens
-        input_feed[self.keep_probs[bucket_id].name] = 1 if forward_only else self.keep_prob
-        input_feed[self.keep_prob_sketches[bucket_id].name] = 1 if forward_only else self.keep_prob_sketch
-        input_feed[self.is_trains[bucket_id].name] = not forward_only
-        #print "input_feed", input_feed.keys()
-
-        if not forward_only:
-            output_feed = [self.losses[bucket_id],
-                           self.predictions[bucket_id],
-                           self.losses_reg[bucket_id],
-                           self.updates[bucket_id],
-                           self.gradient_norms[bucket_id]]
-        else:
-            output_feed = [self.losses[bucket_id], self.predictions[bucket_id], self.losses_reg[bucket_id]]
-        #print "output_feed", output_feed
-
-        outputs = session.run(output_feed, input_feed)
-        #print "outputs", outputs
-
-        predictions = []
-        for seq_len, pred in zip(seq_lens, outputs[1]):
-                predictions.append(pred[:seq_len].tolist())
-
-        return outputs[0], predictions, outputs[2]  # loss, predictions, regularized loss
-
-    def get_sketches_for_single_sample(self, session, bucket_id, input, label, mask, seq_len):
-        """
-        fetch the sketches and the attention for a single sample from the graph
-        """
-        input_feed = {}
-        input_feed[self.inputs[bucket_id].name] = np.expand_dims(input, 0)  # batch_size = 1
-        input_feed[self.labels[bucket_id].name] = np.expand_dims(label, 0)
-        input_feed[self.masks[bucket_id].name] = np.expand_dims(mask, 0)
-        input_feed[self.seq_lens[bucket_id].name] = np.expand_dims(seq_len, 0)
-        input_feed[self.keep_probs[bucket_id].name] = 1.0
-        input_feed[self.keep_prob_sketches[bucket_id].name] = 1.0
-        input_feed[self.is_trains[bucket_id].name] = False
-
-        output_feed = [self.sketches_tfs[bucket_id]]
-        outputs = session.run(output_feed, input_feed)
-
-        return outputs[0]
 
 
 def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
@@ -399,23 +133,17 @@ def train():
     print_config()
     logger.info("Training on %d thread(s)" % FLAGS.threads)
 
-    with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)) as sess:
+    with tf.Session(config=tf.ConfigProto( \
+        intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
-        # load data and embeddings
-        #train_dir = FLAGS.data_dir+"/task2_en-de_training/train.basic_features_with_tags"
-        #dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.basic_features_with_tags"
+        # Load data and embeddings.
         train_dir = FLAGS.data_dir+"/task2_en-de_training/train.features"
         dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.features"
 
-        if FLAGS.src_embeddings == "":
-            src_embeddings = None
+        if FLAGS.embeddings == "":
+            embeddings = None
         else:
-            src_embeddings = load_embedding(FLAGS.src_embeddings)
-
-        if FLAGS.tgt_embeddings == "":
-            tgt_embeddings = None
-        else:
-            tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
+            embeddings = load_embeddings(FLAGS.embeddings)
 
         train_feature_vectors, train_tgt_sentences, train_labels, train_label_dict, \
         train_src_embeddings, train_tgt_embeddings = load_data(train_dir, src_embeddings,
@@ -427,40 +155,26 @@ def train():
             load_data(dev_dir, train_src_embeddings, train_tgt_embeddings, train=False,
                       labeled=True)  # use training vocab for dev
 
+        if FLAGS.embeddings == "":
+            embeddings = embedding.Embedding(None, train_embeddings.word2id,
+                                             train_embeddings.id2word,
+                                             train_embeddings.UNK_id,
+                                             train_embeddings.PAD_id,
+                                             train_embeddings.end_id,
+                                             train_embeddings.start_id)
+            vocab_size = FLAGS.vocab_size # Do we need this?
 
-        if FLAGS.src_embeddings == "":
-            src_embeddings = embedding.Embedding(None, train_src_embeddings.word2id,
-                                                 train_src_embeddings.id2word,
-                                                 train_src_embeddings.UNK_id,
-                                                 train_src_embeddings.PAD_id,
-                                                 train_src_embeddings.end_id,
-                                                 train_src_embeddings.start_id)
-            src_vocab_size = FLAGS.src_vocab_size
-        else:
-            src_vocab_size = len(train_src_embeddings.word2id)
-
-        if FLAGS.tgt_embeddings == "":
-            tgt_embeddings = embedding.Embedding(None, train_tgt_embeddings.word2id,
-                                                 train_tgt_embeddings.id2word,
-                                                 train_tgt_embeddings.UNK_id,
-                                                 train_tgt_embeddings.PAD_id,
-                                                 train_tgt_embeddings.end_id,
-                                                 train_tgt_embeddings.start_id)
-            tgt_vocab_size = FLAGS.tgt_vocab_size
-        else:
-            tgt_vocab_size = len(train_tgt_embeddings.word2id)
-
-        logger.info("src vocab size: %d" % src_vocab_size)
-        logger.info("tgt vocab size: %d" % tgt_vocab_size)
+        logger.info("vocab size: %d" % vocab_size)
 
         logger.info("Training on %d instances" % len(train_labels))
         logger.info("Validating on %d instances" % len(dev_labels))
 
-        logger.info("Maximum sentence length (train): %d" % max([len(y) for y in train_labels]))
-        logger.info("Maximum sentence length (dev): %d" % max([len(y) for y in dev_labels]))
+        logger.info("Maximum sentence length (train): %d" % \
+                    max([len(y) for y in train_labels]))
+        logger.info("Maximum sentence length (dev): %d" % \
+                    max([len(y) for y in dev_labels]))
 
-        class_weights = [1, FLAGS.bad_weight]  # TODO QE specific
-        logger.info("Weights for classes: %s" % str(class_weights))
+        maximum_sentence_length = max([len(y) for y in train_labels])
 
         # bucketing training and dev data
 
@@ -468,7 +182,7 @@ def train():
         data_buckets, reordering_indexes, bucket_edges = buckets_by_length(
             np.asarray(train_feature_vectors),
             np.asarray(train_labels), buckets=FLAGS.buckets,
-            max_len=FLAGS.L, mode="pad")
+            max_len=maximum_sentence_length, mode="pad")
         train_buckets = data_buckets
         train_reordering_indexes = reordering_indexes
 
@@ -478,11 +192,12 @@ def train():
                                                              buckets=bucket_edges)
 
         # create the model
-        model = create_model(sess, bucket_edges, src_vocab_size, tgt_vocab_size,
-                             False, src_embeddings, tgt_embeddings, class_weights)
+        model = create_model(sess, bucket_edges, vocab_size, False, embeddings)
 
-        train_buckets_sizes = {i: len(indx) for i, indx in train_reordering_indexes.items()}
-        dev_buckets_sizes = {i: len(indx) for i, indx in dev_reordering_indexes.items()}
+        train_buckets_sizes = {i: len(indx) \
+                               for i, indx in train_reordering_indexes.items()}
+        dev_buckets_sizes = {i: len(indx) \
+                             for i, indx in dev_reordering_indexes.items()}
 
 
         logger.info("Creating buckets for training data:")
@@ -678,94 +393,6 @@ def test():
         print message
 
 
-def demo():
-    """
-    Test a model dynamically by reading input from stdin
-    :return:
-    """
-    FLAGS.restore = True
-    with tf.Session() as sess:
-        # load the embeddings
-        src_embeddings = load_embedding(FLAGS.src_embeddings)
-        tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
-        src_vocab_size = src_embeddings.table.shape[0]
-        tgt_vocab_size = tgt_embeddings.table.shape[0]
-
-
-        # load model
-        class_weights = [1, FLAGS.bad_weight]  # QE-specific
-        model = create_model(sess, src_vocab_size=src_vocab_size, tgt_vocab_size=tgt_vocab_size,
-                             buckets=None, forward_only=True, src_embeddings=src_embeddings,
-                             tgt_embeddings=tgt_embeddings, class_weights=class_weights)
-
-        # bucketing test data
-        bucket_edges = model.buckets
-
-        sys.stdout.write("Enter source and target sentence separated by '|'.\n")
-        sys.stdout.write("> ")
-        sys.stdout.flush()
-        sentence = sys.stdin.readline()
-        while sentence:
-            inputs = sentence.split("|")
-            src = inputs[0].strip()
-            tgt = inputs[1].strip()
-
-            # get word ids
-            words_src = [src_embeddings.get_id(src_word) for src_word in src.split()]
-            words_tgt = [tgt_embeddings.get_id(tgt_word) for tgt_word in tgt.split()]
-            if len(words_tgt) > FLAGS.L:
-                print "WARNING: target input too long, last %d words will not be classified" % \
-                      (len(words_tgt)-FLAGS.L)
-
-            window_size = 3
-            # features for each word: context word on src and tgt
-            X = []
-            for i, w in enumerate(words_tgt):
-                x = []
-                context_size = int(math.floor(window_size/2.))
-                for j in range(i-context_size, i+context_size+1):  # source context words
-                    if j < 0 or j >= len(words_src):
-                        x.append(src_embeddings.PAD_id)
-                    else:
-                        x.append(words_src[j])
-
-                for j in range(i-context_size, i+context_size+1):  # target context words
-                    if j < 0 or j >= len(words_tgt):
-                        x.append(tgt_embeddings.PAD_id)
-                    else:
-                        x.append(words_tgt[j])
-                X.append(x)
-
-            bucket_id = 0
-            for bucket_edge in bucket_edges:
-                if len(X) > bucket_edge:
-                    bucket_id += 1
-
-            # pad sentence and create mask
-            seq_len = len(X)
-            mask = np.zeros((1,bucket_edges[bucket_id]))
-            X_padded = np.zeros((1, bucket_edges[bucket_id], 2*window_size))
-            for i, x in enumerate(X):
-                mask[0][i] = 1
-                X_padded[0][i] = np.asarray(x).T
-            Y_padded = np.zeros_like(mask)  # dummy labels
-
-            # get predictions
-            step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id, X_padded,
-                                                                       Y_padded, mask, [seq_len],
-                                                                       True)
-            outputs = predictions[0]
-
-            while len(outputs) < len(words_tgt):  # can happen because of sentence length limit
-                outputs.append(0)
-            print "prediction: ",  zip(tgt.split(), outputs)
-            sys.stdout.flush()
-            sys.stdout.write("Enter source and target sentence separated by '|'.\n")
-            sys.stdout.write("> ")
-            sys.stdout.flush()
-            sentence = sys.stdin.readline()
-
-
 def main(_):
 
     if not FLAGS.interactive:
@@ -776,7 +403,7 @@ def main(_):
         else:
             test()
     else:
-        demo()
+        raise NonImplementedError
 
 if __name__ == "__main__":
     tf.app.run()
