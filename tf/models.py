@@ -201,8 +201,9 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 tau = temperature # 0.2 # temperature.
                 #a_n = softmax_with_mask(rz, mask, tau=1.0)  # make sure that no attention is spent on padded areas
                 a_n = rz
-                a_n = a_n - d*b
-                a_n = softmax_with_mask(a_n, mask, tau=tau)
+                #a_n = a_n - d*b
+                #a_n = softmax_with_mask(a_n, mask, tau=tau)
+                a_n = softmax_with_mask(a_n, mask, tau=1.0)
                 # interpolation gate
                 #a_n = softmax_with_mask(rz, mask, tau=1.0)
                 #g_n = tf.sigmoid(g)  # range (0,1)
@@ -243,10 +244,12 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
                 a_n, _ = alpha(L, sketch_embedding_matrix_padded, b, a,
                                discount_factor=attention_discount_factor,
                                temperature=attention_temperature)
+
                 # make "hard"
                 #a_n = softmax_to_hard(a_n)
 
                 # cumulative attention scores
+                #b_n = b + a_n
                 b_n = (tf.cast(n_counter, tf.float32)-1)*b + a_n #rz
                 b_n /= tf.cast(n_counter, tf.float32)
 
@@ -268,6 +271,7 @@ def ef_single_state(inputs, labels, masks, seq_lens, src_vocab_size, tgt_vocab_s
             HS = tf.concat(2, [H, S])
             sketches = []
             b = tf.ones(shape=[batch_size, L], dtype=tf.float32)/L  # cumulative attention
+            #b = tf.zeros(shape=[batch_size, L], dtype=tf.float32)
             b_n = b
             g = tf.Variable(tf.zeros(shape=[L]))
 
