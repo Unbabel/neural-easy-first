@@ -1,0 +1,352 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[latin1]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+
+% For algorithms
+\usepackage{algorithm}
+\usepackage{algorithmic}
+
+\usepackage{graphicx}
+\usepackage{tikz-dependency}
+\usepackage{tikz}
+\usepackage{tikz-qtree}
+
+%\usepackage[numbers]{natbib}
+\usepackage{natbib}
+
+
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}[theorem]{\bf{Definition}}
+\newtheorem{proposition}[theorem]{\bf{Proposition}}
+\newtheorem{lemma}[theorem]{\bf{Lemma}}
+\newtheorem{corollary}[theorem]{\bf{Corollary}}
+\newtheorem{example}[theorem]{\bf{Example}}
+\newtheorem{remark}[theorem]{\bf{Remark}}
+\newtheorem{property}[theorem]{\bf{Property}}
+\newtheorem{procedure}[theorem]{\bf{Procedure}}
+
+% % "box" symbols at end of proofs
+\def\QEDclosed{\mbox{\rule[0pt]{1.3ex}{1.3ex}}} % for a filled box
+% V1.6 some journals use an open box instead that will just fit around a closed one
+\def\QEDopen{{\setlength{\fboxsep}{0pt}\setlength{\fboxrule}{0.2pt}\fbox{\rule[0pt]{0pt}{1.3ex}\rule[0pt]{1.3ex}{0pt}}}}
+\def\QED{\QEDclosed} % default to closed
+\def\proof{\noindent\hspace{0em}{\itshape Proof: }}
+\def\endproof{\hspace*{\fill}~\QED\par\endtrivlist\unskip}
+\def\lemmaproof{\noindent\hspace{0em}{\itshape Proof (of the Lemma): }}
+\def\endlemmaproof{\hspace*{\fill}~\QED\par\endtrivlist\unskip}
+
+
+%\newcommand{\Prob}[1]{\prob\{#1\}}
+\newcommand{\Prob}{\mathbb{P}}
+
+\newcommand{\vect}[1]{\mathbf{#1}}
+\newcommand{\set}[1]{\mathbb{#1}}
+\newcommand{\sett}[1]{\mathcal{#1}}
+%\newcommand{\sett}[1]{{#1}}
+\newcommand{\matr}[1]{\mathbf{#1}}
+\newcommand{\vectsymb}[1]{\boldsymbol{#1}}
+\newcommand{\vectsymbscript}[1]{\boldsymbol{#1}}
+%\newcommand{\vectsymb}[1]{\mbox{\boldmath$#1$}}
+%\newcommand{\vectsymbscript}[1]{\mbox{{\scriptsize\boldmath$#1$}}}
+\newcommand{\tup}[1]{\mathscr{#1}}
+%\newcommand{\tup}[1]{\mathcal{#1}}
+\newcommand{\sembrack}[1]{[\![#1]\!]}
+
+\newcommand{\x}{{\vectsymb{x}}}
+\newcommand{\y}{{\vectsymb{y}}}
+\newcommand{\z}{{\vectsymb{z}}}
+\newcommand{\hh}{{\vectsymb{h}}}
+\newcommand{\sss}{{\vectsymb{s}}}
+\newcommand{\aaa}{{\vectsymb{a}}}
+\newcommand{\bb}{{\vectsymb{b}}}
+\newcommand{\X}{{\matr{X}}}
+\newcommand{\Y}{{\matr{Y}}}
+\newcommand{\Z}{{\matr{Z}}}
+\newcommand{\HH}{{\matr{H}}}
+\newcommand{\SSS}{{\matr{S}}}
+
+\newcommand{\W}{{\vectsymb{w}}}
+\newcommand{\F}{{\vectsymb{f}}}
+\newcommand{\w}{{w}}
+\newcommand{\f}{{f}}
+\newcommand{\U}{{\vectsymb{u}}}
+\newcommand{\G}{{\vectsymb{g}}}
+\newcommand{\B}{{\vectsymb{b}}}
+\newcommand{\Score}{\vectsymb{\theta}}
+\newcommand{\score}{{\theta}}
+\newcommand{\DP}[2]{{#1}^{\top}{#2}}
+%\newcommand{\DP}[2]{{#1}\cdot{#2}}
+\newcommand{\Reg}{\Omega}
+\newcommand{\Loss}{L}
+\newcommand{\Scorepart}{\phi}
+%\newcommand{\MARG}{\sett{M}}
+\newcommand{\MARG}{\mathrm{MARG}}
+%\newcommand{\LOCAL}{\sett{L}}
+\newcommand{\LOCAL}{\mathrm{LOCAL}}
+
+
+\newcommand{\bigforallandall}[2]{\underset{\substack{{#1}\\{#2}}}{\text{\LARGE{$\forall$}}}}
+\newcommand{\bigforall}[1]{\underset{#1}{\text{\LARGE{$\forall$}}}}
+\newcommand{\bigexistsandexists}[2]{\underset{\substack{{#1}\\{#2}}}{\text{\LARGE{$\exists$}}}}
+\newcommand{\bigexists}[1]{\underset{#1}{\text{\LARGE{$\exists$}}}}
+\newcommand{\bigvarepsilon}{\mbox{\large$\varepsilon$}}
+
+\newcommand{\elide}[1]{{\emph{\textcolor{blue}{#1}}}}
+
+\DeclareMathOperator{\card}{\mathtt{card}}
+\DeclareMathOperator{\rank}{\mathtt{rank}}
+\DeclareMathOperator{\BlkDiag}{\mathtt{BlkDiag}}
+\DeclareMathOperator{\Diag}{\mathtt{Diag}}
+\DeclareMathOperator{\diag}{\mathtt{diag}}
+\DeclareMathOperator{\epi}{\mathtt{epi}}
+\DeclareMathOperator{\hypo}{\mathtt{hypo}}
+\DeclareMathOperator{\image}{\mathtt{Im}}
+\DeclareMathOperator{\kernel}{\mathtt{Ker}}
+\DeclareMathOperator{\relint}{\mathtt{ri}}
+\DeclareMathOperator{\interior}{\mathtt{int}}
+\DeclareMathOperator{\proj}{\mathtt{Proj}}
+\DeclareMathOperator{\co}{\mathtt{co}}
+\DeclareMathOperator{\volume}{\mathtt{vol}}
+\DeclareMathOperator{\Span}{\mathtt{span}}
+
+\DeclareMathOperator*{\argmax}{argmax}
+\DeclareMathOperator*{\argmin}{argmin}
+\DeclareMathOperator*{\Argmax}{Argmax}
+\DeclareMathOperator*{\Argmin}{Argmin}
+\DeclareMathOperator*{\argsup}{argsup}
+\DeclareMathOperator*{\arginf}{arginf}
+\DeclareMathOperator*{\Argsup}{Argsup}
+\DeclareMathOperator*{\Arginf}{Arginf}
+%\DeclareMathOperator*{\prob}{Pr}
+\DeclareMathOperator{\conv}{conv}
+\DeclareMathOperator*{\sgn}{sgn}
+
+
+\newenvironment{itemizesquish}{\begin{list}{\labelitemi}{\setlength{\itemsep}{0em}\setlength{\labelwidth}{0.5em}\setlength{\leftmargin}{\labelwidth}\addtolength{\leftmargin}{\labelsep}}}{\end{list}}
+
+
+\newenvironment{enumeratesquish}{\begin{list}{\addtocounter{enumi}{1}\labelenumi}{\setlength{\itemsep}{0em}\setlength{\labelwidth}{0.5em}\setlength{\leftmargin}{\labelwidth}\addtolength{\leftmargin}{\labelsep}}}{\end{list}\setcounter{enumi}{0}}
+
+\newcommand{\andre}[1]{{\textcolor{red}{\bf [{\sc afm:} #1]}}}
+
+
+\newcommand{\dataset}{{\cal D}}
+\newcommand{\fracpartial}[2]{\frac{\partial #1}{\partial  #2}}
+
+
+\begin{document}
+
+\author{Andr\'e Martins}
+\title{Neural Easy-First Algorithms}
+\date{\today}
+\maketitle
+
+\section{Problem Definition}
+
+I'm going to assume a sequence tagging problem, with inputs $\X = \x_1, \ldots, \x_L$ 
+and outputs $\Y = \y_1, \ldots, \y_L$, where each $\x_i \in \set{R}^V$ and each $\y_i \in \set{R}^K$ is a one-hot representation of a input symbol and an output label, respectively. 
+%For simplicity we assume that the number of possible labels is fixed and equal to $K$. 
+We assume a neural component (e.g. an embedding layer followed by a convolutional layer or an RNN) 
+produces intermediate representations (states) 
+$\HH = \hh_1, \ldots, \hh_L \in \set{R}^D$. 
+
+\section{Neural Easy-First Models}
+
+\subsection{Easy-First}
+
+Our inspiration are vanilla easy-first systems, which have been used for dependency parsing \citep{Goldberg2010} and for POS-tagging \citep{Ma2012,Ma2013}.
+
+\andre{there's also this recent paper, we need to take a look: \citet{Kiperwasser2016}}
+
+Applied to sequence tagging, a vanilla easy-first system works as follows. It maintains a set of positions already covered (call it $\sett{B}$) and the set of 
+predictions already made (a set $\sett{S}$ of pairs of the form $(i,\widehat{\y}_i)$). 
+Then:
+\begin{enumerate}
+\item Sets are initialized as empty, $\sett{B} = \sett{S} = \varnothing$. 
+\item Repeat until all positions are covered (i.e., until $\sett{S} = \{1,\ldots,L\}$):
+\begin{enumerate}
+\item For each $i \notin \sett{B}$ and each $\y_i$, use the model $\vectsymb{\theta}$ (e.g. a linear model) to 
+evaluate the score $\mathrm{score}_{\vectsymb{\theta}}(i,\y_i; \X, \sett{S})$, 
+based on the existing contextual output information $\sett{S}$ obtained in previous steps.
+\item Compute $\arg\max_{i\in \sett{S},\y_i} \mathrm{score}(i,\y_i; \X, \sett{S})$ 
+yielding a prediction $\widehat{\y}_i$ at position $i$; add the pair to set $\sett{S}$.
+\item Add $i$ to $\sett{B}$ and proceed. 
+\end{enumerate}
+\end{enumerate}
+
+The neural easy-first systems we propose here are end-to-end differentiable attention-based systems 
+which have a similar structure but the following changes:
+\begin{itemize}
+\item Instead of a set of covered positions $\sett{B}$ it maintains 
+a (continuous) cumulative attention distribution $\bb$ over the $L$ positions in the sequence. 
+\item Instead of picking the position  with the largest score at each step, 
+the ``easy-first'' behaviour is achieved by computing a (continuous) attention distribution $\aaa$ at each step.
+\item The cumulative contextual output information $\sett{S}$ will be replaced by a 
+``sketch'' matrix $\SSS$ of the state/predictions made so far---this will be different for the three models we next describe.
+\end{itemize}
+
+
+
+\subsection{Single-State Model}
+
+%The single-state model is a simplified version of the above that (i) drops the 
+%probabilistic interpretation of the sketches, treating them as arbitrary states; 
+%(ii) only updates a single sketch vector at the time. 
+
+Our neural easy-first single-state system is going to produce $N$ output sketch matrices
+$(\SSS^{n})_{n=1}^{N}$, where each $\SSS^{n} \in \set{R}^{D \times L}$ (i.e. one $D$-dimensional state vector per each position of the sequence). 
+The sketch matrices produced at each step may be regarded as more fine-grained 
+than the ones produced in the previous steps, in the sense that they cover more positions. This is done by doing simple rank-one updates via a sketch vector $\sss^n$. 
+The actual positions added to sketches are controlled by an attention mechanism, defined below. Earliest sketches are expected to be focused on ``easier'' positions in which later decisions will depend upon, so that the whole process mimics the idea of easy-first algorithms. 
+
+Let $\Delta^{L-1}$ be the probability simplex. 
+An attention distribution $\aaa^n \in \Delta^{L-1}$ is computed at the $n$th step. 
+A cumulative attention $\bb^{n} = \frac{\sum_{j=1}^n \aaa^j}{n}$ is also maintained.
+This attention serves two purposes: it will be used to condition the emitted sketch vector $\sss^{n}$; and it will serve to do the rank-one updates to the sketch matrix, via $\SSS^n = \SSS^{n-1} + \sss^n {\aaa^n}^{\top}$. 
+The final label probabilities will be computed by a position-wise softmax 
+over the columns of the last sketch matrix $\SSS^N$. 
+Cross-entropy can then be used as the loss function to optimize. 
+
+Given a sequence of states $\SSS = [\sss_1, \ldots, \sss_L] \in \set{R}^{D \times L}$, 
+we denote the convolution operation with width $r$ by 
+$\conv_r(\SSS) := [\sss_{(1-r):{1+r}}, \ldots, \sss_{(L-r):{L+r}}] \in \set{R}^{D(2R+1)\times L}$, 
+where we use zero-padding. 
+
+The overall forward equations of the single-state model are the following:
+\begin{enumerate}
+\item Initialize $\bb^{0} = \vect{1}/L$ (uniform distribution over words), 
+$\SSS^{0} = \vect{0}$ (zero sketch).
+\item For $N$ steps, $n=1,\ldots,N$, do:
+\begin{enumerate}
+\item Compute attention over words conditioned on the current cumulative sketch and the current cumulative attention:
+\begin{equation}\label{eq:attention}
+\aaa^{n} = \alpha(\HH, \SSS^{n-1}, \bb^{n-1}).
+\end{equation}
+One possible definition of the function $\alpha$ is as follows. 
+Set
+\begin{equation}
+z_i = \vectsymb{v}_i^{\top} \tanh (\matr{W}_{hz}\hh_i + \matr{W}_{sz}\sss^{n-1}_{(i-r):(i+r)} + \matr{W}_{bz} \bb^{n-1}_{(i-r):(i+r)} + \vectsymb{w}_z).
+\end{equation}
+Then, define $\aaa^{n} = \mathrm{softmax}(\vectsymb{z})$, or alternatively $\aaa^{n} = \mathrm{sparsemax}(\vectsymb{z})$.
+\item Update cumulative attention:
+\begin{equation}
+\bb^{n} = \frac{(n-1) \bb^{n-1} + \aaa^n}{n}, \quad \text{so that $\bb^{n} = \frac{\sum_{j=1}^n \aaa^j}{n}$}.
+\end{equation}
+\item Predict a new sketch vector, focused on the current attention and conditioned on the current cumulative sketch:
+\begin{equation}
+\sss^n = \beta(\HH, \SSS^{n-1}, \aaa^{n}).
+\end{equation}
+A possible function $\beta$ is as follows. 
+Start by computing a state representation using attention-based averaging:
+\begin{equation}
+\bar{\hh} = H\aaa^{n}.
+\end{equation}
+Note that, as the attention probability is more peaked, this will tend to select an 
+individual word's state. 
+Now make a convolution over the current cumulative sketch and attention-based averaging to obtain a ``contextual sketch'' around the selected word: 
+\begin{equation}
+\bar{\sss} = \conv_r(\SSS^{n-1})\aaa^{n}.
+\end{equation}
+Finally, define
+\begin{equation}
+\sss^n = \tanh (\matr{W}_{hs}\bar{\hh} + \matr{W}_{ss}\bar{\sss} + \vectsymb{w}_s).
+\end{equation}
+\item Update cumulative sketch:
+\begin{equation}
+\SSS^n = \SSS^{n-1} + \sss^n {\aaa^n}^{\top}, 
+\quad \text{so that $\SSS^n = \sum_{j=1}^n \sss^j {\aaa^j}^{\top}$}.
+\end{equation}
+\end{enumerate}
+\item Compute the final prediction (final label probabilities):
+\begin{equation}
+\vectsymb{p}_i = \mathrm{softmax}(\matr{W}_{sp}\sss^{N}_i + \vectsymb{w}_p), \,\, \forall i = 1,\ldots,L.
+\end{equation}
+\end{enumerate}
+
+One possibility is to omit 
+$\bb^{n-1}$ in \eqref{eq:attention}. 
+In a way, the cumulative sketch already carries information 
+about what parts of the input have been processed.
+
+
+\subsection{Full-State Model}
+
+The overall forward equations of the full-state model are very similar to the ones in the single-state model. The only change is in steps (c) and (d), 
+which are now as follows:
+\begin{enumerate}
+\item[(c)] Predict a new full sketch sequence, focused on the current attention and conditioned on the current cumulative sketch:
+\begin{equation}
+\SSS^n = \beta(\HH, \SSS^{n-1}, \aaa^{n}).
+\end{equation}
+A possible function $\beta$ is as follows. For $i=1,\ldots,L$:
+\begin{equation}
+\sss_i^n = \sss_i^{n-1} + a_i^n \tanh (\matr{W}_{hs}\hh_i + \matr{W}_{ss}\sss^{n-1}_{(i-r):(i+r)} + \vectsymb{w}_s).
+\end{equation}
+\item[(d)] The cumulative sketch is just the $\SSS^{n}$ above, 
+$\SSS^{n} = [\sss_1^n, \ldots, \sss_L^n]$.
+\end{enumerate}
+
+Again, one possibility is to omit 
+$\bb^{n-1}$ in \eqref{eq:attention}. 
+In a way, the cumulative sketch already carries information 
+about what parts of the input have been processed.
+
+
+
+\subsection{Probabilistic Sketch Model}
+
+The probabilistic sketch model is similar to the full-state one, except that 
+the sketches are now representing actual label probabilities. That is, the system is going to produce $N$ output sketch sequences 
+$(\Z^{n})_{n=1}^{N}$, where each $\Z^{n} = \z^{n}_1, \ldots, \z^{n}_L$, each $\z^{n}_i$ being in the probability simplex $\Delta^{K-1}$. 
+Each output sketch sequence may be regarded as sequence of label probabilities focused on a particular position in the sequence. The actual position will be controlled by an attention mechanism, defined below. Earliest sketches are expected to be focused on ``easier'' positions in which later decisions will depend upon, so that the whole process mimics the idea of easy-first algorithms. 
+
+An attention distribution $\aaa^n \in \Delta^{L-1}$ is computed at the $n$th step. 
+A cumulative attention $\bb^{n} = \frac{\sum_{j=1}^n \aaa^j}{n}$ is also maintained.
+This attention serves two purposes: it will be used to condition the sketch sequence $\Z^{n}$; and it will rescale this sequence by multiplying $a^{n}_i \z^{n}_i$. A cumulative sketch $\SSS^{n} = \sss^{n}_1, \ldots, \sss^{n}_L$ will be computed via $\sss^{n}_i = \sum_{j=1}^n a^{j}_i \z^{j}_i$; note that each $\sss^{n}_i$ will be non-negative but unnormalized. 
+The final label probabilities will be computed via 
+$\z_i = \sss^{N}_i / \vect{1}^{\top}\sss^{N}_i$. 
+Cross-entropy can then be used as the loss function to optimize. 
+
+The overall forward equations are the following:
+\begin{enumerate}
+\item Initialize $\bb^{0} = \vect{1}/L$ (uniform distribution over words), 
+$\SSS^{0} = \vect{0}$ (zero sketch).
+\item For $N$ steps, $n=1,\ldots,N$, do:
+\begin{enumerate}
+\item Compute attention over words conditioned on the current cumulative sketch and the current cumulative attention:
+\begin{equation}\label{eq:attention}
+\aaa^{n} = \alpha(\HH, \SSS^{n-1}, \bb^{n-1}).
+\end{equation}
+\item Update cumulative attention:
+\begin{equation}
+\bb^{n} = \frac{(n-1) \bb^{n-1} + \aaa^n}{n}, \quad \text{so that $\bb^{n} = \frac{\sum_{j=1}^n \aaa^j}{n}$}.
+\end{equation}
+\item Predict a new sketch, focused on the current attention and conditioned on the current cumulative sketch:
+\begin{equation}
+\Z^{n} = \beta(\HH, \SSS^{n-1}, \aaa^{n}).
+\end{equation}
+\item Update cumulative sketch:
+\begin{equation}
+\sss^{n}_i = \sss^{n-1}_i + a^n_i \z^n_i, \quad \text{so that $\sss^{n}_i = \sum_{j=1}^n a^{j}_i \z^{j}_i$}.
+\end{equation}
+\end{enumerate}
+\item Compute the final prediction (final label probabilities):
+\begin{equation}
+\vectsymb{p}_i = \frac{\sss^{N}_i}{\vect{1}^{\top}\sss^{N}_i}
+\end{equation}
+\end{enumerate}
+
+Note that there is some redundancy between $\bb^n$ and $\SSS^{n}$, 
+since we have $\bb^n = \frac{\vect{1}^{\top}\SSS^n}{n}$. Maybe we can omit 
+$\bb^{n-1}$ in \eqref{eq:attention}.
+
+
+
+
+\bibliography{neural_easy_first}
+\bibliographystyle{unsrtnat}
+
+\end{document}
