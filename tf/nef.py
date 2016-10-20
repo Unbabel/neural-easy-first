@@ -9,7 +9,9 @@ import math
 from embedding import *
 import logging
 import datetime
+import os
 from easy_first_model import *
+import pdb
 
 """
 Tensorflow implementation of the neural easy-first model
@@ -37,7 +39,14 @@ tf.app.flags.DEFINE_integer("batch_size", 200,
 
 tf.app.flags.DEFINE_integer("word_cutoff", 1, "Word cutoff.")
 
-tf.app.flags.DEFINE_string("data_dir", "pos_tagging/data", "Data directory")
+tf.app.flags.DEFINE_string("training_file",
+                           "pos_tagging/data/en-ud-normalized_train_sample.conll.tagging",
+                           #"pos_tagging/data/en-ud-normalized_train.conll.tagging",
+                           "Training file.")
+tf.app.flags.DEFINE_string("dev_file",
+                           #"pos_tagging/data/en-ud-normalized_dev.conll.tagging",
+                           "pos_tagging/data/en-ud-normalized_train_sample.conll.tagging",
+                           "Dev file.")
 tf.app.flags.DEFINE_string("model_dir", "pos_tagging/models", "Model directory")
 tf.app.flags.DEFINE_string("sketch_dir", "pos_tagging/sketches",
                            "Directory where sketch dumps are stored")
@@ -47,7 +56,7 @@ tf.app.flags.DEFINE_float("max_gradient_norm", -1,
 
 tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
 tf.app.flags.DEFINE_string("embeddings",
-                           "../data/WMT2016/embeddings/polyglot-en.train.basic_features_with_tags.7000.extended.pkl",
+                           "pos_tagging/data/embeddings/polyglot-en.pkl",
                            "path to word embeddings")
 
 tf.app.flags.DEFINE_boolean("update_embeddings", False, "update the embeddings")
@@ -56,10 +65,10 @@ tf.app.flags.DEFINE_integer("embedding_size", 64,
                             "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("hidden_size", 20, "dimensionality of hidden layer")
 tf.app.flags.DEFINE_integer("lstm_size", 20, "number of LSTM-RNN encoder units")
-tf.app.flags.DEFINE_boolean("bilstm", False, "bi-directional LSTM-RNN encoder")
+tf.app.flags.DEFINE_boolean("use_bilstm", False, "bi-directional LSTM-RNN encoder")
 tf.app.flags.DEFINE_integer("context_size", 2, "context size")
 
-tf.app.flags.DEFINE_boolean("concatenate", True,
+tf.app.flags.DEFINE_boolean("concatenate_last_layer", True,
                             "concatenating s_i and h_i for prediction")
 tf.app.flags.DEFINE_float("attention_discount_factor", 0.0,
                           "Attention discount factor")
@@ -80,7 +89,7 @@ tf.app.flags.DEFINE_boolean("track_sketches", False,
                             "keep track of the sketches during learning")
 FLAGS = tf.app.flags.FLAGS
 
-log_file_path = FLAGS.model_dir + \
+log_file_path = FLAGS.model_dir + os.sep + \
                 str(datetime.datetime.now()).replace(" ", "-") + ".training.log"
 logging.basicConfig(filename=log_file_path)
 logger = logging.getLogger("NEF")
@@ -88,9 +97,9 @@ logger.setLevel(logging.INFO)
 
 
 
-def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
-                 forward_only=False, src_embeddings=None, tgt_embeddings=None,
-                 class_weights=None):
+def create_model(session, buckets, vocabulary_size, num_labels,
+                 is_train=True, embeddings=None,
+                 label_weights=None):
     """
     Create a model
     :param session:
@@ -99,21 +108,35 @@ def create_model(session, buckets, src_vocab_size, tgt_vocab_size,
     """
     np.random.seed(123)
     tf.set_random_seed(123)
-    model = EasyFirstModel(K=FLAGS.K, D=FLAGS.D, N=FLAGS.N, J=FLAGS.J, r=FLAGS.r,
-                           src_vocab_size=src_vocab_size, tgt_vocab_size=tgt_vocab_size,
+    model = EasyFirstModel(num_labels=num_labels,
+                           embedding_size=FLAGS.embedding_size,
+                           hidden_size=FLAGS.hidden_size,
+                           context_size=FLAGS.context_size,
+                           vocabulary_size=vocabulary_size,
+                           lstm_size=FLAGS.lstm_size,
+                           concatenate_last_layer=FLAGS.concatenate_last_layer,
+                           use_bilstm=FLAGS.use_bilstm,
                            batch_size=FLAGS.batch_size,
-                           optimizer=FLAGS.optimizer, learning_rate=FLAGS.learning_rate,
-                           max_gradient_norm=FLAGS.max_gradient_norm, lstm_units=FLAGS.lstm_units,
-                           concat=FLAGS.concat, forward_only=forward_only, buckets=buckets,
-                           src_embeddings=src_embeddings, tgt_embeddings=tgt_embeddings,
-                           window_size=3, class_weights=class_weights, l2_scale=FLAGS.l2_scale,
-                           keep_prob=FLAGS.keep_prob, keep_prob_sketch=FLAGS.keep_prob_sketch,
-                           model_dir=FLAGS.model_dir, bilstm=FLAGS.bilstm, update_emb=FLAGS.update_emb,
-                           model=FLAGS.model, activation=FLAGS.activation, l1_scale=FLAGS.l1_scale,
-                           track_sketches=FLAGS.track_sketches)
+                           optimizer=FLAGS.optimizer,
+                           learning_rate=FLAGS.learning_rate,
+                           max_gradient_norm=FLAGS.max_gradient_norm,
+                           keep_prob=FLAGS.keep_prob,
+                           keep_prob_sketch=FLAGS.keep_prob_sketch,
+                           label_weights=label_weights,
+                           l2_scale=FLAGS.l2_scale,
+                           l1_scale=FLAGS.l1_scale,
+                           embeddings=embeddings,
+                           update_embeddings=FLAGS.update_embeddings,
+                           activation=FLAGS.activation,
+                           buckets=buckets,
+                           track_sketches=FLAGS.track_sketches,
+                           model_dir=FLAGS.model_dir,
+                           is_train=is_train)
     checkpoint = tf.train.get_checkpoint_state(FLAGS.model_dir)
-    if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) and FLAGS.restore:
-        logger.info("Reading model parameters from %s" % checkpoint.model_checkpoint_path)
+    if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) \
+       and FLAGS.restore:
+        logger.info("Reading model parameters from %s" %
+                    checkpoint.model_checkpoint_path)
         model.saver.restore(session, checkpoint.model_checkpoint_path)
     else:
         logger.info("Creating model with fresh parameters")
@@ -137,23 +160,24 @@ def train():
         intra_op_parallelism_threads=FLAGS.threads)) as sess:
 
         # Load data and embeddings.
-        train_dir = FLAGS.data_dir+"/task2_en-de_training/train.features"
-        dev_dir = FLAGS.data_dir+"/task2_en-de_dev/dev.features"
+        filepath_train = FLAGS.training_file
+        filepath_dev = FLAGS.dev_file
 
         if FLAGS.embeddings == "":
             embeddings = None
         else:
-            embeddings = load_embeddings(FLAGS.embeddings)
+            embeddings = load_embedding(FLAGS.embeddings)
 
-        train_feature_vectors, train_tgt_sentences, train_labels, train_label_dict, \
-        train_src_embeddings, train_tgt_embeddings = load_data(train_dir, src_embeddings,
-                                                               tgt_embeddings,
-                                                               max_sent=FLAGS.max_train_data_size,
-                                                               train=True, labeled=True)
+        train_sentences, train_labels, train_label_dict, train_embeddings = \
+            load_pos_data(filepath_train, embeddings, label_dict={}, train=True)
 
-        dev_feature_vectors, dev_tgt_sentences, dev_labels, dev_label_dict = \
-            load_data(dev_dir, train_src_embeddings, train_tgt_embeddings, train=False,
-                      labeled=True)  # use training vocab for dev
+        # Use training vocab/labels for dev.
+        dev_sentences, dev_labels, dev_label_dict = \
+            load_pos_data(filepath_dev, train_embeddings,
+                          label_dict=train_label_dict, train=False)
+
+        vocab_size = train_embeddings.vocab_size()
+        num_labels = len(train_label_dict)
 
         if FLAGS.embeddings == "":
             embeddings = embedding.Embedding(None, train_embeddings.word2id,
@@ -162,7 +186,6 @@ def train():
                                              train_embeddings.PAD_id,
                                              train_embeddings.end_id,
                                              train_embeddings.start_id)
-            vocab_size = FLAGS.vocab_size # Do we need this?
 
         logger.info("vocab size: %d" % vocab_size)
 
@@ -180,19 +203,22 @@ def train():
 
         # equal bucket sizes
         data_buckets, reordering_indexes, bucket_edges = buckets_by_length(
-            np.asarray(train_feature_vectors),
-            np.asarray(train_labels), buckets=FLAGS.buckets,
+            np.asarray(train_sentences),
+            np.asarray(train_labels),
+            buckets=FLAGS.buckets,
             max_len=maximum_sentence_length, mode="pad")
+
         train_buckets = data_buckets
         train_reordering_indexes = reordering_indexes
 
         # bucketing dev data
-        dev_buckets, dev_reordering_indexes = put_in_buckets(np.asarray(dev_feature_vectors),
+        dev_buckets, dev_reordering_indexes = put_in_buckets(np.asarray(dev_sentences),
                                                              np.asarray(dev_labels),
-                                                             buckets=bucket_edges)
+                                                             buckets=bucket_edges) # Is this buckets argument correct?
 
         # create the model
-        model = create_model(sess, bucket_edges, vocab_size, False, embeddings)
+        model = create_model(sess, bucket_edges, vocab_size, num_labels,
+                             is_train=True, embeddings=embeddings)
 
         train_buckets_sizes = {i: len(indx) \
                                for i, indx in train_reordering_indexes.items()}
@@ -255,6 +281,7 @@ def train():
                     y_batch = bucket_ys[batch_samples]
                     mask_batch = bucket_masks[batch_samples]
                     seq_lens_batch = bucket_seq_lens[batch_samples]
+                    pdb.set_trace()
                     step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
                                                                                x_batch, y_batch,
                                                                                mask_batch,
