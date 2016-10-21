@@ -315,6 +315,7 @@ class EasyFirstModel(object):
             # extract 2r+1 rows around i for each batch
             context_j = time_major_matrix[j-r:j+r+1, :, :]  # 2*r+1 x 2*state_size x batch_size
             # concatenate
+            pdb.set_trace()
             context_j = tf.reshape(context_j, [(2*r+1)*2*state_size, self.batch_size])  # (2*r+1)*(state_size) x batch_size
             contexts.append(context_j)
         contexts = tf.pack(contexts)  # L x (2*r+1)* 2*(state_size) x batch_size
@@ -509,102 +510,101 @@ class EasyFirstModel(object):
 
 
         with tf.name_scope("sketching"):
-            W_hss = tf.get_variable(name="W_hss",
-                                    shape=[2*state_size*(2*self.context_size+1),
-                                           state_size],
-                                    initializer=\
+            from layers import SketchLayer
+            sketch_layer = SketchLayer(sequence_length=max_sequence_length,
+                                       input_size=self.hidden_size,
+                                       context_size=self.context_size,
+                                       hidden_size=self.hidden_size,
+                                       batch_size=batch_size,
+                                       batch_mask=mask,
+                                       keep_prob=self.keep_prob_sketch)
+            S, sketches_tf = sketch_layer.forward(H)
+
+            if False:
+                W_hss = tf.get_variable(name="W_hss",
+                                        shape=[2*state_size*(2*self.context_size+1),
+                                               state_size],
+                                        initializer=\
                                         tf.contrib.layers.xavier_initializer(
                                             uniform=True, dtype=tf.float32))
-            w_s = tf.get_variable(name="w_s", shape=[state_size],
-                                  initializer=\
+                w_s = tf.get_variable(name="w_s", shape=[state_size],
+                                      initializer=\
                                       tf.random_uniform_initializer(
                                           dtype=tf.float32))
-            w_z = tf.get_variable(name="w_z", shape=[self.hidden_size],
-                                  initializer=tf.random_uniform_initializer(
-                                      dtype=tf.float32))
-            v = tf.get_variable(name="v", shape=[self.hidden_size, 1],
-                                initializer=tf.random_uniform_initializer(
-                                    dtype=tf.float32))
-            W_hsz = tf.get_variable(name="W_hsz",
-                                    shape=[2*state_size*(2*self.context_size+1),
-                                           self.hidden_size],
-                                    initializer=\
+                w_z = tf.get_variable(name="w_z", shape=[self.hidden_size],
+                                      initializer=tf.random_uniform_initializer(
+                                          dtype=tf.float32))
+                v = tf.get_variable(name="v", shape=[self.hidden_size, 1],
+                                    initializer=tf.random_uniform_initializer(
+                                        dtype=tf.float32))
+                W_hsz = tf.get_variable(name="W_hsz",
+                                        shape=[2*state_size*(2*self.context_size+1),
+                                               self.hidden_size],
+                                        initializer=\
                                         tf.contrib.layers.xavier_initializer(
                                             uniform=True, dtype=tf.float32))
-            # dropout within sketch
-            # see https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/nn_ops.py#L1078 (inverted dropout)
-            W_hss_mask = \
-                tf.to_float(tf.less_equal(tf.random_uniform(tf.shape(W_hss)),
-                                          self.keep_prob_sketch)) * \
-                tf.inv(self.keep_prob_sketch)
+                # dropout within sketch
+                # see https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/nn_ops.py#L1078 (inverted dropout)
+                W_hss_mask = \
+                             tf.to_float(tf.less_equal(tf.random_uniform(tf.shape(W_hss)),
+                                                       self.keep_prob_sketch)) * \
+                             tf.inv(self.keep_prob_sketch)
 
-            S = tf.zeros(shape=[batch_size, max_sequence_length, state_size], dtype=tf.float32)
-            HS = tf.concat(2, [H, S])
-            sketches = []
-            # Cumulative attention.
-            b = tf.ones(shape=[batch_size, max_sequence_length],
-                        dtype=tf.float32) / max_sequence_length
-            #b = tf.zeros(shape=[batch_size, L], dtype=tf.float32)
-            b_n = b
+                S = tf.zeros(shape=[batch_size, max_sequence_length, state_size], dtype=tf.float32)
+                HS = tf.concat(2, [H, S])
+                sketches = []
+                # Cumulative attention.
+                b = tf.ones(shape=[batch_size, max_sequence_length],
+                            dtype=tf.float32) / max_sequence_length
+                #b = tf.zeros(shape=[batch_size, L], dtype=tf.float32)
+                b_n = b
 
-            padding_hs_col = \
-                tf.constant([[0, 0],
-                             [self.context_size, self.context_size],
+                padding_hs_col = \
+                                 tf.constant([[0, 0],
+                                              [self.context_size, self.context_size],
                              [0, 0]], name="padding_hs_col")
-            n = tf.constant(1, dtype=tf.int32, name="n")
+                n = tf.constant(1, dtype=tf.int32, name="n")
 
-            num_sketches = max_sequence_length
-            if num_sketches > 0:
-                for i in xrange(num_sketches):
-                    n, HS, b_n, a_n = self._sketch_step(n,
-                                                        max_sequence_length,
-                                                        state_size,
-                                                        W_hsz, w_z, v,
-                                                        W_hss, W_hss_mask,
-                                                        w_s,
-                                                        mask,
-                                                        HS,
-                                                        padding_hs_col,
-                                                        b_n)
-                    sketch = tf.split(2, 2, HS)[1]
-                    # append attention to sketch
-                    #sketch_attention_cumulative = tf.concat(2, [sketch, tf.expand_dims(a_n, 2), tf.expand_dims(b_n, 2)])
-                    sketch_attention_cumulative = tf.concat(2, [tf.expand_dims(a_n, 2), tf.expand_dims(b_n, 2)])
-                    sketches.append(sketch_attention_cumulative)
+                num_sketches = max_sequence_length
+                if num_sketches > 0:
+                    for i in xrange(num_sketches):
+                        n, HS, b_n, a_n = self._sketch_step(n,
+                                                            max_sequence_length,
+                                                            state_size,
+                                                            W_hsz, w_z, v,
+                                                            W_hss, W_hss_mask,
+                                                            w_s,
+                                                            mask,
+                                                            HS,
+                                                            padding_hs_col,
+                                                            b_n)
+                        sketch = tf.split(2, 2, HS)[1]
+                        # append attention to sketch
+                        #sketch_attention_cumulative = tf.concat(2, [sketch, tf.expand_dims(a_n, 2), tf.expand_dims(b_n, 2)])
+                        sketch_attention_cumulative = tf.concat(2, [tf.expand_dims(a_n, 2), tf.expand_dims(b_n, 2)])
+                        sketches.append(sketch_attention_cumulative)
 
-            sketches_tf = tf.pack(sketches)
+                sketches_tf = tf.pack(sketches)
 
 
 
         with tf.name_scope("scoring"):
-
-            w_p = tf.get_variable(name="w_p", shape=[self.num_labels],
-                                   initializer=tf.random_uniform_initializer(dtype=tf.float32))
-            if self.concatenate_last_layer:
-                wsp_size = 2*state_size
-            else:
-                wsp_size = state_size
-            W_sp = tf.get_variable(name="W_sp", shape=[wsp_size, self.num_labels],
-                                   initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
-
-            if label_weights is not None:
-                label_weights = tf.constant(self.label_weights, name="label_weights")
+            from layers import ScoreLayer
 
             if self.concatenate_last_layer:
-                S = HS
+                state_size = 2*self.hidden_size
+                S = tf.concat(2, [H, S])
             else:
-                S = tf.slice(HS, [0, 0, state_size], [batch_size, L, state_size])
+                state_size = self.hidden_size
 
-            f = lambda score_input : self._score_predict_loss(score_input, state_size, W_sp, w_p)
-            scores_pred = tf.map_fn(f,
-                                    [tf.transpose(S, [1, 0, 2]), tf.transpose(y, [1,0])],
-                                    dtype=[tf.int64, tf.float32])  # elems are unpacked along dim 0 -> L
-            pred_labels = scores_pred[0]
-            losses = scores_pred[1]
+            score_layer = ScoreLayer(sequence_length=max_sequence_length,
+                                     input_size=state_size,
+                                     num_labels=self.num_labels,
+                                     label_weights=label_weights,
+                                     batch_size=batch_size,
+                                     batch_mask=mask)
 
-            pred_labels = mask*tf.transpose(pred_labels, [1, 0])  # masked, batch_size x L
-            losses = tf.reduce_mean(tf.cast(mask, tf.float32)*tf.transpose(losses, [1, 0]),
-                                    1)  # masked, batch_size x 1
+            losses, pred_labels = score_layer.forward(S, y)
             losses_reg = losses
             if self.l2_scale > 0:
                 weights_list = [W_hss, W_sp]  # M_src, M_tgt word embeddings not included
@@ -616,5 +616,48 @@ class EasyFirstModel(object):
                 l1_loss = tf.contrib.layers.apply_regularization(
                     tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
                 losses_reg += l1_loss
+
+
+            if False:
+                w_p = tf.get_variable(name="w_p", shape=[self.num_labels],
+                                      initializer=tf.random_uniform_initializer(dtype=tf.float32))
+                if self.concatenate_last_layer:
+                    wsp_size = 2*state_size
+                else:
+                    wsp_size = state_size
+                W_sp = tf.get_variable(name="W_sp", shape=[wsp_size, self.num_labels],
+                                       initializer=tf.contrib.layers.xavier_initializer(uniform=True, dtype=tf.float32))
+
+                if label_weights is not None:
+                    label_weights = tf.constant(self.label_weights, name="label_weights")
+
+                #if self.concatenate_last_layer:
+                    #S = HS
+                #else:
+                    #S = tf.slice(HS, [0, 0, state_size], [batch_size, L, state_size])
+                if self.concatenate_last_layer:
+                    S = tf.concat(2, [H, S])
+
+                f = lambda score_input : self._score_predict_loss(score_input, state_size, W_sp, w_p)
+                scores_pred = tf.map_fn(f,
+                                        [tf.transpose(S, [1, 0, 2]), tf.transpose(y, [1,0])],
+                                        dtype=[tf.int64, tf.float32])  # elems are unpacked along dim 0 -> L
+                pred_labels = scores_pred[0]
+                losses = scores_pred[1]
+
+                pred_labels = mask*tf.transpose(pred_labels, [1, 0])  # masked, batch_size x L
+                losses = tf.reduce_mean(tf.cast(mask, tf.float32)*tf.transpose(losses, [1, 0]),
+                                        1)  # masked, batch_size x 1
+                losses_reg = losses
+                if self.l2_scale > 0:
+                    weights_list = [W_hss, W_sp]  # M_src, M_tgt word embeddings not included
+                    l2_loss = tf.contrib.layers.apply_regularization(
+                        tf.contrib.layers.l2_regularizer(self.l2_scale), weights_list=weights_list)
+                    losses_reg += l2_loss
+                if self.l1_scale > 0:
+                    weights_list = [W_hss, W_sp]
+                    l1_loss = tf.contrib.layers.apply_regularization(
+                        tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
+                    losses_reg += l1_loss
 
         return losses, losses_reg, pred_labels, M, sketches_tf

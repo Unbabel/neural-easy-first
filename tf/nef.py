@@ -34,7 +34,7 @@ tf.app.flags.DEFINE_float("l1_scale", 0, "L1 regularization constant")
 tf.app.flags.DEFINE_string("optimizer", "adam",
                            "Optimizer [sgd, adam, adagrad, adadelta, momentum]")
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
-tf.app.flags.DEFINE_integer("batch_size", 200,
+tf.app.flags.DEFINE_integer("batch_size", 5, #200,
                             "Batch size to use during training.")
 
 tf.app.flags.DEFINE_integer("word_cutoff", 1, "Word cutoff.")
@@ -54,7 +54,8 @@ tf.app.flags.DEFINE_string("sketch_dir", "pos_tagging/sketches",
 tf.app.flags.DEFINE_float("max_gradient_norm", -1,
                           "max gradient norm for clipping (-1: no clipping)")
 
-tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
+tf.app.flags.DEFINE_integer("buckets", 1, "number of buckets")
+#tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
 tf.app.flags.DEFINE_string("embeddings",
                            "pos_tagging/data/embeddings/polyglot-en.pkl",
                            "path to word embeddings")
@@ -281,7 +282,6 @@ def train():
                     y_batch = bucket_ys[batch_samples]
                     mask_batch = bucket_masks[batch_samples]
                     seq_lens_batch = bucket_seq_lens[batch_samples]
-                    pdb.set_trace()
                     step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
                                                                                x_batch, y_batch,
                                                                                mask_batch,
