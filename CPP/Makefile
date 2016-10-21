@@ -11,7 +11,7 @@ all: attentive_quality_estimator attentive_quality_estimator_test
 attentive_quality_estimator_test: $(OBJS) attentive_quality_estimator_test.o
 	$(CC) $(OBJS) attentive_quality_estimator_test.o $(LFLAGS) -o attentive_quality_estimator_test
 
-attentive_quality_estimator_test.o: attentive_quality_estimator_test.cpp lookup_layer.h linear_layer.h rnn_layer.h attention_layer.h alignment_layer.h concatenator_layer.h feedforward_layer.h softmax_layer.h layer.h
+attentive_quality_estimator_test.o: attentive_quality_estimator_test.cpp lookup_layer.h linear_layer.h rnn_layer.h attention_layer.h alignment_layer.h concatenator_layer.h feedforward_layer.h softmax_layer.h low_rank_update_layer.h layer.h
 	$(CC) $(CFLAGS) attentive_quality_estimator_test.cpp
 
 attentive_quality_estimator: $(OBJS) attentive_quality_estimator.o

@@ -62,7 +62,16 @@ template<typename Real> class EasyFirstLayer : public Layer<Real> {
       const Vector<Real> &sketch_vector = feedforward_layer_->GetOutput(0);
       const Vector<Real> &attention_probabilities = attention_->GetOutput(0);
 
-      S += sketch_vector * attention_probabilities.transpose();
+      low_rank_update_layer_->SetNumInputs(3);
+      low_rank_update_layer_->SetNumOutputs(1);
+      network_.ConnectLayers(sketch_layer_, low_rank_update_layer_,
+                             0, 0);
+      network_.ConnectLayers(feedforward_layer_, low_rank_update_layer_,
+                             0, 1);
+      network_.ConnectLayers(attention_layer_, low_rank_update_layer_,
+                             0, 2);
+
+      //S += sketch_vector * attention_probabilities.transpose();
     }
 
     // TODO.
@@ -80,6 +89,7 @@ template<typename Real> class EasyFirstLayer : public Layer<Real> {
   ConvolutionalLayer<Real> *convolutional_layer_;
   ConcatenatorLayer<Real> *concatenator_layer_;
   FeedforwardLayer<Real> *feedforward_layer_;
+  LowRankUpdateLayer<Real> *low_rank_update_layer_;
 };
 
 #endif /* EASY_FIRST_LAYER_H_ */

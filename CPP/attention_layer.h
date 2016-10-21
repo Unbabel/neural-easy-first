@@ -15,10 +15,10 @@ struct AttentionTypes {
 // - An input X (input_size-by-N) whose columns are subject to attention.
 // - Control variables Y (control_size-by-M) whose columns are controllers for
 // the attention mechanisms.
-// - The output will be a matrix Xtilde (input_size-by-M) whose columns are
+// - The first output is a matrix Xtilde (input_size-by-M) whose columns are
 // an weighted average of the rows in X determined by the M attention
 // mechanisms.
-// TODO: return also as output the probability matrix (N-by-M).
+// - The second output (optional) is the probability matrix (N-by-M).
 template<typename Real> class AttentionLayer : public Layer<Real> {
  public:
   AttentionLayer() {}
@@ -143,10 +143,14 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
       }
     }
 
-    this->SetOutput(X * P_);
+    this->SetOutput(0, X * P_);
+    if (this->GetNumOutputs() == 2) {
+      this->SetOutput(1, P_);
+    }
   }
 
   void RunBackward() {
+    assert(this->GetNumOutputs() == 1); // Not done yet for 2 outputs.
     assert(this->GetNumInputs() == 2);
     const Matrix<Real> &X = *(this->inputs_[0]); // Input subject to attention.
     const Matrix<Real> &Y = *(this->inputs_[1]); // Control inputs.
@@ -154,7 +158,7 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
     Matrix<Real> *dY = this->input_derivatives_[1];
     int num_attention_mechanisms = Y.cols();
     int length = X.cols();
-    dP_.noalias() = X.transpose() * this->GetOutputDerivative();
+    dP_.noalias() = X.transpose() * this->GetOutputDerivative(0);
 
     dz_.resize(num_attention_mechanisms);
     for (int m = 0; m < num_attention_mechanisms; ++m) {
@@ -214,7 +218,7 @@ template<typename Real> class AttentionLayer : public Layer<Real> {
       *dX += Wxz_->transpose() * dzraw;
       // TODO: do this out of the loop like:
       // *dX += this->GetOutputDerivative() * P_.transpose();
-      *dX += this->GetOutputDerivative().col(m) * P_.col(m).transpose();
+      *dX += this->GetOutputDerivative(0).col(m) * P_.col(m).transpose();
       dY->col(m) += Wyz_->transpose() * dzraw_sum;
 
       *dwzp_ += z_[m] * Jdp;
