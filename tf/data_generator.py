@@ -207,7 +207,7 @@ def generate_hmm_data(numbers_of_instances, instance_length, vocab_size, number_
         x, y = [], []
         for i in range(number_of_instances):
             # generate input
-            x_i_len = np.random.randint(1, instance_length+1, )
+            x_i_len = np.random.randint(1, instance_length+1)
             x_i = np.array([[np.random.randint(vocab_size)] for j in range(x_i_len)])
             y_i = hmm_model.predict(x_i)
             # or sample from model directly: x_i, y_i = hmm_model.sample(x_i_len)

@@ -6,7 +6,7 @@ import codecs
 import embedding
 from scipy import stats
 import operator
-
+import logging
 
 def load_embedding(pkl_file):
     word2id = {}
@@ -23,7 +23,7 @@ def load_embedding(pkl_file):
         for i, w in enumerate(words):
             word2id[w] = i
             id2word[i] = w
-    print "Loaded embeddings for %d words with dimensionality %d" % (len(words), len(vectors[0]))
+    logging.info("Loaded embeddings for %d words with dimensionality %d" % (len(words), len(vectors[0])))
     #print "Special tokens:", UNK_id, PAD_id, start_id, end_id
     emb = embedding.Embedding(vectors, word2id, id2word, UNK_id, PAD_id, end_id, start_id)
     return emb
@@ -78,13 +78,13 @@ def load_vocabs(train_src, train_tgt, train_features, src_limit,tgt_limit, freq_
     src_vocab_by_freq = sorted(src_vocab.items(), key=operator.itemgetter(1), reverse=True)
     tgt_vocab_by_freq = sorted(tgt_vocab.items(), key=operator.itemgetter(1), reverse=True)
 
-    print "found %d tokens in train src vocabulary" % len(src_vocab_by_freq)
-    print "found %d tokens in train tgt vocabulary" % len(tgt_vocab_by_freq)
+    logging.info("found %d tokens in train src vocabulary" % len(src_vocab_by_freq))
+    logging.info("found %d tokens in train tgt vocabulary" % len(tgt_vocab_by_freq))
 
     #cut off infrequent ones
     if src_limit > 0:
         src_vocab_by_freq = src_vocab_by_freq[:src_limit]
-        print "cutting down src vocab to %d tokens" % len(src_vocab_by_freq)
+        logging.info("cutting down src vocab to %d tokens" % len(src_vocab_by_freq))
     if tgt_limit > 0:
         tgt_vocab_by_freq = tgt_vocab_by_freq[:tgt_limit]
         print "cutting down tgt vocab to %d tokens" % len(tgt_vocab_by_freq)
@@ -96,8 +96,8 @@ def load_vocabs(train_src, train_tgt, train_features, src_limit,tgt_limit, freq_
     src_words = list(set(map(operator.itemgetter(0), src_vocab_by_freq)).union(vocab))
     tgt_words = list(set(map(operator.itemgetter(0), tgt_vocab_by_freq)).union(vocab))
 
-    print "final %d tokens in src vocabulary" % len(src_words)
-    print "final %d tokens in tgt vocabulary" % len(tgt_words)
+    logging.info("final %d tokens in src vocabulary" % len(src_words))
+    logging.info("final %d tokens in tgt vocabulary" % len(tgt_words))
 
     return src_words, tgt_words
 
@@ -142,23 +142,23 @@ def load_vocabs_from_features(feature_file, src_limit=0, tgt_limit=0):
     src_vocab_by_freq = sorted(src_vocab.items(), key=operator.itemgetter(1), reverse=True)
     tgt_vocab_by_freq = sorted(tgt_vocab.items(), key=operator.itemgetter(1), reverse=True)
 
-    print "found %d tokens in train src vocabulary" % len(src_vocab_by_freq)
-    print "found %d tokens in train tgt vocabulary" % len(tgt_vocab_by_freq)
+    logging.info("found %d tokens in train src vocabulary" % len(src_vocab_by_freq))
+    logging.info("found %d tokens in train tgt vocabulary" % len(tgt_vocab_by_freq))
 
     #cut off infrequent ones
     if src_limit > 0:
         src_vocab_by_freq = src_vocab_by_freq[:src_limit]
-        print "cutting down src vocab to %d tokens" % len(src_vocab_by_freq)
+        logging.info("cutting down src vocab to %d tokens" % len(src_vocab_by_freq))
     if tgt_limit > 0:
         tgt_vocab_by_freq = tgt_vocab_by_freq[:tgt_limit]
-        print "cutting down tgt vocab to %d tokens" % len(tgt_vocab_by_freq)
+        logging.info("cutting down tgt vocab to %d tokens" % len(tgt_vocab_by_freq))
 
     vocab = {"<PAD>", "<UNK>", "<s>", "</s>"}
     src_words = list(set(map(operator.itemgetter(0), src_vocab_by_freq)).union(vocab))
     tgt_words = list(set(map(operator.itemgetter(0), tgt_vocab_by_freq)).union(vocab))
 
-    print "final %d tokens in src vocabulary" % len(src_words)
-    print "final %d tokens in tgt vocabulary" % len(tgt_words)
+    logging.info("final %d tokens in src vocabulary" % len(src_words))
+    logging.info("final %d tokens in tgt vocabulary" % len(tgt_words))
 
     return src_words, tgt_words
 
@@ -180,11 +180,11 @@ def build_vocab(feature_file, origin, store=False):
                 for token in tokens:
                     if token not in vocab:
                         vocab.append(token)
-    print "Built %s vocabulary of %d words" % (origin, len(vocab))
+    logging.info("Built %s vocabulary of %d words" % (origin, len(vocab)))
     if store:
         dump_file = feature_file+".vocab."+origin+".pkl"
         pkl.dump(vocab, open(dump_file, "wb"))
-        print "Stored %s vocabulary in %s" % (origin, dump_file)
+        logging.info("Stored %s vocabulary in %s" % (origin, dump_file))
     return vocab, 0, 1, 2, 3
 
 
@@ -304,9 +304,9 @@ def load_data(feature_label_file, embedding_src, embedding_tgt, max_sent=0, task
                     label = "OK"
                 label_sentence.append(label_dict[label])
 
-    print "Loaded %d sentences" % len(feature_vectors)
-    print "%d UNK words in src" % len(src_unks)
-    print "%d UNK words in tgt" % len(tgt_unks)
+    logging.info("Loaded %d sentences" % len(feature_vectors))
+    logging.info("%d UNK words in src" % len(src_unks))
+    logging.info("%d UNK words in tgt" % len(tgt_unks))
     if train:
         return feature_vectors, tgt_sentences, labels, label_dict, embedding_src, embedding_tgt
     else:
@@ -347,7 +347,7 @@ def pad_data(X, Y, max_len, PAD_symbol=0):
     return X_padded, Y_padded, masks, np.asarray(seq_lens)
 
 
-def buckets_by_length(data, labels, buckets=20, max_len=0, mode='pad'):
+def buckets_by_length(data, labels, buckets=20, max_len=50, mode='pad'):
     """
     :param data: numpy arrays of data
     :param labels: numpy arrays of labels
@@ -367,13 +367,13 @@ def buckets_by_length(data, labels, buckets=20, max_len=0, mode='pad'):
     data_lengths_with_idx = [(len(s), i) for i, s in enumerate(data)]
     sorted_data_lengths_with_idx = sorted(data_lengths_with_idx, key=operator.itemgetter(0))
     bucket_size = int(np.ceil(len(data)/float(buckets)))
-    print "Creating %d Buckets of size %d" % (buckets, bucket_size)
+    logging.info("Creating %d Buckets of size %d" % (buckets, bucket_size))
     buckets_data = [sorted_data_lengths_with_idx[i:i+bucket_size] for i in xrange(0, len(sorted_data_lengths_with_idx), bucket_size)]
-    bin_edges = [bucket[-1][0] for bucket in buckets_data]  # max len of sequence in bucket
-    print "bin_edges", bin_edges
+    bin_edges = [min(bucket[-1][0], max_len) for bucket in buckets_data]  # max len of sequence in bucket
+    logging.info("bin_edges %s" % str(bin_edges))
     if bin_edges[-1] < maxlen:
         bin_edges[-1] = maxlen
-    print "final bin_edges", bin_edges
+    logging.info("final bin_edges %s" % str(bin_edges))
     input_bucket_index = np.zeros(shape=len(data), dtype=int)
     for bucket_idx, bucket in enumerate(buckets_data):
         for l, d_idx in bucket:
