@@ -1,10 +1,145 @@
 import tensorflow as tf
-import tensorflow.python.util.nest as nest
 import numpy as np
-import logging
-import cPickle as pkl
+#import logging
+#import cPickle as pkl
 import pdb
 
+class EmbeddingLayer(object):
+    def __init__(self, vocabulary_size, embedding_size, keep_prob,
+                 embedding_table=None, update_embeddings=True):
+        self.vocabulary_size = vocabulary_size
+        self.embedding_size = embedding_size
+        self.keep_prob = keep_prob
+        self.embedding_table = embedding_table
+        self.update_embeddings = update_embeddings
+
+    def _create_variables(self):
+        if self.embedding_table is None:
+            self.M = tf.get_variable(name="M",
+                                     shape=[self.vocabulary_size,
+                                            self.embedding_size],
+                                     initializer=\
+                                         tf.contrib.layers.xavier_initializer( \
+                                             uniform=True, dtype=tf.float32))
+        else:
+            self.M = tf.get_variable(name="M",
+                                     shape=[self.embedding_table.shape[0],
+                                            self.embedding_table.shape[1]],
+                                     initializer=\
+                                     tf.constant_initializer( \
+                                         self.embedding_table),
+                                     trainable=self.update_embeddings)
+            assert len(self.embedding_table[0] == self.embedding_size)
+        
+    def forward(self, input_sequence):
+        # input_sequence is batch_size x sequence_length x num_features.
+        self._create_variables()
+
+        batch_size = tf.shape(input_sequence)[0]
+        sequence_length = tf.shape(input_sequence)[1]
+        num_features = 1 #tf.shape(input_sequence)[2]
+
+        # Dropout on embeddings.
+        M = tf.nn.dropout(self.M, self.keep_prob)
+        # batch_size x L x window_size x emb_size
+        emb_orig = tf.nn.embedding_lookup(M, input_sequence, name="emb_orig")
+        emb = tf.reshape(emb_orig,
+                         [batch_size,
+                          sequence_length,
+                          num_features * self.embedding_size],
+                         name="emb") # batch_size x L x window_size*emb_size
+        return emb
+
+class FeedforwardLayer(object):
+    def __init__(self, sequence_length, input_size, hidden_size, batch_size):
+        self.sequence_lengths = sequence_lengths
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.batch_size = batch_size
+
+    def _create_variables(self):
+        self.W_xh = tf.get_variable(name="W_xh",
+                                    shape=[self.input_size,
+                                           self.hidden_size],
+                                    initializer= \
+                                        tf.contrib.layers.xavier_initializer(
+                                            uniform=True, dtype=tf.float32))
+        self.b_h = tf.get_variable(shape=[self.hidden_size],
+                                   initializer=\
+                                       tf.random_uniform_initializer(
+                                           dtype=tf.float32), name="b_h")
+        
+    def forward(self, input_sequence):
+        # input_sequence is batch_size x sequence_length x input_size.
+        self._create_variables()
+
+        # fully-connected layer on top of embeddings to reduce size
+        x = tf.reshape(input_sequence, [self.batch_size*self.sequence_length,
+                                        self.input_size])
+        H = tf.reshape(activation(tf.matmul(x, self.W_xh) + b_h), \
+                       [self.batch_size,
+                        self.sequence_length,
+                        self.hidden_size])
+        return H
+
+                
+class RNNLayer(object):
+    def __init__(self, sequence_lengths, hidden_size, batch_size, use_bilstm, keep_prob):
+        self.sequence_lengths = sequence_lengths
+        self.hidden_size = hidden_size
+        self.batch_size = batch_size
+        self.use_bilstm = use_bilstm
+        self.keep_prob = keep_prob
+
+    def _create_variables(self):
+        self.fw_cell = tf.nn.rnn_cell.LSTMCell(num_units=self.hidden_size,
+                                               state_is_tuple=True)
+        if self.use_bilstm:
+            with tf.name_scope("bi-lstm"):
+                self.bw_cell = tf.nn.rnn_cell.LSTMCell( \
+                    num_units=self.hidden_size, state_is_tuple=True)
+        
+    def forward(self, input_sequence):
+        # input_sequence is batch_size x max_sequence_length x input_size.
+        self._create_variables()
+
+        if self.use_bilstm:
+            with tf.name_scope("bi-lstm"):
+                # dropout on lstm
+                # TODO make params, input is already dropped out.
+                fw_cell = \
+                    tf.nn.rnn_cell.DropoutWrapper( \
+                        self.fw_cell, input_keep_prob=1.0, \
+                        output_keep_prob=self.keep_prob)
+                bw_cell = \
+                    tf.nn.rnn_cell.DropoutWrapper( \
+                        self.bw_cell, input_keep_prob=1.0, \
+                        output_keep_prob=self.keep_prob)
+
+                outputs, _ = \
+                    tf.nn.bidirectional_dynamic_rnn(
+                        fw_cell, bw_cell, input_sequence,
+                        sequence_length=self.sequence_lengths,
+                        dtype=tf.float32, time_major=False)
+                outputs = tf.concat(2, outputs)
+                state_size = 2*self.hidden_size # concat of fw and bw lstm output.
+        else:
+            with tf.name_scope("lstm"):
+                # dropout on lstm
+                fw_cell = tf.nn.rnn_cell.DropoutWrapper( \
+                    self.fw_cell, input_keep_prob=1.0, \
+                    output_keep_prob=self.keep_prob) # TODO make params, input is already dropped out
+
+                outputs, _, = tf.nn.dynamic_rnn(
+                    cell=self.fw_cell, inputs=input_sequence,
+                    sequence_length=self.sequence_lengths,
+                    dtype=tf.float32, time_major=False)
+                state_size = self.hidden_size
+
+        H = outputs
+        return H
+
+        
 class ScoreLayer(object):
     def __init__(self, sequence_length, input_size, num_labels, label_weights,
                  batch_size, batch_mask):
