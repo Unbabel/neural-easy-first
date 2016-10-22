@@ -11,7 +11,7 @@ class EasyFirstModel(object):
     Neural easy-first model
     """
     def __init__(self, num_labels, embedding_size, hidden_size, context_size,
-                 vocabulary_size, lstm_size, concatenate_last_layer, use_bilstm,
+                 vocabulary_size, encoder, concatenate_last_layer,
                  batch_size, optimizer, learning_rate, max_gradient_norm,
                  keep_prob=1.0, keep_prob_sketch=1.0, label_weights=None,
                  l2_scale=0.0, l1_scale=0.0, embeddings=None,
@@ -27,9 +27,8 @@ class EasyFirstModel(object):
         self.hidden_size = hidden_size
         self.context_size = context_size
         self.vocabulary_size = vocabulary_size
-        self.lstm_size = lstm_size
+        self.encoder = encoder
         self.concatenate_last_layer = concatenate_last_layer
-        self.use_bilstm = use_bilstm
 
         self.batch_size = batch_size
         self.learning_rate = learning_rate
@@ -58,33 +57,18 @@ class EasyFirstModel(object):
 
         model = 'easy_first'
         self.path = "%s/%s_K%d_D%d_J%d_r%d_batch%d_opt%s_lr%0.4f_gradnorm%0.2f" \
-                    "_lstm%d_concat%r_l2r%0.4f_l1r%0.4f_dropout%0.2f_sketchdrop%0.2f_updateemb%s_voc%d.model" % \
+                    "_concat%r_l2r%0.4f_l1r%0.4f_dropout%0.2f_sketchdrop%0.2f_updateemb%s_voc%d.model" % \
                     (self.model_dir, model, self.num_labels,
                      self.embedding_size, self.hidden_size,
                      self.context_size, self.batch_size, optimizer,
-                     self.learning_rate, self.max_gradient_norm, self.lstm_size,
+                     self.learning_rate, self.max_gradient_norm,
                      self.concatenate_last_layer,
                      self.l2_scale, self.l1_scale, self.keep_prob,
                      self.keep_prob_sketch, self.update_embeddings,
                      self.vocabulary_size)
         logger.info("Model path: %s"  % self.path)
 
-        if self.lstm_size > 0:
-            if self.use_bilstm:
-                logger.info(
-                    "Model with bi-directional LSTM RNN encoder of %d units" %
-                    self.lstm_size)
-            else:
-                logger.info(
-                    "Model with uni-directional LSTM RNN encoder of %d units" %
-                    self.lstm_size)
-        else:
-            if self.embeddings.table is None:
-                logger.info("Model with simple embeddings of size %d" %
-                            self.embedding_size)
-            else:
-                logger.info("Model with simple embeddings of size %d" %
-                            self.embeddings.table.shape[0])
+        logger.info("Model with %s encoder" % self.encoder)
 
         if update_embeddings:
             logger.info("Updating the embeddings during training")
@@ -195,7 +179,7 @@ class EasyFirstModel(object):
         self.saver = tf.train.Saver(tf.all_variables(), write_version=tf.train.SaverDef.V2)
 
 
-    def batch_update(self, session, bucket_id, inputs, labels, masks, seq_lens, forward_only=False):
+    def batch_update(self, session, bucket_id, batch_data, forward_only=False):
         """
         Training step
         :param session:
@@ -207,10 +191,10 @@ class EasyFirstModel(object):
         """
         # get input feed for bucket
         input_feed = {}
-        input_feed[self.inputs[bucket_id].name] = inputs
-        input_feed[self.labels[bucket_id].name] = labels
-        input_feed[self.masks[bucket_id].name] = masks
-        input_feed[self.seq_lens[bucket_id].name] = seq_lens
+        input_feed[self.inputs[bucket_id].name] = batch_data.inputs
+        input_feed[self.labels[bucket_id].name] = batch_data.labels
+        input_feed[self.masks[bucket_id].name] = batch_data.masks
+        input_feed[self.seq_lens[bucket_id].name] = batch_data.lengths
         input_feed[self.keep_probs[bucket_id].name] = 1 if forward_only else self.keep_prob
         input_feed[self.keep_prob_sketches[bucket_id].name] = 1 if forward_only else self.keep_prob_sketch
         input_feed[self.is_trains[bucket_id].name] = not forward_only
@@ -232,7 +216,7 @@ class EasyFirstModel(object):
         #print "outputs", outputs
 
         predictions = []
-        for seq_len, pred in zip(seq_lens, outputs[1]):
+        for seq_len, pred in zip(batch_data.lengths, outputs[1]):
                 predictions.append(pred[:seq_len].tolist())
 
         return outputs[0], predictions, outputs[2]  # loss, predictions, regularized loss
@@ -276,14 +260,21 @@ class EasyFirstModel(object):
             emb = embedding_layer.forward(x)
 
         with tf.name_scope("hidden"):
-            from layers import FeedforwardLayer, RNNLayer
-            if self.lstm_size > 0:
-                rnn_layer = RNNLayer(sequence_lengths=sequence_lengths,
-                                     hidden_size=self.lstm_size,
-                                     batch_size=batch_size,
-                                     use_bilstm=self.use_bilstm,
-                                     keep_prob=self.keep_prob)
+            from layers import FeedforwardLayer, LSTMLayer, BILSTMLayer
+            if self.encoder == 'lstm':
+                rnn_layer = LSTMLayer(sequence_lengths=sequence_lengths,
+                                      hidden_size=self.hidden_size,
+                                      batch_size=batch_size,
+                                      keep_prob=self.keep_prob)
                 H = rnn_layer.forward(emb)
+                state_size = self.hidden_size
+            elif self.encoder == 'bilstm':
+                rnn_layer = BILSTMLayer(sequence_lengths=sequence_lengths,
+                                        hidden_size=self.hidden_size,
+                                        batch_size=batch_size,
+                                        keep_prob=self.keep_prob)                
+                H = rnn_layer.forward(emb)
+                state_size = 2*self.hidden_size
             else:
                 input_size = tf.shape(emb)[2]
                 feedforward_layer = FeedforwardLayer(sequence_length=sequence_length,
@@ -291,13 +282,14 @@ class EasyFirstModel(object):
                                                      hidden_size=self.hidden_size,
                                                      batch_size=batch_size)
                 H = feedforward_layer.forward(emb)
+                state_size = self.hidden_size
                 
         with tf.name_scope("sketching"):
             from layers import SketchLayer
             sketch_layer = SketchLayer(sequence_length=max_sequence_length,
                                        input_size=self.hidden_size,
                                        context_size=self.context_size,
-                                       hidden_size=self.hidden_size,
+                                       hidden_size=state_size,
                                        batch_size=batch_size,
                                        batch_mask=mask,
                                        keep_prob=self.keep_prob_sketch)
@@ -307,7 +299,7 @@ class EasyFirstModel(object):
             from layers import ScoreLayer
 
             if self.concatenate_last_layer:
-                state_size = 2*self.hidden_size
+                state_size = state_size + self.hidden_size
                 S = tf.concat(2, [H, S])
             else:
                 state_size = self.hidden_size

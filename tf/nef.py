@@ -11,6 +11,7 @@ import logging
 import datetime
 import os
 from easy_first_model import *
+from buckets import BucketFactory
 import pdb
 
 """
@@ -54,7 +55,7 @@ tf.app.flags.DEFINE_string("sketch_dir", "pos_tagging/sketches",
 tf.app.flags.DEFINE_float("max_gradient_norm", -1,
                           "max gradient norm for clipping (-1: no clipping)")
 
-tf.app.flags.DEFINE_integer("buckets", 1, "number of buckets")
+tf.app.flags.DEFINE_integer("buckets", 3, "number of buckets")
 #tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
 tf.app.flags.DEFINE_string("embeddings",
                            "pos_tagging/data/embeddings/polyglot-en.pkl",
@@ -64,13 +65,13 @@ tf.app.flags.DEFINE_boolean("update_embeddings", False, "update the embeddings")
 tf.app.flags.DEFINE_string("activation", "tanh", "activation function")
 tf.app.flags.DEFINE_integer("embedding_size", 64,
                             "dimensionality of embeddings")
-tf.app.flags.DEFINE_integer("hidden_size", 20, "dimensionality of hidden layer")
-tf.app.flags.DEFINE_integer("lstm_size", 20, "number of LSTM-RNN encoder units")
-tf.app.flags.DEFINE_boolean("use_bilstm", False, "bi-directional LSTM-RNN encoder")
+tf.app.flags.DEFINE_integer("hidden_size", 20, "dimensionality of hidden layers")
+tf.app.flags.DEFINE_string("encoder", "lstm", "Encoder type: bilstm, lstm, or "
+                           "feedforward")
 tf.app.flags.DEFINE_integer("context_size", 2, "context size")
 
 tf.app.flags.DEFINE_boolean("concatenate_last_layer", True,
-                            "concatenating s_i and h_i for prediction")
+                            "concatenating sketches and encoder states for prediction")
 tf.app.flags.DEFINE_float("attention_discount_factor", 0.0,
                           "Attention discount factor")
 tf.app.flags.DEFINE_float("attention_temperature", 1.0,
@@ -114,9 +115,8 @@ def create_model(session, buckets, vocabulary_size, num_labels,
                            hidden_size=FLAGS.hidden_size,
                            context_size=FLAGS.context_size,
                            vocabulary_size=vocabulary_size,
-                           lstm_size=FLAGS.lstm_size,
+                           encoder=FLAGS.encoder,
                            concatenate_last_layer=FLAGS.concatenate_last_layer,
-                           use_bilstm=FLAGS.use_bilstm,
                            batch_size=FLAGS.batch_size,
                            optimizer=FLAGS.optimizer,
                            learning_rate=FLAGS.learning_rate,
@@ -189,10 +189,8 @@ def train():
                                              train_embeddings.start_id)
 
         logger.info("vocab size: %d" % vocab_size)
-
         logger.info("Training on %d instances" % len(train_labels))
         logger.info("Validating on %d instances" % len(dev_labels))
-
         logger.info("Maximum sentence length (train): %d" % \
                     max([len(y) for y in train_labels]))
         logger.info("Maximum sentence length (dev): %d" % \
@@ -203,54 +201,21 @@ def train():
         # bucketing training and dev data
 
         # equal bucket sizes
-        data_buckets, reordering_indexes, bucket_edges = buckets_by_length(
-            np.asarray(train_sentences),
-            np.asarray(train_labels),
-            buckets=FLAGS.buckets,
-            max_len=maximum_sentence_length, mode="pad")
+        factory = BucketFactory()
+        train_buckets = factory.build_buckets(np.asarray(train_sentences),
+                                              np.asarray(train_labels),
+                                              num_buckets=FLAGS.buckets)
 
-        train_buckets = data_buckets
-        train_reordering_indexes = reordering_indexes
-
-        # bucketing dev data
-        dev_buckets, dev_reordering_indexes = put_in_buckets(np.asarray(dev_sentences),
-                                                             np.asarray(dev_labels),
-                                                             buckets=bucket_edges) # Is this buckets argument correct?
+        dev_buckets = factory.put_in_buckets(np.asarray(dev_sentences),
+                                             np.asarray(dev_labels),
+                                             reference_buckets=train_buckets)
 
         # create the model
-        model = create_model(sess, bucket_edges, vocab_size, num_labels,
+        bucket_lengths = [bucket.data.max_length() for bucket in train_buckets]
+        model = create_model(sess, bucket_lengths, vocab_size, num_labels,
                              is_train=True, embeddings=embeddings)
 
-        train_buckets_sizes = {i: len(indx) \
-                               for i, indx in train_reordering_indexes.items()}
-        dev_buckets_sizes = {i: len(indx) \
-                             for i, indx in dev_reordering_indexes.items()}
-
-
-        logger.info("Creating buckets for training data:")
-        for i in train_buckets.keys():
-            X_train_padded, Y_train_padded, train_masks, train_seq_lens = train_buckets[i]
-            total_number_of_pads = sum([bucket_edges[i]-l for l in train_seq_lens])
-            logger.info("Bucket no %d with max length %d: %d instances, avg length %f,  " \
-                  "%d number of PADS in total" % (i, bucket_edges[i], train_buckets_sizes[i],
-                                                  np.average(train_seq_lens), total_number_of_pads))
-
-        logger.info("Creating buckets for dev data:")
-        for i in dev_buckets.keys():
-            X_dev_padded, Y_dev_padded, dev_masks, dev_seq_lens = dev_buckets[i]
-            total_number_of_pads = sum([bucket_edges[i]-l for l in dev_seq_lens])
-            logger.info("Bucket no %d with max length %d: %d instances, avg length %f,  " \
-                  "%d number of PADS in total" % (i, bucket_edges[i], dev_buckets_sizes[i],
-                                                  np.average(dev_seq_lens), total_number_of_pads))
-
-        # choose a training sample to analyse during sketching
-        if FLAGS.track_sketches:
-            train_corpus_id = 37
-            sample_bucket_id = np.nonzero([train_corpus_id in train_reordering_indexes[b] for b in train_reordering_indexes.keys()])[0][0]
-            sample_in_bucket_index = np.nonzero([i == train_corpus_id for i in train_reordering_indexes[sample_bucket_id]])[0]  # position of sample within bucket
-            logger.info("Chosen sketch sample: corpus id %d, bucket %d, index in bucket %d" % (train_corpus_id, sample_bucket_id, sample_in_bucket_index))
-
-        # training in epochs
+        # Training in epochs.
         best_valid = 0
         best_valid_epoch = 0
         for epoch in xrange(FLAGS.epochs):
@@ -261,99 +226,87 @@ def train():
             train_true = []
             start_time_epoch = time.time()
 
-            # random bucket order
-            bucket_ids = np.random.permutation(train_buckets.keys())
+            # Random bucket order.
+            bucket_ids = np.random.permutation(range(len(train_buckets)))
 
             for bucket_id in bucket_ids:
-                bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = train_buckets[bucket_id]
-                # random order of samples in batch
-                order = np.random.permutation(len(bucket_xs))
-                # split data in bucket into random batches of at most batch_size
-                if train_buckets_sizes[bucket_id] > FLAGS.batch_size:
-                    number_of_batches = np.ceil(train_buckets_sizes[bucket_id]/float(FLAGS.batch_size))
-                    batch_ids = np.array_split(order, number_of_batches)
-                else:
-                    batch_ids = [order]  # only one batch
+                bucket = train_buckets[bucket_id]
+                # Random order of samples in batch.
+                order = np.random.permutation(bucket.data.num_sequences())
+                # Split data in bucket into random batches of at most
+                # batch_size.
+                # If the bucket has fewer data than the batch size, there will
+                # be only one batch.
+                num_batches = np.ceil(bucket.data.num_sequences() /
+                                      float(FLAGS.batch_size))
+                batch_ids = np.array_split(order, num_batches)
                 bucket_loss = 0
                 bucket_loss_reg = 0
-                # make update on each batch
+                # Make update on each batch.
                 for i, batch_samples in enumerate(batch_ids):
-                    x_batch = bucket_xs[batch_samples]
-                    y_batch = bucket_ys[batch_samples]
-                    mask_batch = bucket_masks[batch_samples]
-                    seq_lens_batch = bucket_seq_lens[batch_samples]
-                    step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
-                                                                               x_batch, y_batch,
-                                                                               mask_batch,
-                                                                               seq_lens_batch,
-                                                                               False)  # loss for each instance in batch
+                    batch_data = bucket.data.select(batch_samples)
+                    # Loss for each instance in batch.
+                    step_loss, predictions, step_loss_reg = \
+                        model.batch_update(sess, bucket_id, batch_data, False)
                     loss_reg += np.sum(step_loss_reg)
                     loss += np.sum(step_loss)  # sum over batch
                     bucket_loss += np.sum(step_loss)
                     bucket_loss_reg += np.sum(step_loss_reg)
                     train_predictions.extend(predictions)
-                    train_true.extend(y_batch)  # needs to be stored because of random order
-                    current_sample += len(x_batch)
+                    # needs to be stored because of random order
+                    train_true.extend(batch_data.labels)
 
-                    if FLAGS.model == "ef_single_state" and FLAGS.track_sketches:
-                        if bucket_id == sample_bucket_id and sample_in_bucket_index in batch_samples:
-                            sample_in_batch_index = np.nonzero([i == sample_in_bucket_index for i in batch_samples])[0][0]
-                            all_sketches = model.get_sketches_for_single_sample(
-                                sess, bucket_id, x_batch[sample_in_batch_index],
-                                y_batch[sample_in_batch_index],
-                                mask_batch[sample_in_batch_index],
-                                seq_lens_batch[sample_in_batch_index])
-                            sample_sketch = np.squeeze(all_sketches, 1)
-                            logger.info("true: %s", str(y_batch[sample_in_batch_index]))
-                            logger.info("predicted: %s", str(predictions[sample_in_batch_index]))
-                            pkl.dump(sample_sketch, open("%s/sketches_sent%d_epoch%d.pkl" % (FLAGS.sketch_dir, train_corpus_id, epoch), "wb"))
-
-
-                logger.info("bucket %d - loss %0.2f - loss+reg %0.2f" % (bucket_id,
-                                                                   bucket_loss/len(bucket_xs),
-                                                                   bucket_loss_reg/len(bucket_xs)))
+                logger.info("bucket %d - loss %0.2f - loss+reg %0.2f" %
+                            (bucket_id,
+                             bucket_loss / bucket.data.num_sequences(),
+                             bucket_loss_reg / bucket.data.num_sequences()))
 
             train_accuracy = accuracy(train_true, train_predictions)
-            train_f1_1, train_f1_2 = f1s_binary(train_true, train_predictions)
             time_epoch = time.time() - start_time_epoch
 
-            logger.info("EPOCH %d: epoch time %fs, loss %f, train acc. %f, f1 prod %f (%f/%f) " % \
-                  (epoch+1, time_epoch, loss/len(train_labels), train_accuracy,
-                   train_f1_1*train_f1_2, train_f1_1, train_f1_2))
+            logger.info("EPOCH %d: epoch time %fs, loss %f, train acc. %f" % \
+                        (epoch+1, time_epoch, loss/len(train_labels),
+                         train_accuracy))
 
-            # eval on dev (every epoch)
+            # Eval on dev (every epoch).
             start_time_valid = time.time()
             dev_loss = 0.0
             dev_predictions = []
             dev_true = []
-            for bucket_id in dev_buckets.keys():
-                bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = dev_buckets[bucket_id]
-                step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
-                                                                           bucket_xs, bucket_ys,
-                                                                           bucket_masks,
-                                                                           bucket_seq_lens,
-                                                                           True)  # loss for whole bucket
+            for bucket_id in range(len(dev_buckets)):
+                bucket = dev_buckets[bucket_id]
+                if bucket == None:
+                    continue
+                # Loss for whole bucket.
+                step_loss, predictions, step_loss_reg = \
+                    model.batch_update(sess, bucket_id,
+                                       bucket.data,
+                                       True)
                 dev_predictions.extend(predictions)
-                dev_true.extend(bucket_ys)
+                dev_true.extend(bucket.data.labels)
                 dev_loss += np.sum(step_loss)
             time_valid = time.time() - start_time_valid
             dev_accuracy = accuracy(dev_true, dev_predictions)
             dev_f1_1, dev_f1_2 = f1s_binary(dev_true, dev_predictions)
-            logger.info("EPOCH %d: validation time %fs, loss %f, dev acc. %f, f1 prod %f (%f/%f) " % \
-                  (epoch+1, time_valid, dev_loss/len(dev_labels), dev_accuracy,
-                   dev_f1_1*dev_f1_2, dev_f1_1, dev_f1_2))
-            if dev_f1_1*dev_f1_2 > best_valid:
+            logger.info("EPOCH %d: validation time %fs, loss %f, dev acc. %f" %
+                        (epoch+1, time_valid, dev_loss/len(dev_labels),
+                         dev_accuracy))
+            if dev_accuracy > best_valid:
                 logger.info("NEW BEST!")
-                best_valid = dev_f1_1*dev_f1_2
+                best_valid = dev_accuracy
                 best_valid_epoch = epoch+1
-                # save checkpoint
-                model.saver.save(sess, model.path, global_step=model.global_step, write_meta_graph=False)
+                # Save checkpoint.
+                model.saver.save(sess, model.path,
+                                 global_step=model.global_step,
+                                 write_meta_graph=False)
             else:
-                logger.info("current best: %f at epoch %d" % (best_valid, best_valid_epoch))
+                logger.info("current best: %f at epoch %d" %
+                            (best_valid, best_valid_epoch))
 
 
-        logger.info("Training finished after %d epochs. Best validation result: %f at epoch %d." \
-              % (epoch+1, best_valid, best_valid_epoch))
+        logger.info("Training finished after %d epochs. "
+                    "Best validation result: %f at epoch %d." \
+                    % (epoch+1, best_valid, best_valid_epoch))
 
 def test():
     """

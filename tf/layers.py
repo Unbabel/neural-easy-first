@@ -81,65 +81,79 @@ class FeedforwardLayer(object):
                         self.sequence_length,
                         self.hidden_size])
         return H
-
                 
 class RNNLayer(object):
-    def __init__(self, sequence_lengths, hidden_size, batch_size, use_bilstm, keep_prob):
+    def __init__(self, sequence_lengths, hidden_size, batch_size, keep_prob):
         self.sequence_lengths = sequence_lengths
         self.hidden_size = hidden_size
         self.batch_size = batch_size
-        self.use_bilstm = use_bilstm
         self.keep_prob = keep_prob
 
     def _create_variables(self):
-        self.fw_cell = tf.nn.rnn_cell.LSTMCell(num_units=self.hidden_size,
-                                               state_is_tuple=True)
-        if self.use_bilstm:
-            with tf.name_scope("bi-lstm"):
-                self.bw_cell = tf.nn.rnn_cell.LSTMCell( \
-                    num_units=self.hidden_size, state_is_tuple=True)
+        self.cell = tf.nn.rnn_cell.RNNCell(num_units=self.hidden_size,
+                                           state_is_tuple=True)
         
     def forward(self, input_sequence):
         # input_sequence is batch_size x max_sequence_length x input_size.
         self._create_variables()
 
-        if self.use_bilstm:
-            with tf.name_scope("bi-lstm"):
-                # dropout on lstm
-                # TODO make params, input is already dropped out.
-                fw_cell = \
-                    tf.nn.rnn_cell.DropoutWrapper( \
-                        self.fw_cell, input_keep_prob=1.0, \
-                        output_keep_prob=self.keep_prob)
-                bw_cell = \
-                    tf.nn.rnn_cell.DropoutWrapper( \
-                        self.bw_cell, input_keep_prob=1.0, \
-                        output_keep_prob=self.keep_prob)
+        # Dropout on RNN.
+        cell = tf.nn.rnn_cell.DropoutWrapper( \
+            self.cell,
+            input_keep_prob=1.0, \
+            output_keep_prob=self.keep_prob)
 
-                outputs, _ = \
-                    tf.nn.bidirectional_dynamic_rnn(
-                        fw_cell, bw_cell, input_sequence,
-                        sequence_length=self.sequence_lengths,
-                        dtype=tf.float32, time_major=False)
-                outputs = tf.concat(2, outputs)
-                state_size = 2*self.hidden_size # concat of fw and bw lstm output.
-        else:
-            with tf.name_scope("lstm"):
-                # dropout on lstm
-                fw_cell = tf.nn.rnn_cell.DropoutWrapper( \
-                    self.fw_cell, input_keep_prob=1.0, \
-                    output_keep_prob=self.keep_prob) # TODO make params, input is already dropped out
+        outputs, _, = tf.nn.dynamic_rnn(
+            cell=self.cell, inputs=input_sequence,
+            sequence_length=self.sequence_lengths,
+            dtype=tf.float32, time_major=False)
 
-                outputs, _, = tf.nn.dynamic_rnn(
-                    cell=self.fw_cell, inputs=input_sequence,
-                    sequence_length=self.sequence_lengths,
-                    dtype=tf.float32, time_major=False)
-                state_size = self.hidden_size
+        H = outputs
+        return H
+    
+class LSTMLayer(RNNLayer):
+    def __init__(self, sequence_lengths, hidden_size, batch_size, keep_prob):
+        RNNLayer.__init__(self, sequence_lengths, hidden_size, batch_size, keep_prob)
+
+    def _create_variables(self):
+        self.cell = tf.nn.rnn_cell.LSTMCell(num_units=self.hidden_size,
+                                            state_is_tuple=True)
+        
+class BILSTMLayer(LSTMLayer):
+    def __init__(self, sequence_lengths, hidden_size, batch_size, keep_prob):
+        LSTMLayer.__init__(self, sequence_lengths, hidden_size, batch_size, keep_prob)
+
+    def _create_variables(self):
+        LSTMLayer._create_variables()
+        with tf.name_scope("bw_cell"):
+            self.bw_cell = tf.nn.rnn_cell.LSTMCell( \
+                num_units=self.hidden_size, state_is_tuple=True)
+
+    def forward(self, input_sequence):
+        # input_sequence is batch_size x max_sequence_length x input_size.
+        self._create_variables()
+
+        # Dropout on LSTM.
+        fw_cell = tf.nn.rnn_cell.DropoutWrapper(
+            self.cell,
+            input_keep_prob=1.0,
+            output_keep_prob=self.keep_prob)
+        with tf.name_scope("bw_cell"):
+            bw_cell = tf.nn.rnn_cell.DropoutWrapper(
+                self.bw_cell,
+                input_keep_prob=1.0,
+                output_keep_prob=self.keep_prob)
+
+            outputs, _ = tf.nn.bidirectional_dynamic_rnn(
+                fw_cell, bw_cell, input_sequence,
+                sequence_length=self.sequence_lengths,
+                dtype=tf.float32, time_major=False)
+            outputs = tf.concat(2, outputs)
+            state_size = 2*self.hidden_size # concat of fw and bw lstm output.
 
         H = outputs
         return H
 
-        
 class ScoreLayer(object):
     def __init__(self, sequence_length, input_size, num_labels, label_weights,
                  batch_size, batch_mask):
