@@ -51,7 +51,8 @@ def build_pos_vocab(filepath, store=False):
     return vocab
 
 
-def load_pos_data(filepath, embeddings, label_dict={}, train=False):
+def load_pos_data(filepath, embeddings, max_length=-1, label_dict={},
+                  train=False):
     """
     Given a dataset file with features and labels, and word embeddings, read them to lists and dictionaries
     :param feature_label_file:
@@ -91,8 +92,9 @@ def load_pos_data(filepath, embeddings, label_dict={}, train=False):
             line = line.rstrip()
             if line == "":  # sentence end
                 assert len(sentence) == len(sentence_labels)
-                sentences.append(sentence)
-                labels.append(sentence_labels)
+                if max_length < 0 or len(sentence) < max_length:
+                    sentences.append(sentence)
+                    labels.append(sentence_labels)
                 sentence = []
                 sentence_labels = []
             else:  # one word per line

@@ -27,7 +27,7 @@ tf.app.flags.DEFINE_string("model", "ef_single_state",
                            "Model for training: rnn or ef_single_state")
 
 tf.app.flags.DEFINE_boolean("train", True, "training model")
-tf.app.flags.DEFINE_integer("epochs", 500, "training epochs")
+tf.app.flags.DEFINE_integer("epochs", 50, "training epochs")
 tf.app.flags.DEFINE_integer("checkpoint_frequency", 100, "save model every x epochs")
 tf.app.flags.DEFINE_float("l2_scale", 0, "L2 regularization constant")
 tf.app.flags.DEFINE_float("l1_scale", 0, "L1 regularization constant")
@@ -35,18 +35,21 @@ tf.app.flags.DEFINE_float("l1_scale", 0, "L1 regularization constant")
 tf.app.flags.DEFINE_string("optimizer", "adam",
                            "Optimizer [sgd, adam, adagrad, adadelta, momentum]")
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
-tf.app.flags.DEFINE_integer("batch_size", 5, #200,
+tf.app.flags.DEFINE_integer("batch_size", 200, #200,
                             "Batch size to use during training.")
 
 tf.app.flags.DEFINE_integer("word_cutoff", 1, "Word cutoff.")
 
+tf.app.flags.DEFINE_integer("max_sentence_length", 50,
+                            "Discard sentences longer than this length (both "
+                            "for training and dev files. Set this to -1 to "
+                            "keep all the sentences.")
 tf.app.flags.DEFINE_string("training_file",
-                           "pos_tagging/data/en-ud-normalized_train_sample.conll.tagging",
-                           #"pos_tagging/data/en-ud-normalized_train.conll.tagging",
+                           #"pos_tagging/data/en-ud-normalized_dev.conll.tagging",
+                           "pos_tagging/data/en-ud-normalized_train.conll.tagging",
                            "Training file.")
 tf.app.flags.DEFINE_string("dev_file",
-                           #"pos_tagging/data/en-ud-normalized_dev.conll.tagging",
-                           "pos_tagging/data/en-ud-normalized_train_sample.conll.tagging",
+                           "pos_tagging/data/en-ud-normalized_dev.conll.tagging",
                            "Dev file.")
 tf.app.flags.DEFINE_string("model_dir", "pos_tagging/models", "Model directory")
 tf.app.flags.DEFINE_string("sketch_dir", "pos_tagging/sketches",
@@ -55,20 +58,23 @@ tf.app.flags.DEFINE_string("sketch_dir", "pos_tagging/sketches",
 tf.app.flags.DEFINE_float("max_gradient_norm", -1,
                           "max gradient norm for clipping (-1: no clipping)")
 
-tf.app.flags.DEFINE_integer("buckets", 3, "number of buckets")
+tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
 #tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
 tf.app.flags.DEFINE_string("embeddings",
                            "pos_tagging/data/embeddings/polyglot-en.pkl",
                            "path to word embeddings")
 
-tf.app.flags.DEFINE_boolean("update_embeddings", False, "update the embeddings")
+tf.app.flags.DEFINE_boolean("update_embeddings", True, "update the embeddings")
 tf.app.flags.DEFINE_string("activation", "tanh", "activation function")
 tf.app.flags.DEFINE_integer("embedding_size", 64,
                             "dimensionality of embeddings")
 tf.app.flags.DEFINE_integer("hidden_size", 20, "dimensionality of hidden layers")
-tf.app.flags.DEFINE_string("encoder", "lstm", "Encoder type: bilstm, lstm, or "
-                           "feedforward")
+tf.app.flags.DEFINE_string("encoder", "bilstm", "Encoder type: bilstm, lstm, "
+                           "or feedforward")
 tf.app.flags.DEFINE_integer("context_size", 2, "context size")
+tf.app.flags.DEFINE_integer("num_sketches", -1, "Number of sketches. Set to "
+                            "-1 to let the number of sketches to equal the "
+                            "number of words.")
 
 tf.app.flags.DEFINE_boolean("concatenate_last_layer", True,
                             "concatenating sketches and encoder states for prediction")
@@ -115,6 +121,7 @@ def create_model(session, buckets, vocabulary_size, num_labels,
                            hidden_size=FLAGS.hidden_size,
                            context_size=FLAGS.context_size,
                            vocabulary_size=vocabulary_size,
+                           num_sketches=FLAGS.num_sketches,
                            encoder=FLAGS.encoder,
                            concatenate_last_layer=FLAGS.concatenate_last_layer,
                            batch_size=FLAGS.batch_size,
@@ -169,12 +176,16 @@ def train():
         else:
             embeddings = load_embedding(FLAGS.embeddings)
 
+        max_sentence_length = FLAGS.max_sentence_length
         train_sentences, train_labels, train_label_dict, train_embeddings = \
-            load_pos_data(filepath_train, embeddings, label_dict={}, train=True)
+            load_pos_data(filepath_train, embeddings,
+                          max_length=max_sentence_length,
+                          label_dict={}, train=True)
 
         # Use training vocab/labels for dev.
         dev_sentences, dev_labels, dev_label_dict = \
             load_pos_data(filepath_dev, train_embeddings,
+                          max_length=max_sentence_length,
                           label_dict=train_label_dict, train=False)
 
         vocab_size = train_embeddings.vocab_size()

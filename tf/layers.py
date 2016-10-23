@@ -30,7 +30,7 @@ class EmbeddingLayer(object):
                                          self.embedding_table),
                                      trainable=self.update_embeddings)
             assert len(self.embedding_table[0] == self.embedding_size)
-        
+
     def forward(self, input_sequence):
         # input_sequence is batch_size x sequence_length x num_features.
         self._create_variables()
@@ -68,7 +68,7 @@ class FeedforwardLayer(object):
                                    initializer=\
                                        tf.random_uniform_initializer(
                                            dtype=tf.float32), name="b_h")
-        
+
     def forward(self, input_sequence):
         # input_sequence is batch_size x sequence_length x input_size.
         self._create_variables()
@@ -81,7 +81,7 @@ class FeedforwardLayer(object):
                         self.sequence_length,
                         self.hidden_size])
         return H
-                
+
 class RNNLayer(object):
     def __init__(self, sequence_lengths, hidden_size, batch_size, keep_prob):
         self.sequence_lengths = sequence_lengths
@@ -92,7 +92,7 @@ class RNNLayer(object):
     def _create_variables(self):
         self.cell = tf.nn.rnn_cell.RNNCell(num_units=self.hidden_size,
                                            state_is_tuple=True)
-        
+
     def forward(self, input_sequence):
         # input_sequence is batch_size x max_sequence_length x input_size.
         self._create_variables()
@@ -110,7 +110,7 @@ class RNNLayer(object):
 
         H = outputs
         return H
-    
+
 class LSTMLayer(RNNLayer):
     def __init__(self, sequence_lengths, hidden_size, batch_size, keep_prob):
         RNNLayer.__init__(self, sequence_lengths, hidden_size, batch_size, keep_prob)
@@ -118,13 +118,13 @@ class LSTMLayer(RNNLayer):
     def _create_variables(self):
         self.cell = tf.nn.rnn_cell.LSTMCell(num_units=self.hidden_size,
                                             state_is_tuple=True)
-        
+
 class BILSTMLayer(LSTMLayer):
     def __init__(self, sequence_lengths, hidden_size, batch_size, keep_prob):
         LSTMLayer.__init__(self, sequence_lengths, hidden_size, batch_size, keep_prob)
 
     def _create_variables(self):
-        LSTMLayer._create_variables()
+        LSTMLayer._create_variables(self)
         with tf.name_scope("bw_cell"):
             self.bw_cell = tf.nn.rnn_cell.LSTMCell( \
                 num_units=self.hidden_size, state_is_tuple=True)
@@ -229,8 +229,10 @@ class ScoreLayer(object):
 
 
 class SketchLayer(object):
-    def __init__(self, sequence_length, input_size, context_size, hidden_size,
-                 batch_size, batch_mask, keep_prob, activation=tf.nn.tanh):
+    def __init__(self, num_sketches, sequence_length, input_size, context_size,
+                 hidden_size, batch_size, batch_mask, keep_prob,
+                 activation=tf.nn.tanh):
+        self.num_sketches = num_sketches
         self.sequence_length = sequence_length
         self.input_size = input_size
         self.context_size = context_size
@@ -380,7 +382,7 @@ class SketchLayer(object):
         b_n = b
 
         sketches = [] # For debug purposes.
-        num_sketches = self.sequence_length
+        num_sketches = self.num_sketches
         sketch_counter = tf.constant(1, dtype=tf.int32, name="sketch_counter")
         if num_sketches > 0:
             for i in xrange(num_sketches):

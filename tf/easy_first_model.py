@@ -11,7 +11,7 @@ class EasyFirstModel(object):
     Neural easy-first model
     """
     def __init__(self, num_labels, embedding_size, hidden_size, context_size,
-                 vocabulary_size, encoder, concatenate_last_layer,
+                 vocabulary_size, num_sketches, encoder, concatenate_last_layer,
                  batch_size, optimizer, learning_rate, max_gradient_norm,
                  keep_prob=1.0, keep_prob_sketch=1.0, label_weights=None,
                  l2_scale=0.0, l1_scale=0.0, embeddings=None,
@@ -27,6 +27,7 @@ class EasyFirstModel(object):
         self.hidden_size = hidden_size
         self.context_size = context_size
         self.vocabulary_size = vocabulary_size
+        self.num_sketches = num_sketches
         self.encoder = encoder
         self.concatenate_last_layer = concatenate_last_layer
 
@@ -244,7 +245,8 @@ class EasyFirstModel(object):
     def forward(self, x, y, mask, max_sequence_length, sequence_lengths,
                 label_weights):
         """
-        Compute a forward step for the easy first model and return loss and predictions for a batch
+        Compute a forward step for the easy first model and return loss and
+        predictions for a batch.
         :param x:
         :param y:
         :return:
@@ -272,7 +274,7 @@ class EasyFirstModel(object):
                 rnn_layer = BILSTMLayer(sequence_lengths=sequence_lengths,
                                         hidden_size=self.hidden_size,
                                         batch_size=batch_size,
-                                        keep_prob=self.keep_prob)                
+                                        keep_prob=self.keep_prob)
                 H = rnn_layer.forward(emb)
                 state_size = 2*self.hidden_size
             else:
@@ -283,13 +285,18 @@ class EasyFirstModel(object):
                                                      batch_size=batch_size)
                 H = feedforward_layer.forward(emb)
                 state_size = self.hidden_size
-                
+
         with tf.name_scope("sketching"):
             from layers import SketchLayer
-            sketch_layer = SketchLayer(sequence_length=max_sequence_length,
-                                       input_size=self.hidden_size,
+            if self.num_sketches < 0:
+                num_sketches = max_sequence_length
+            else:
+                num_sketches = self.num_sketches
+            sketch_layer = SketchLayer(num_sketches=num_sketches,
+                                       sequence_length=max_sequence_length,
+                                       input_size=state_size,
                                        context_size=self.context_size,
-                                       hidden_size=state_size,
+                                       hidden_size=self.hidden_size,
                                        batch_size=batch_size,
                                        batch_mask=mask,
                                        keep_prob=self.keep_prob_sketch)
@@ -314,14 +321,16 @@ class EasyFirstModel(object):
             losses, pred_labels = score_layer.forward(S, y)
             losses_reg = losses
             if self.l2_scale > 0:
-                weights_list = [W_hss, W_sp]  # M_src, M_tgt word embeddings not included
+                weights_list = [W_hss, W_sp]  # M word embeddings not included
                 l2_loss = tf.contrib.layers.apply_regularization(
-                    tf.contrib.layers.l2_regularizer(self.l2_scale), weights_list=weights_list)
+                    tf.contrib.layers.l2_regularizer(self.l2_scale),
+                    weights_list=weights_list)
                 losses_reg += l2_loss
             if self.l1_scale > 0:
                 weights_list = [W_hss, W_sp]
                 l1_loss = tf.contrib.layers.apply_regularization(
-                    tf.contrib.layers.l1_regularizer(l1_scale), weights_list=weights_list)
+                    tf.contrib.layers.l1_regularizer(l1_scale),
+                    weights_list=weights_list)
                 losses_reg += l1_loss
 
         return losses, losses_reg, pred_labels, sketches_tf
