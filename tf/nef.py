@@ -313,7 +313,6 @@ def train():
                 logger.info("current best: %f at epoch %d" %
                             (best_valid, best_valid_epoch))
 
-
         logger.info("Training finished after %d epochs. "
                     "Best validation result: %f at epoch %d." \
                     % (epoch+1, best_valid, best_valid_epoch))
@@ -326,63 +325,65 @@ def test():
     :return:
     """
     logger.info("Testing")
-    FLAGS.restore = True  # has to be loaded
+    FLAGS.restore = True  # The model has to be loaded.
     with tf.Session() as sess:
 
-        # load the embeddings
-        src_embeddings = load_embedding(FLAGS.src_embeddings)
-        tgt_embeddings = load_embedding(FLAGS.tgt_embeddings)
-        src_vocab_size = src_embeddings.table.shape[0]
-        tgt_vocab_size = tgt_embeddings.table.shape[0]
+        # Load the embeddings.
+        reader = DatasetReader()
+        embeddings = reader.load_embeddings(FLAGS.embeddings)
+        vocabulary_size = embeddings.table.shape[0]
 
-        test_dir = FLAGS.data_dir+"/task2_en-de_test/test.corrected_full_parsed_features_with_tags"
-        test_feature_vectors, test_tgt_sentences, test_labels, test_label_dict = \
-            load_data(test_dir, src_embeddings, tgt_embeddings, train=False,
-                      labeled=True)
+        filepath_test = FLAGS.test_file
+        max_sentence_length = FLAGS.max_sentence_length
+        # TODO: Need to save the label dictionary from training.
+        # And maybe also the vocabulary?
+        test_sentences, test_labels, test_label_dict = \
+            reader.load_data(filepath_test,
+                             embeddings=embeddings,
+                             max_length=max_sentence_length,
+                             train=False)
+        num_labels = len(test_label_dict)
 
-        # load model
-        class_weights = [1, FLAGS.bad_weight]  #QE-specific
-        model = create_model(sess, src_vocab_size=src_vocab_size, tgt_vocab_size=tgt_vocab_size, buckets=None, forward_only=True, src_embeddings=src_embeddings,
-                             tgt_embeddings=tgt_embeddings, class_weights=class_weights)
+        # Bucket test data.
+        logger.info("Creating buckets for test data.")
+        factory = BucketFactory()
+        test_buckets = factory.build_buckets(np.asarray(test_sentences),
+                                              np.asarray(test_labels),
+                                              num_buckets=FLAGS.buckets)
+        bucket_lengths = [bucket.data.max_length() for bucket in train_buckets]
 
-        # bucketing test data
-        bucket_edges = model.buckets
-        test_buckets, test_reordering_indexes = put_in_buckets(np.asarray(test_feature_vectors),
-                                                               np.asarray(test_labels),
-                                                               buckets=bucket_edges)
-        test_buckets_sizes = {i: len(indx) for i, indx in test_reordering_indexes.items()}
+        # Load model.
+        model = create_model(sess,
+                             buckets=bucket_lengths,
+                             vocabulary_size=vocabulary_size,
+                             num_labels=num_labels,
+                             is_train=False,
+                             embeddings=embeddings)
 
-        logger.info("Creating buckets for test data:")
-        for i in test_buckets.keys():
-            X_test_padded, Y_test_padded, test_masks, test_seq_lens = test_buckets[i]
-            total_number_of_pads = sum([bucket_edges[i]-l for l in test_seq_lens])
-            logger.info("Bucket no %d with max length %d: %d instances, avg length %f,  " \
-                  "%d number of PADS in total" % (i, bucket_edges[i], test_buckets_sizes[i],
-                                                  np.average(test_seq_lens), total_number_of_pads))
-
-        # eval on test
+        # Evaluate on test.
         start_time_valid = time.time()
         test_loss = 0.0
         test_predictions = []
         test_true = []
-        for bucket_id in test_buckets.keys():
-            bucket_xs, bucket_ys, bucket_masks, bucket_seq_lens = test_buckets[bucket_id]
-            step_loss, predictions, step_loss_reg = model.batch_update(sess, bucket_id,
-                                                                       bucket_xs, bucket_ys,
-                                                                       bucket_masks,
-                                                                       bucket_seq_lens,
-                                                                       True)  # loss for whole bucket
-            test_predictions.extend(predictions)
-            test_true.extend(bucket_ys)
-            test_loss += np.sum(step_loss)
-        time_valid = time.time() - start_time_valid
-        test_accuracy = accuracy(test_true, test_predictions)
-        test_f1_1, test_f1_2 = f1s_binary(test_true, test_predictions)
-        message = "Test time %fs, loss %f, test acc. %f, f1 prod %f (%f/%f) " % \
-                  (time_valid, test_loss/len(test_labels), test_accuracy,
-                   test_f1_1*test_f1_2, test_f1_1, test_f1_2)
-        logger.info(message)
-        print message
+        for bucket_id in xrange(len(test_buckets)):
+            bucket = test_buckets[bucket_id]
+            if bucket == None:
+                continue
+            # Loss for whole bucket.
+            step_loss, predictions, step_loss_reg = \
+                model.batch_update(sess, bucket_id,
+                                   bucket.data,
+                                   True)
+                test_predictions.extend(predictions)
+                test_true.extend(bucket.data.labels)
+                test_loss += np.sum(step_loss)
+            time_valid = time.time() - start_time_valid
+            test_accuracy = evaluator.accuracy(test_true, test_predictions)
+            message = "Test time %fs, loss %f, test acc. %f" % \
+                      (epoch+1, time_valid, test_loss/len(test_labels),
+                       test_accuracy)
+            logger.info(message)
+            print message
 
 # Main function.
 def main(_):
