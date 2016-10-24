@@ -374,9 +374,9 @@ def test():
                 model.batch_update(sess, bucket_id,
                                    bucket.data,
                                    True)
-                test_predictions.extend(predictions)
-                test_true.extend(bucket.data.labels)
-                test_loss += np.sum(step_loss)
+            test_predictions.extend(predictions)
+            test_true.extend(bucket.data.labels)
+            test_loss += np.sum(step_loss)
             time_valid = time.time() - start_time_valid
             test_accuracy = evaluator.accuracy(test_true, test_predictions)
             message = "Test time %fs, loss %f, test acc. %f" % \
