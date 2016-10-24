@@ -15,12 +15,10 @@ class EasyFirstModel(object):
                  batch_size, optimizer, learning_rate, max_gradient_norm,
                  keep_prob=1.0, keep_prob_sketch=1.0, label_weights=None,
                  l2_scale=0.0, l1_scale=0.0, embeddings=None,
-                 update_embeddings=True,
-                 activation="tanh", buckets=None, track_sketches=False,
-                 model_dir="models/", is_train=True):
+                 update_embeddings=True, activation="tanh", buckets=None,
+                 track_sketches=False, model_dir="models/", is_train=True):
         """
         Initialize the model.
-        :param xxx:
         """
         self.num_labels = num_labels
         self.embedding_size = embedding_size
@@ -30,7 +28,6 @@ class EasyFirstModel(object):
         self.num_sketches = num_sketches
         self.encoder = encoder
         self.concatenate_last_layer = concatenate_last_layer
-
         self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.global_step = tf.Variable(0, trainable=False)
@@ -50,15 +47,14 @@ class EasyFirstModel(object):
         self.keep_prob = keep_prob
         self.keep_prob_sketch = keep_prob_sketch
         self.max_gradient_norm = max_gradient_norm
-
         self.embeddings = embeddings
         self.update_embeddings = update_embeddings
-
         self.model_dir = model_dir
 
         model = 'easy_first'
-        self.path = "%s/%s_K%d_D%d_J%d_r%d_batch%d_opt%s_lr%0.4f_gradnorm%0.2f" \
-                    "_concat%r_l2r%0.4f_l1r%0.4f_dropout%0.2f_sketchdrop%0.2f_updateemb%s_voc%d.model" % \
+        self.path = "%s/%s_K%d_D%d_J%d_r%d_batch%d_opt%s_lr%0.4f" \
+                    "_gradnorm%0.2f_concat%r_l2r%0.4f_l1r%0.4f_dropout%0.2f" \
+                    "_sketchdrop%0.2f_updateemb%s_voc%d.model" % \
                     (self.model_dir, model, self.num_labels,
                      self.embedding_size, self.hidden_size,
                      self.context_size, self.batch_size, optimizer,
@@ -68,10 +64,9 @@ class EasyFirstModel(object):
                      self.keep_prob_sketch, self.update_embeddings,
                      self.vocabulary_size)
         logger.info("Model path: %s"  % self.path)
-
         logger.info("Model with %s encoder" % self.encoder)
 
-        if update_embeddings:
+        if self.update_embeddings:
             logger.info("Updating the embeddings during training")
         else:
             logger.info("Keeping the embeddings fixed")
@@ -96,7 +91,7 @@ class EasyFirstModel(object):
 
         self.buckets = buckets
         buckets_path = self.path.split(".model", 2)[0] + ".buckets.pkl"
-        if self.buckets is not None:  # store bucket edges
+        if self.buckets is not None: # Store bucket lengths.
             logger.info("Dumping bucket edges in %s" % buckets_path)
             pkl.dump(self.buckets, open(buckets_path, "wb"))
         else:  # load bucket edges
@@ -118,11 +113,15 @@ class EasyFirstModel(object):
         if self.track_sketches:
             logger.info("Tracking sketches")
 
-        # prepare input feeds
+        self._create_computation_graphs(is_train=is_train)
+
+    # Create the computation graphs (one per bucket).
+    def _create_computation_graphs(self, is_train=True):
+        # Prepare input feeds.
         self.inputs = []
         self.labels = []
         self.masks = []
-        self.seq_lens = []
+        self.lengths = []
         self.losses = []
         self.losses_reg = []
         self.predictions = []
@@ -131,32 +130,46 @@ class EasyFirstModel(object):
         self.keep_prob_sketches = []
         self.is_trains = []
         window_size = 1
-        for j, max_len in enumerate(self.buckets):
+        for j, max_length in enumerate(self.buckets):
             self.inputs.append(tf.placeholder(tf.int32,
-                                              shape=[None, max_len, window_size],
+                                              shape=[None, max_length,
+                                                     window_size],
                                               name="inputs{0}".format(j)))
             self.labels.append(tf.placeholder(tf.int32,
-                                              shape=[None, max_len], name="labels{0}".format(j)))
+                                              shape=[None, max_length],
+                                              name="labels{0}".format(j)))
             self.masks.append(tf.placeholder(tf.int64,
-                                             shape=[None, max_len], name="masks{0}".format(j)))
-            self.seq_lens.append(tf.placeholder(tf.int64,
-                                                shape=[None], name="seq_lens{0}".format(j)))
-            self.keep_prob_sketches.append(tf.placeholder(tf.float32, name="keep_prob_sketch{0}".format(j)))
-            self.keep_probs.append(tf.placeholder(tf.float32, name="keep_prob{0}".format(j)))
-            self.is_trains.append(tf.placeholder(tf.bool, name="is_train{0}".format(j)))
-            with tf.variable_scope(tf.get_variable_scope(), reuse=True if j > 0 else None):
-                logger.info("Initializing parameters for bucket with max len %d" % max_len)
+                                             shape=[None, max_length],
+                                             name="masks{0}".format(j)))
+            self.lengths.append(tf.placeholder(tf.int64,
+                                               shape=[None],
+                                               name="lengths{0}".format(j)))
+            self.keep_prob_sketches.append(
+                tf.placeholder(tf.float32,
+                               name="keep_prob_sketch{0}".format(j)))
+            self.keep_probs.append(
+                tf.placeholder(tf.float32, name="keep_prob{0}".format(j)))
+            self.is_trains.append(
+                tf.placeholder(tf.bool, name="is_train{0}".format(j)))
+
+            with tf.variable_scope(tf.get_variable_scope(),
+                                   reuse=True if j > 0 else None):
+                logger.info("Initializing parameters for bucket with max len %d"
+                            % max_length)
 
                 bucket_losses, bucket_losses_reg, bucket_predictions, \
-                    sketches = self.forward(self.inputs[j], self.labels[j],
-                                            self.masks[j], max_len, self.seq_lens[j],
+                    sketches = self.forward(self.inputs[j],
+                                            self.labels[j],
+                                            self.masks[j],
+                                            max_length,
+                                            self.lengths[j],
                                             self.label_weights)
 
+                # List of tensors, one for each bucket.
                 self.losses_reg.append(bucket_losses_reg)
-                self.losses.append(bucket_losses) # list of tensors, one for each bucket
-                self.predictions.append(bucket_predictions)  # list of tensors, one for each bucket
-                #self.table = table  # shared for all buckets
-                if self.track_sketches:  # else sketches are just empty
+                self.losses.append(bucket_losses)
+                self.predictions.append(bucket_predictions)
+                if self.track_sketches:  # else sketches are just empty.
                     self.sketches_tfs.append(sketches)
 
         # gradients and update operation for training the model
@@ -164,22 +177,31 @@ class EasyFirstModel(object):
             params = tf.trainable_variables()
             self.gradient_norms = []
             self.updates = []
-            for j in xrange(len(buckets)):
-                gradients = tf.gradients(tf.reduce_mean(self.losses_reg[j], 0), params)  # batch normalization
-                if max_gradient_norm > -1:
-                    clipped_gradients, norm = tf.clip_by_global_norm(gradients, max_gradient_norm)
+            for j in xrange(len(self.buckets)):
+                gradients = tf.gradients(tf.reduce_mean(self.losses_reg[j], 0),
+                                         params)  # batch normalization
+                if self.max_gradient_norm > -1:
+                    clipped_gradients, norm = \
+                        tf.clip_by_global_norm(gradients,
+                                               self.max_gradient_norm)
                     self.gradient_norms.append(norm)
-                    update = self.optimizer.apply_gradients(zip(clipped_gradients, params))
+                    update = self.optimizer.apply_gradients(
+                        zip(clipped_gradients, params))
                     self.updates.append(update)
 
                 else:
                     self.gradient_norms.append(tf.global_norm(gradients))
-                    update = self.optimizer.apply_gradients(zip(gradients, params))
+                    update = self.optimizer.apply_gradients(zip(gradients,
+                                                                params))
                     self.updates.append(update)
 
-        self.saver = tf.train.Saver(tf.all_variables(), write_version=tf.train.SaverDef.V2)
+        self.saver = tf.train.Saver(tf.all_variables())
+        # Replace the above with this line, if using the bleeding edge version
+        # of TensorFlow.
+        #self.saver = tf.train.Saver(tf.all_variables(),
+        #                            write_version=tf.train.SaverDef.V2)
 
-
+    # Batch update of the model parameters.
     def batch_update(self, session, bucket_id, batch_data, forward_only=False):
         """
         Training step
@@ -190,16 +212,17 @@ class EasyFirstModel(object):
         :param forward_only:
         :return:
         """
-        # get input feed for bucket
+        # Get input feed for bucket.
         input_feed = {}
         input_feed[self.inputs[bucket_id].name] = batch_data.inputs
         input_feed[self.labels[bucket_id].name] = batch_data.labels
         input_feed[self.masks[bucket_id].name] = batch_data.masks
-        input_feed[self.seq_lens[bucket_id].name] = batch_data.lengths
-        input_feed[self.keep_probs[bucket_id].name] = 1 if forward_only else self.keep_prob
-        input_feed[self.keep_prob_sketches[bucket_id].name] = 1 if forward_only else self.keep_prob_sketch
+        input_feed[self.lengths[bucket_id].name] = batch_data.lengths
+        input_feed[self.keep_probs[bucket_id].name] = \
+            1 if forward_only else self.keep_prob
+        input_feed[self.keep_prob_sketches[bucket_id].name] = \
+            1 if forward_only else self.keep_prob_sketch
         input_feed[self.is_trains[bucket_id].name] = not forward_only
-        #print "input_feed", input_feed.keys()
 
         if not forward_only:
             output_feed = [self.losses[bucket_id],
@@ -211,37 +234,16 @@ class EasyFirstModel(object):
             output_feed = [self.losses[bucket_id],
                            self.predictions[bucket_id],
                            self.losses_reg[bucket_id]]
-        #print "output_feed", output_feed
 
         outputs = session.run(output_feed, input_feed)
-        #print "outputs", outputs
-
         predictions = []
-        for seq_len, pred in zip(batch_data.lengths, outputs[1]):
-                predictions.append(pred[:seq_len].tolist())
+        for length, pred in zip(batch_data.lengths, outputs[1]):
+            predictions.append(pred[:length].tolist())
 
-        return outputs[0], predictions, outputs[2]  # loss, predictions, regularized loss
+        # Outputs are: loss, predictions, regularized loss.
+        return outputs[0], predictions, outputs[2]
 
-
-    def get_sketches_for_single_sample(self, session, bucket_id, input, label, mask, seq_len):
-        """
-        fetch the sketches and the attention for a single sample from the graph
-        """
-        input_feed = {}
-        input_feed[self.inputs[bucket_id].name] = np.expand_dims(input, 0)  # batch_size = 1
-        input_feed[self.labels[bucket_id].name] = np.expand_dims(label, 0)
-        input_feed[self.masks[bucket_id].name] = np.expand_dims(mask, 0)
-        input_feed[self.seq_lens[bucket_id].name] = np.expand_dims(seq_len, 0)
-        input_feed[self.keep_probs[bucket_id].name] = 1.0
-        input_feed[self.keep_prob_sketches[bucket_id].name] = 1.0
-        input_feed[self.is_trains[bucket_id].name] = False
-
-        output_feed = [self.sketches_tfs[bucket_id]]
-        outputs = session.run(output_feed, input_feed)
-
-        return outputs[0]
-
-
+    # Forward computation to obtain predictions and losses.
     def forward(self, x, y, mask, max_sequence_length, sequence_lengths,
                 label_weights):
         """

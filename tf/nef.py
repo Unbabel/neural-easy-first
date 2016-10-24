@@ -4,114 +4,115 @@ import tensorflow as tf
 import numpy as np
 import time
 import sys
-from utils import *
 import math
-from embedding import *
 import logging
 import datetime
 import os
-from easy_first_model import *
+from easy_first_model import EasyFirstModel
+from embedding import Embedding
+from dataset import DatasetReader
 from buckets import BucketFactory
+from evaluator import Evaluator
 import pdb
 
 """
 Tensorflow implementation of the neural easy-first model
 - Single-State Model
-
-Baseline model
-- QUETCH
 """
 
-# Flags
-tf.app.flags.DEFINE_string("model", "ef_single_state",
-                           "Model for training: rnn or ef_single_state")
+# Flags.
+tf.app.flags.DEFINE_boolean("train", True, "True if training, False if "
+                            "testing.")
 
-tf.app.flags.DEFINE_boolean("train", True, "training model")
-tf.app.flags.DEFINE_integer("epochs", 50, "training epochs")
-tf.app.flags.DEFINE_integer("checkpoint_frequency", 100, "save model every x epochs")
+tf.app.flags.DEFINE_integer("epochs", 50, "Number of training epochs.")
+tf.app.flags.DEFINE_integer("checkpoint_frequency", 10, "Save model every N "
+                            "epochs.")
+tf.app.flags.DEFINE_string("optimizer", "adam",
+                           "Optimizer [sgd, adam, adagrad, adadelta, "
+                           "momentum].")
+tf.app.flags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
+tf.app.flags.DEFINE_integer("batch_size", 200,
+                            "Batch size to use during training.")
+tf.app.flags.DEFINE_float("max_gradient_norm", -1,
+                          "Max gradient norm for clipping (-1: no clipping).")
+tf.app.flags.DEFINE_integer("buckets", 10, "Number of buckets.")
 tf.app.flags.DEFINE_float("l2_scale", 0, "L2 regularization constant")
 tf.app.flags.DEFINE_float("l1_scale", 0, "L1 regularization constant")
+tf.app.flags.DEFINE_float("keep_prob", 1.0,
+                          "Keep probability for dropout during training "
+                          "(1: no dropout).")
+tf.app.flags.DEFINE_float("keep_prob_sketch", 1.0,
+                          "Keep probability for dropout during sketching "
+                          "(1: no dropout).")
 
-tf.app.flags.DEFINE_string("optimizer", "adam",
-                           "Optimizer [sgd, adam, adagrad, adadelta, momentum]")
-tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
-tf.app.flags.DEFINE_integer("batch_size", 200, #200,
-                            "Batch size to use during training.")
+tf.app.flags.DEFINE_string("training_file",
+                           "pos_tagging/data/en-ud-normalized_train.conll."
+                           "tagging",
+                           "Path to training file.")
+tf.app.flags.DEFINE_string("dev_file",
+                           "pos_tagging/data/en-ud-normalized_dev.conll."
+                           "tagging",
+                           "Path to dev file.")
+tf.app.flags.DEFINE_string("embeddings",
+                           "pos_tagging/data/embeddings/polyglot-en.pkl",
+                           "Path to word embeddings.")
+tf.app.flags.DEFINE_string("model_dir", "pos_tagging/models", "Path to folder "
+                           "where the model is stored.")
 
 tf.app.flags.DEFINE_integer("word_cutoff", 1, "Word cutoff.")
-
 tf.app.flags.DEFINE_integer("max_sentence_length", 50,
                             "Discard sentences longer than this length (both "
                             "for training and dev files. Set this to -1 to "
                             "keep all the sentences.")
-tf.app.flags.DEFINE_string("training_file",
-                           #"pos_tagging/data/en-ud-normalized_dev.conll.tagging",
-                           "pos_tagging/data/en-ud-normalized_train.conll.tagging",
-                           "Training file.")
-tf.app.flags.DEFINE_string("dev_file",
-                           "pos_tagging/data/en-ud-normalized_dev.conll.tagging",
-                           "Dev file.")
-tf.app.flags.DEFINE_string("model_dir", "pos_tagging/models", "Model directory")
-tf.app.flags.DEFINE_string("sketch_dir", "pos_tagging/sketches",
-                           "Directory where sketch dumps are stored")
-
-tf.app.flags.DEFINE_float("max_gradient_norm", -1,
-                          "max gradient norm for clipping (-1: no clipping)")
-
-tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
-#tf.app.flags.DEFINE_integer("buckets", 10, "number of buckets")
-tf.app.flags.DEFINE_string("embeddings",
-                           "pos_tagging/data/embeddings/polyglot-en.pkl",
-                           "path to word embeddings")
-
-tf.app.flags.DEFINE_boolean("update_embeddings", True, "update the embeddings")
-tf.app.flags.DEFINE_string("activation", "tanh", "activation function")
+tf.app.flags.DEFINE_boolean("update_embeddings", True,
+                            "True to update the embeddings; False otherwise.")
+tf.app.flags.DEFINE_string("activation", "tanh", "Activation function.")
 tf.app.flags.DEFINE_integer("embedding_size", 64,
-                            "dimensionality of embeddings")
-tf.app.flags.DEFINE_integer("hidden_size", 20, "dimensionality of hidden layers")
-tf.app.flags.DEFINE_string("encoder", "bilstm", "Encoder type: bilstm, lstm, "
-                           "or feedforward")
+                            "Dimensionality of embeddings.")
+tf.app.flags.DEFINE_integer("hidden_size", 20,
+                            "Dimensionality of hidden layers.")
+tf.app.flags.DEFINE_string("encoder", "bilstm",
+                           "Encoder type: bilstm, lstm, or feedforward")
 tf.app.flags.DEFINE_integer("context_size", 2, "context size")
 tf.app.flags.DEFINE_integer("num_sketches", -1, "Number of sketches. Set to "
                             "-1 to let the number of sketches to equal the "
                             "number of words.")
-
 tf.app.flags.DEFINE_boolean("concatenate_last_layer", True,
-                            "concatenating sketches and encoder states for prediction")
+                            "Concatenate sketches and encoder states for "
+                            "prediction")
 tf.app.flags.DEFINE_float("attention_discount_factor", 0.0,
-                          "Attention discount factor")
+                          "Attention discount factor.")
 tf.app.flags.DEFINE_float("attention_temperature", 1.0,
-                          "Attention temperature")
-tf.app.flags.DEFINE_float("keep_prob", 1.0,
-                          "keep probability for dropout during training "
-                          "(1: no dropout)")
-tf.app.flags.DEFINE_float("keep_prob_sketch", 1.0,
-                          "keep probability for dropout during sketching "
-                          "(1: no dropout)")
+                          "Attention temperature.")
 
-tf.app.flags.DEFINE_boolean("interactive", False, "interactive mode")
+tf.app.flags.DEFINE_boolean("interactive", False, "Set interactive mode.")
 tf.app.flags.DEFINE_boolean("restore", False,
-                            "restoring last session from checkpoint")
-tf.app.flags.DEFINE_integer("threads", 8, "number of threads")
+                            "Restore last session from checkpoint.")
+tf.app.flags.DEFINE_integer("threads", 8, "Number of threads.")
 tf.app.flags.DEFINE_boolean("track_sketches", False,
-                            "keep track of the sketches during learning")
+                            "Keep track of the sketches during learning.")
+tf.app.flags.DEFINE_string("sketch_dir", "pos_tagging/sketches",
+                           "Directory where sketch dumps are stored")
+
 FLAGS = tf.app.flags.FLAGS
 
+# Set logging file.
 log_file_path = FLAGS.model_dir + os.sep + \
                 str(datetime.datetime.now()).replace(" ", "-") + ".training.log"
 logging.basicConfig(filename=log_file_path)
 logger = logging.getLogger("NEF")
 logger.setLevel(logging.INFO)
 
+# Print all the flags.
+def print_config():
+    logger.info("Configuration: %s" % str(FLAGS.__dict__["__flags"]))
 
-
-def create_model(session, buckets, vocabulary_size, num_labels,
-                 is_train=True, embeddings=None,
-                 label_weights=None):
+# Create a new easy-first model.
+def create_model(session, buckets, vocabulary_size, num_labels, is_train=True,
+                 embeddings=None, label_weights=None):
     """
     Create a model
     :param session:
-    :param forward_only:
     :return:
     """
     np.random.seed(123)
@@ -151,14 +152,10 @@ def create_model(session, buckets, vocabulary_size, num_labels,
         session.run(tf.initialize_all_variables())
     return model
 
-
-def print_config():
-    logger.info("Configuration: %s" % str(FLAGS.__dict__["__flags"]))
-
-
+# Train a model.
 def train():
     """
-    Train a model
+    Train a model.
     :return:
     """
     print_config()
@@ -171,35 +168,41 @@ def train():
         filepath_train = FLAGS.training_file
         filepath_dev = FLAGS.dev_file
 
+        reader = DatasetReader()
         if FLAGS.embeddings == "":
             embeddings = None
         else:
-            embeddings = load_embedding(FLAGS.embeddings)
+            embeddings = reader.load_embeddings(FLAGS.embeddings)
 
         max_sentence_length = FLAGS.max_sentence_length
         train_sentences, train_labels, train_label_dict, train_embeddings = \
-            load_pos_data(filepath_train, embeddings,
-                          max_length=max_sentence_length,
-                          label_dict={}, train=True)
+            reader.load_data(filepath_train,
+                             embeddings=embeddings,
+                             max_length=max_sentence_length,
+                             label_dict={},
+                             train=True)
 
         # Use training vocab/labels for dev.
         dev_sentences, dev_labels, dev_label_dict = \
-            load_pos_data(filepath_dev, train_embeddings,
-                          max_length=max_sentence_length,
-                          label_dict=train_label_dict, train=False)
+            reader.load_data(filepath_dev,
+                             embeddings=train_embeddings,
+                             max_length=max_sentence_length,
+                             label_dict=train_label_dict,
+                             train=False)
 
-        vocab_size = train_embeddings.vocab_size()
+        vocabulary_size = train_embeddings.vocab_size()
         num_labels = len(train_label_dict)
 
         if FLAGS.embeddings == "":
-            embeddings = embedding.Embedding(None, train_embeddings.word2id,
-                                             train_embeddings.id2word,
-                                             train_embeddings.UNK_id,
-                                             train_embeddings.PAD_id,
-                                             train_embeddings.end_id,
-                                             train_embeddings.start_id)
+            embeddings = Embedding(None,
+                                   train_embeddings.word2id,
+                                   train_embeddings.id2word,
+                                   train_embeddings.UNK_id,
+                                   train_embeddings.PAD_id,
+                                   train_embeddings.end_id,
+                                   train_embeddings.start_id)
 
-        logger.info("vocab size: %d" % vocab_size)
+        logger.info("Vocabulary size: %d" % vocabulary_size)
         logger.info("Training on %d instances" % len(train_labels))
         logger.info("Validating on %d instances" % len(dev_labels))
         logger.info("Maximum sentence length (train): %d" % \
@@ -209,9 +212,7 @@ def train():
 
         maximum_sentence_length = max([len(y) for y in train_labels])
 
-        # bucketing training and dev data
-
-        # equal bucket sizes
+        # Bucket training and dev data (equal bucket sizes).
         factory = BucketFactory()
         train_buckets = factory.build_buckets(np.asarray(train_sentences),
                                               np.asarray(train_labels),
@@ -221,16 +222,16 @@ def train():
                                              np.asarray(dev_labels),
                                              reference_buckets=train_buckets)
 
-        # create the model
+        # Create the model.
         bucket_lengths = [bucket.data.max_length() for bucket in train_buckets]
-        model = create_model(sess, bucket_lengths, vocab_size, num_labels,
+        model = create_model(sess, bucket_lengths, vocabulary_size, num_labels,
                              is_train=True, embeddings=embeddings)
 
         # Training in epochs.
+        evaluator = Evaluator()
         best_valid = 0
         best_valid_epoch = 0
         for epoch in xrange(FLAGS.epochs):
-            current_sample = 0
             loss = 0.0
             loss_reg = 0.0
             train_predictions = []
@@ -239,7 +240,6 @@ def train():
 
             # Random bucket order.
             bucket_ids = np.random.permutation(range(len(train_buckets)))
-
             for bucket_id in bucket_ids:
                 bucket = train_buckets[bucket_id]
                 # Random order of samples in batch.
@@ -260,11 +260,11 @@ def train():
                     step_loss, predictions, step_loss_reg = \
                         model.batch_update(sess, bucket_id, batch_data, False)
                     loss_reg += np.sum(step_loss_reg)
-                    loss += np.sum(step_loss)  # sum over batch
+                    loss += np.sum(step_loss)  # Sum over batch.
                     bucket_loss += np.sum(step_loss)
                     bucket_loss_reg += np.sum(step_loss_reg)
                     train_predictions.extend(predictions)
-                    # needs to be stored because of random order
+                    # Needs to be stored because of random order.
                     train_true.extend(batch_data.labels)
 
                 logger.info("bucket %d - loss %0.2f - loss+reg %0.2f" %
@@ -272,7 +272,7 @@ def train():
                              bucket_loss / bucket.data.num_sequences(),
                              bucket_loss_reg / bucket.data.num_sequences()))
 
-            train_accuracy = accuracy(train_true, train_predictions)
+            train_accuracy = evaluator.accuracy(train_true, train_predictions)
             time_epoch = time.time() - start_time_epoch
 
             logger.info("EPOCH %d: epoch time %fs, loss %f, train acc. %f" % \
@@ -284,7 +284,7 @@ def train():
             dev_loss = 0.0
             dev_predictions = []
             dev_true = []
-            for bucket_id in range(len(dev_buckets)):
+            for bucket_id in xrange(len(dev_buckets)):
                 bucket = dev_buckets[bucket_id]
                 if bucket == None:
                     continue
@@ -297,8 +297,7 @@ def train():
                 dev_true.extend(bucket.data.labels)
                 dev_loss += np.sum(step_loss)
             time_valid = time.time() - start_time_valid
-            dev_accuracy = accuracy(dev_true, dev_predictions)
-            dev_f1_1, dev_f1_2 = f1s_binary(dev_true, dev_predictions)
+            dev_accuracy = evaluator.accuracy(dev_true, dev_predictions)
             logger.info("EPOCH %d: validation time %fs, loss %f, dev acc. %f" %
                         (epoch+1, time_valid, dev_loss/len(dev_labels),
                          dev_accuracy))
@@ -319,6 +318,8 @@ def train():
                     "Best validation result: %f at epoch %d." \
                     % (epoch+1, best_valid, best_valid_epoch))
 
+# Test the model.
+# TODO: refactor this part.
 def test():
     """
     Test a model
@@ -383,12 +384,10 @@ def test():
         logger.info(message)
         print message
 
-
+# Main function.
 def main(_):
-
     if not FLAGS.interactive:
         training = FLAGS.train
-
         if training:
             train()
         else:

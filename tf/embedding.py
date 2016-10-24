@@ -3,7 +3,8 @@ import operator
 import cPickle as pkl
 
 class Embedding:
-    def __init__(self, table, word2id, id2word, UNK_id, PAD_id, end_id, start_id):
+    def __init__(self, table, word2id, id2word,
+                 UNK_id, PAD_id, end_id, start_id):
         self.table = table
         self.word2id = word2id
         self.id2word = id2word
@@ -32,7 +33,9 @@ class Embedding:
         if word not in self.word2id.keys():
             assert self.table is not None
             new_v = np.zeros_like(self.table[0])
-            if "|" in word:  # lookup/add single words, then take their avg to initialize combination
+            # Lookup/add single words, then take their avg to initialize
+            # combination.
+            if "|" in word:
                 #print "Found multiple aligned words: %s" % word
                 self.multiple_aligned_words += 1
                 words = word.split("|")
@@ -70,7 +73,10 @@ class Embedding:
         :param file:
         :return:
         """
-        sorted_entries = sorted(self.word2id.items(), key=operator.itemgetter(1))  # sort entries by id, several words can have the same id (e.g. <s> and <S>)
+        # Sort entries by id, several words can have the same id
+        # (e.g. <s> and <S>).
+        sorted_entries = sorted(self.word2id.items(),
+                                key=operator.itemgetter(1))
         sorted_words, sorted_ids = zip(*sorted_entries) 
         vectors = self.table[np.array(sorted_ids)]
         assert len(sorted_words) == len(vectors)
