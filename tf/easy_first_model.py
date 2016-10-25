@@ -196,8 +196,8 @@ class EasyFirstModel(object):
                     self.updates.append(update)
 
         self.saver = tf.train.Saver(tf.all_variables())
-        # Replace the above with this line, if using the bleeding edge version
-        # of TensorFlow.
+        # Replace the above with this line, if using the bleeding edge
+        # version of TensorFlow.
         #self.saver = tf.train.Saver(tf.all_variables(),
         #                            write_version=tf.train.SaverDef.V2)
 

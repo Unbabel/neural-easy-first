@@ -15,7 +15,7 @@ class Embedding:
         self.added_words = 0
         self.multiple_aligned_words = 0
 
-    def vocab_size(self):
+    def vocabulary_size(self):
         return len(self.word2id)
 
     def get_id(self, word):

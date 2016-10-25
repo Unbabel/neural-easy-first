@@ -53,6 +53,10 @@ tf.app.flags.DEFINE_string("dev_file",
                            "pos_tagging/data/en-ud-normalized_dev.conll."
                            "tagging",
                            "Path to dev file.")
+tf.app.flags.DEFINE_string("test_file",
+                           "pos_tagging/data/en-ud-normalized_test.conll."
+                           "tagging",
+                           "Path to test file.")
 tf.app.flags.DEFINE_string("embeddings",
                            "pos_tagging/data/embeddings/polyglot-en.pkl",
                            "Path to word embeddings.")
@@ -190,7 +194,7 @@ def train():
                              label_dict=train_label_dict,
                              train=False)
 
-        vocabulary_size = train_embeddings.vocab_size()
+        vocabulary_size = train_embeddings.vocabulary_size()
         num_labels = len(train_label_dict)
 
         if FLAGS.embeddings == "":
@@ -331,17 +335,30 @@ def test():
         # Load the embeddings.
         reader = DatasetReader()
         embeddings = reader.load_embeddings(FLAGS.embeddings)
-        vocabulary_size = embeddings.table.shape[0]
 
         filepath_test = FLAGS.test_file
         max_sentence_length = FLAGS.max_sentence_length
+        # Fow now, we need this step to make sure we load the labels and
+        # embeddings consistent with the training data.
         # TODO: Need to save the label dictionary from training.
         # And maybe also the vocabulary?
-        test_sentences, test_labels, test_label_dict = \
-            reader.load_data(filepath_test,
+        filepath_train = FLAGS.training_file
+        _, _, train_label_dict, train_embeddings = \
+            reader.load_data(filepath_train,
                              embeddings=embeddings,
                              max_length=max_sentence_length,
+                             label_dict={},
+                             train=True)
+
+        test_sentences, test_labels, test_label_dict = \
+            reader.load_data(filepath_test,
+                             embeddings=train_embeddings,
+                             max_length=max_sentence_length,
+                             label_dict=train_label_dict,
                              train=False)
+
+        assert test_label_dict == train_label_dict
+        vocabulary_size = train_embeddings.vocabulary_size()
         num_labels = len(test_label_dict)
 
         # Bucket test data.
@@ -350,7 +367,7 @@ def test():
         test_buckets = factory.build_buckets(np.asarray(test_sentences),
                                               np.asarray(test_labels),
                                               num_buckets=FLAGS.buckets)
-        bucket_lengths = [bucket.data.max_length() for bucket in train_buckets]
+        bucket_lengths = [bucket.data.max_length() for bucket in test_buckets]
 
         # Load model.
         model = create_model(sess,
@@ -361,6 +378,7 @@ def test():
                              embeddings=embeddings)
 
         # Evaluate on test.
+        evaluator = Evaluator()
         start_time_valid = time.time()
         test_loss = 0.0
         test_predictions = []
@@ -377,13 +395,12 @@ def test():
             test_predictions.extend(predictions)
             test_true.extend(bucket.data.labels)
             test_loss += np.sum(step_loss)
-            time_valid = time.time() - start_time_valid
-            test_accuracy = evaluator.accuracy(test_true, test_predictions)
-            message = "Test time %fs, loss %f, test acc. %f" % \
-                      (epoch+1, time_valid, test_loss/len(test_labels),
-                       test_accuracy)
-            logger.info(message)
-            print message
+        time_valid = time.time() - start_time_valid
+        test_accuracy = evaluator.accuracy(test_true, test_predictions)
+        message = "Test time %fs, loss %f, test acc. %f" % \
+                  (time_valid, test_loss/len(test_labels), test_accuracy)
+        logger.info(message)
+        print message
 
 # Main function.
 def main(_):
