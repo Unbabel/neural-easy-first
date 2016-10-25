@@ -1,32 +1,53 @@
+# -*- coding: utf-8 -*-
+'''This module handles creation of buckets and data padding.'''
+
 import numpy as np
 import operator
 import logging
-import pdb
 
 class PaddedData(object):
+    '''A class for handling data padding.'''
     def __init__(self, inputs=None, labels=None, masks=None, lengths=None):
+        # Padded input sequences.
+        # Dimension is num_sequences x num_words x num_features_per_word.
         self.inputs = inputs
+        # Padded label sequences.
+        # Dimension is num_sequences x num_words.
         self.labels = labels
+        # Padding masks.
+        # Dimension is num_sequences x num_words.
         self.masks = masks
+        # Actual lengths for each sequence.
+        # Dimension is num_sequences.
         self.lengths = lengths
 
     def num_sequences(self):
+        '''Returns number of sequences in the data.'''
         return self.inputs.shape[0]
 
     def max_length(self):
+        '''Returns length of the sequences (including padding symbols).'''
         return self.inputs.shape[1]
 
     def num_features(self):
+        '''Returns number of features per word.'''
         return self.inputs.shape[2]
 
     def select(self, indices):
-        return PaddedData(self.inputs[indices,:,:],
-                          self.labels[indices,:],
-                          self.masks[indices,:],
+        '''Selects a subset of the sequences, as indexed by "indices" (useful
+        when splitting the data mini-batches).'''
+        return PaddedData(self.inputs[indices, :, :],
+                          self.labels[indices, :],
+                          self.masks[indices, :],
                           self.lengths[indices])
 
     def populate(self, input_sequences, label_sequences, max_length,
                  pad_symbol=0):
+        '''Given an array of "input sequences", an array of "label sequences"
+        (of the same size), a maximum length (which should be larger then or
+        equal to the largest sequence) and a padding symbol, populates this
+        object with these data, after padding it so that each sequence is
+        of size "max_length".'''
         num_sequences = len(input_sequences)
         num_features = len(input_sequences[0][0])
         lengths = []
@@ -52,16 +73,26 @@ class PaddedData(object):
 
 
 class Bucket(object):
+    '''A class to represent a bucket.'''
     def __init__(self, data, indices):
+        # An object of a class such as PaddedData, containing multiple
+        # data examples grouped into the same bucket.
         self.data = data
+        # An array of indices, one per example, refering back to the original
+        # dataset.
         self.indices = indices
 
 
 class BucketFactory(object):
+    '''A factory class to divide data into buckets.'''
     def __init__(self):
         pass
 
     def build_buckets(self, input_sequences, label_sequences, num_buckets=20):
+        '''Given an array of "input sequences", an array of "label sequences"
+        (of the same size), and the desired number of buckets, creates buckets
+        of equal size, and assigns data to each bucket trying to reduce the
+        amount of padding. Returns a array of buckets.'''
         # Sort data by length.
         lengths = [(len(s), i) for i, s in enumerate(input_sequences)]
         sorted_lengths = sorted(lengths, key=operator.itemgetter(0))
@@ -89,11 +120,11 @@ class BucketFactory(object):
 
     def put_in_buckets(self, input_sequences, label_sequences,
                        reference_buckets):
-        """
-        Given buckets, put the data in those buckets according to their length.
+        '''Given an array of "input sequences", an array of "label sequences"
+        (of the same size), and reference buckets, creates new buckets of the
+        same kind, and puts the data in these buckets according to their length.
         May create an additional bucket if the largest length exceeds that of
-        the last bucket.
-        """
+        the last bucket.'''
         bucket_lengths = [bucket.data.max_length() \
                           for bucket in reference_buckets]
         input_lengths = np.array([len(s) for s in input_sequences], dtype='int')

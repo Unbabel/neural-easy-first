@@ -1,15 +1,14 @@
+# -*- coding: utf-8 -*-
+'''This module implements a neural easy-first model.'''
+
 import tensorflow as tf
-import numpy as np
 import logging
 import cPickle as pkl
-import pdb
 
-logger = logging.getLogger("NEF")
+LOGGER = logging.getLogger("NEF")
 
 class EasyFirstModel(object):
-    """
-    Neural easy-first model
-    """
+    '''A class for a neural easy-first model.'''
     def __init__(self, num_labels, embedding_size, hidden_size, context_size,
                  vocabulary_size, num_sketches, encoder, concatenate_last_layer,
                  batch_size, optimizer, learning_rate, max_gradient_norm,
@@ -17,9 +16,6 @@ class EasyFirstModel(object):
                  l2_scale=0.0, l1_scale=0.0, embeddings=None,
                  update_embeddings=True, activation="tanh", buckets=None,
                  track_sketches=False, model_dir="models/", is_train=True):
-        """
-        Initialize the model.
-        """
         self.num_labels = num_labels
         self.embedding_size = embedding_size
         self.hidden_size = hidden_size
@@ -63,41 +59,41 @@ class EasyFirstModel(object):
                      self.l2_scale, self.l1_scale, self.keep_prob,
                      self.keep_prob_sketch, self.update_embeddings,
                      self.vocabulary_size)
-        logger.info("Model path: %s"  % self.path)
-        logger.info("Model with %s encoder" % self.encoder)
+        LOGGER.info("Model path: %s", self.path)
+        LOGGER.info("Model with %s encoder", self.encoder)
 
         if self.update_embeddings:
-            logger.info("Updating the embeddings during training")
+            LOGGER.info("Updating the embeddings during training")
         else:
-            logger.info("Keeping the embeddings fixed")
+            LOGGER.info("Keeping the embeddings fixed")
 
         if self.concatenate_last_layer:
-            logger.info("Concatenating H and S for predictions")
+            LOGGER.info("Concatenating H and S for predictions")
 
         if self.l2_scale > 0:
-            logger.info("L2 regularizer with weight %f" % self.l2_scale)
+            LOGGER.info("L2 regularizer with weight %f", self.l2_scale)
 
         if self.l1_scale > 0:
-            logger.info("L1 regularizer with weight %f" % self.l1_scale)
+            LOGGER.info("L1 regularizer with weight %f", self.l1_scale)
 
         if not is_train:
             self.keep_prob = 1.
             self.keep_prob_sketch = 1.
         if self.keep_prob < 1.:
-            logger.info("Dropout with p=%f" % self.keep_prob)
+            LOGGER.info("Dropout with p=%f", self.keep_prob)
         if self.keep_prob_sketch < 1:
-            logger.info("Dropout during sketching with p=%f" %
+            LOGGER.info("Dropout during sketching with p=%f",
                         self.keep_prob_sketch)
 
         self.buckets = buckets
         buckets_path = self.path.split(".model", 2)[0] + ".buckets.pkl"
         if self.buckets is not None: # Store bucket lengths.
-            logger.info("Dumping bucket edges in %s" % buckets_path)
+            LOGGER.info("Dumping bucket edges in %s", buckets_path)
             pkl.dump(self.buckets, open(buckets_path, "wb"))
         else:  # load bucket edges
-            logger.info("Loading bucket edges from %s" % buckets_path)
+            LOGGER.info("Loading bucket edges from %s", buckets_path)
             self.buckets = pkl.load(open(buckets_path, "rb"))
-        logger.info("Buckets: %s" % str(self.buckets))
+        LOGGER.info("Buckets: %s", str(self.buckets))
 
         if activation == 'tanh':
             self.activation = tf.nn.tanh
@@ -107,16 +103,32 @@ class EasyFirstModel(object):
             self.activation = tf.nn.sigmoid
         else:
             raise NotImplementedError
-        logger.info("Activation function %s" % self.activation.__name__)
+        LOGGER.info("Activation function %s", self.activation.__name__)
 
         self.track_sketches = track_sketches
         if self.track_sketches:
-            logger.info("Tracking sketches")
+            LOGGER.info("Tracking sketches")
 
+        self.inputs = []
+        self.labels = []
+        self.masks = []
+        self.lengths = []
+        self.losses = []
+        self.losses_reg = []
+        self.predictions = []
+        self.sketches_tfs = []
+        self.keep_probs = []
+        self.keep_prob_sketches = []
+        self.is_trains = []
+        self.gradient_norms = []
+        self.updates = []
+        self.saver = None
         self._create_computation_graphs(is_train=is_train)
 
-    # Create the computation graphs (one per bucket).
     def _create_computation_graphs(self, is_train=True):
+        '''Creates the computation graphs (one per bucket). If is_train=False,
+        smaller computation graphs are created which do not compute gradients
+        and updates.'''
         # Prepare input feeds.
         self.inputs = []
         self.labels = []
@@ -154,8 +166,8 @@ class EasyFirstModel(object):
 
             with tf.variable_scope(tf.get_variable_scope(),
                                    reuse=True if j > 0 else None):
-                logger.info("Initializing parameters for bucket with max len %d"
-                            % max_length)
+                LOGGER.info("Initializing parameters for bucket with max len "
+                            "%d", max_length)
 
                 bucket_losses, bucket_losses_reg, bucket_predictions, \
                     sketches = self.forward(self.inputs[j],
@@ -201,17 +213,15 @@ class EasyFirstModel(object):
         #self.saver = tf.train.Saver(tf.all_variables(),
         #                            write_version=tf.train.SaverDef.V2)
 
-    # Batch update of the model parameters.
     def batch_update(self, session, bucket_id, batch_data, forward_only=False):
-        """
-        Training step
-        :param session:
-        :param bucket_id:
-        :param inputs:
-        :param labels:
-        :param forward_only:
-        :return:
-        """
+        '''Performs a Batch update of the model parameters.
+        :param session: the TensorFlow session.
+        :param bucket_id: the bucket being processed.
+        :param batch_data: the data being processed within that bucket.
+        :param forward_only: True if no backward step is required (e.g. test
+        time).
+        :return: loss, predictions, and regularized loss for this batch.
+        '''
         # Get input feed for bucket.
         input_feed = {}
         input_feed[self.inputs[bucket_id].name] = batch_data.inputs
@@ -243,16 +253,18 @@ class EasyFirstModel(object):
         # Outputs are: loss, predictions, regularized loss.
         return outputs[0], predictions, outputs[2]
 
-    # Forward computation to obtain predictions and losses.
     def forward(self, x, y, mask, max_sequence_length, sequence_lengths,
                 label_weights):
-        """
-        Compute a forward step for the easy first model and return loss and
+        '''Computes a forward step for the easy first model and return loss and
         predictions for a batch.
-        :param x:
-        :param y:
-        :return:
-        """
+        :param x: the input sequences for a batch.
+        :param y: the label sequences for that batch.
+        :param mask: a mask telling the sequence lengths.
+        :param max_sequence_length: sequence length for the batch.
+        :param label_weights: costs for each label (used to compute the loss).
+        :return: loss, regularized loss, predictions, and sketches for this
+        batch.
+        '''
         batch_size = tf.shape(x)[0]
         with tf.name_scope("embedding"):
             from layers import EmbeddingLayer
@@ -281,10 +293,11 @@ class EasyFirstModel(object):
                 state_size = 2*self.hidden_size
             else:
                 input_size = tf.shape(emb)[2]
-                feedforward_layer = FeedforwardLayer(sequence_length=sequence_length,
-                                                     input_size=input_size,
-                                                     hidden_size=self.hidden_size,
-                                                     batch_size=batch_size)
+                feedforward_layer = \
+                    FeedforwardLayer(sequence_length=max_sequence_length,
+                                     input_size=input_size,
+                                     hidden_size=self.hidden_size,
+                                     batch_size=batch_size)
                 H = feedforward_layer.forward(emb)
                 state_size = self.hidden_size
 
@@ -323,15 +336,16 @@ class EasyFirstModel(object):
             losses, pred_labels = score_layer.forward(S, y)
             losses_reg = losses
             if self.l2_scale > 0:
-                weights_list = [W_hss, W_sp]  # M word embeddings not included
+                # M word embeddings not included.
+                weights_list = [sketch_layer.W_cs, score_layer.W_sp]
                 l2_loss = tf.contrib.layers.apply_regularization(
                     tf.contrib.layers.l2_regularizer(self.l2_scale),
                     weights_list=weights_list)
                 losses_reg += l2_loss
             if self.l1_scale > 0:
-                weights_list = [W_hss, W_sp]
+                weights_list = [sketch_layer.W_cs, score_layer.W_sp]
                 l1_loss = tf.contrib.layers.apply_regularization(
-                    tf.contrib.layers.l1_regularizer(l1_scale),
+                    tf.contrib.layers.l1_regularizer(self.l1_scale),
                     weights_list=weights_list)
                 losses_reg += l1_loss
 

@@ -1,35 +1,39 @@
+# -*- coding: utf-8 -*-
+'''This module handles loading and storage of word embeddings.'''
+
 import numpy as np
 import operator
 import cPickle as pkl
 
-class Embedding:
+class Embedding(object):
+    '''A class for handling word embeddings.'''
     def __init__(self, table, word2id, id2word,
-                 UNK_id, PAD_id, end_id, start_id):
+                 unk_id, pad_id, end_id, start_id):
         self.table = table
         self.word2id = word2id
         self.id2word = id2word
-        self.UNK_id = UNK_id
-        self.PAD_id = PAD_id
+        self.unk_id = unk_id
+        self.pad_id = pad_id
         self.end_id = end_id
         self.start_id = start_id
         self.added_words = 0
         self.multiple_aligned_words = 0
 
     def vocabulary_size(self):
+        '''Returns the number of words in the vocabulary.'''
         return len(self.word2id)
 
     def get_id(self, word):
-        return self.word2id.get(word, self.UNK_id)
+        '''Given a word, return its id or the UNK id if the word is not in the
+        vocabulary.'''
+        return self.word2id.get(word, self.unk_id)
 
     def lookup(self, word):
+        '''Given a word, return its embedding. Handles unknown words.'''
         return self.table[self.word2id(word)]
 
-    def add_word(self,word):
-        """
-        add a word to an existing embedding and set its embedding to zero
-        :param word:
-        :return:
-        """
+    def add_word(self, word):
+        '''Add a word to an existing embedding and set its embedding to zero.'''
         if word not in self.word2id.keys():
             assert self.table is not None
             new_v = np.zeros_like(self.table[0])
@@ -59,29 +63,17 @@ class Embedding:
             #print "word exists", word, new_id
         return new_id
 
-    def set_table(self, table):
-        """
-        Set the lookup table by a numpy array
-        :param table:
-        :return:
-        """
-        self.table = table
-
-    def store(self, file):
-        """
-        dump embeddings with pickle
-        :param file:
-        :return:
-        """
+    def store(self, filepath):
+        '''Dump embeddings to a pickle file.'''
         # Sort entries by id, several words can have the same id
         # (e.g. <s> and <S>).
         sorted_entries = sorted(self.word2id.items(),
                                 key=operator.itemgetter(1))
-        sorted_words, sorted_ids = zip(*sorted_entries) 
+        sorted_words, sorted_ids = zip(*sorted_entries)
         vectors = self.table[np.array(sorted_ids)]
         assert len(sorted_words) == len(vectors)
-        pkl.dump((sorted_words, vectors), open(file, "wb"))
-        print "Dumped embedding to file %s" % file
+        pkl.dump((sorted_words, vectors), open(filepath, "wb"))
+        print "Dumped embedding to file %s" % filepath
 
     def __str__(self):
         return "Embeddings with vocab_size=%d" % (len(self.word2id))

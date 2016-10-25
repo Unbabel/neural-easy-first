@@ -1,29 +1,32 @@
+# -*- coding: utf-8 -*-
+'''This module evaluates a sequence tagger.'''
 
 class Evaluator(object):
+    '''A class for evaluating a sequence tagger.'''
     def __init__(self):
         pass
 
     def accuracy(self, y_i, predictions):
         """
-        Accuracy of word predictions
+        Accuracy of word predictions.
         :param y_i:
         :param predictions:
-        :return:
+        :return: accuracy
         """
         assert len(y_i) == len(predictions)
-        correct_words, all = 0.0, 0.0
+        correct_words, total = 0.0, 0.0
         for y, y_pred in zip(y_i, predictions):
             # Predictions can be shorter than y, because inputs are cropped to
             # specified maximum length.
             for y_w, y_pred_w in zip(y, y_pred):
-                all += 1
+                total += 1
                 if y_pred_w == y_w:
                     correct_words += 1
-        return correct_words/all
+        return correct_words/total
 
-    def f1s_binary(y_i, predictions):
+    def f1s_binary(self, y_i, predictions):
         """
-        F1 scores of two-class predictions
+        F1 scores of two-class predictions.
         :param y_i:
         :param predictions:
         :return: F1_class1, F1_class2

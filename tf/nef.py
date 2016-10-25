@@ -1,10 +1,10 @@
 # coding=utf-8
+'''This module allows training and testing a Tensorflow implementation of the
+neural easy-first model.'''
 
 import tensorflow as tf
 import numpy as np
 import time
-import sys
-import math
 import logging
 import datetime
 import os
@@ -13,12 +13,6 @@ from embedding import Embedding
 from dataset import DatasetReader
 from buckets import BucketFactory
 from evaluator import Evaluator
-import pdb
-
-"""
-Tensorflow implementation of the neural easy-first model
-- Single-State Model
-"""
 
 # Flags.
 tf.app.flags.DEFINE_boolean("train", True, "True if training, False if "
@@ -101,24 +95,19 @@ tf.app.flags.DEFINE_string("sketch_dir", "pos_tagging/sketches",
 FLAGS = tf.app.flags.FLAGS
 
 # Set logging file.
-log_file_path = FLAGS.model_dir + os.sep + \
-                str(datetime.datetime.now()).replace(" ", "-") + ".training.log"
-logging.basicConfig(filename=log_file_path)
-logger = logging.getLogger("NEF")
-logger.setLevel(logging.INFO)
+LOG_FILE = FLAGS.model_dir + os.sep + \
+           str(datetime.datetime.now()).replace(" ", "-") + ".training.log"
+logging.basicConfig(filename=LOG_FILE)
+LOGGER = logging.getLogger("NEF")
+LOGGER.setLevel(logging.INFO)
 
-# Print all the flags.
 def print_config():
-    logger.info("Configuration: %s" % str(FLAGS.__dict__["__flags"]))
+    '''Print all the flags.'''
+    LOGGER.info("Configuration: %s", str(FLAGS.__dict__["__flags"]))
 
-# Create a new easy-first model.
 def create_model(session, buckets, vocabulary_size, num_labels, is_train=True,
                  embeddings=None, label_weights=None):
-    """
-    Create a model
-    :param session:
-    :return:
-    """
+    '''Create a new easy-first model.'''
     np.random.seed(123)
     tf.set_random_seed(123)
     model = EasyFirstModel(num_labels=num_labels,
@@ -148,22 +137,18 @@ def create_model(session, buckets, vocabulary_size, num_labels, is_train=True,
     checkpoint = tf.train.get_checkpoint_state(FLAGS.model_dir)
     if checkpoint and tf.gfile.Exists(checkpoint.model_checkpoint_path) \
        and FLAGS.restore:
-        logger.info("Reading model parameters from %s" %
+        LOGGER.info("Reading model parameters from %s",
                     checkpoint.model_checkpoint_path)
         model.saver.restore(session, checkpoint.model_checkpoint_path)
     else:
-        logger.info("Creating model with fresh parameters")
+        LOGGER.info("Creating model with fresh parameters")
         session.run(tf.initialize_all_variables())
     return model
 
-# Train a model.
 def train():
-    """
-    Train a model.
-    :return:
-    """
+    '''Train a model.'''
     print_config()
-    logger.info("Training on %d thread(s)" % FLAGS.threads)
+    LOGGER.info("Training on %d thread(s)", FLAGS.threads)
 
     with tf.Session(config=tf.ConfigProto( \
         intra_op_parallelism_threads=FLAGS.threads)) as sess:
@@ -183,11 +168,11 @@ def train():
             reader.load_data(filepath_train,
                              embeddings=embeddings,
                              max_length=max_sentence_length,
-                             label_dict={},
+                             label_dict=None,
                              train=True)
 
         # Use training vocab/labels for dev.
-        dev_sentences, dev_labels, dev_label_dict = \
+        dev_sentences, dev_labels, _ = \
             reader.load_data(filepath_dev,
                              embeddings=train_embeddings,
                              max_length=max_sentence_length,
@@ -201,20 +186,18 @@ def train():
             embeddings = Embedding(None,
                                    train_embeddings.word2id,
                                    train_embeddings.id2word,
-                                   train_embeddings.UNK_id,
-                                   train_embeddings.PAD_id,
+                                   train_embeddings.unk_id,
+                                   train_embeddings.pad_id,
                                    train_embeddings.end_id,
                                    train_embeddings.start_id)
 
-        logger.info("Vocabulary size: %d" % vocabulary_size)
-        logger.info("Training on %d instances" % len(train_labels))
-        logger.info("Validating on %d instances" % len(dev_labels))
-        logger.info("Maximum sentence length (train): %d" % \
+        LOGGER.info("Vocabulary size: %d", vocabulary_size)
+        LOGGER.info("Training on %d instances", len(train_labels))
+        LOGGER.info("Validating on %d instances", len(dev_labels))
+        LOGGER.info("Maximum sentence length (train): %d",
                     max([len(y) for y in train_labels]))
-        logger.info("Maximum sentence length (dev): %d" % \
+        LOGGER.info("Maximum sentence length (dev): %d",
                     max([len(y) for y in dev_labels]))
-
-        maximum_sentence_length = max([len(y) for y in train_labels])
 
         # Bucket training and dev data (equal bucket sizes).
         factory = BucketFactory()
@@ -258,7 +241,7 @@ def train():
                 bucket_loss = 0
                 bucket_loss_reg = 0
                 # Make update on each batch.
-                for i, batch_samples in enumerate(batch_ids):
+                for batch_samples in batch_ids:
                     batch_data = bucket.data.select(batch_samples)
                     # Loss for each instance in batch.
                     step_loss, predictions, step_loss_reg = \
@@ -271,17 +254,18 @@ def train():
                     # Needs to be stored because of random order.
                     train_true.extend(batch_data.labels)
 
-                logger.info("bucket %d - loss %0.2f - loss+reg %0.2f" %
-                            (bucket_id,
-                             bucket_loss / bucket.data.num_sequences(),
-                             bucket_loss_reg / bucket.data.num_sequences()))
+                LOGGER.info("bucket %d - loss %0.5f - loss+reg %0.5f",
+                            bucket_id,
+                            bucket_loss / bucket.data.num_sequences(),
+                            bucket_loss_reg / bucket.data.num_sequences())
 
             train_accuracy = evaluator.accuracy(train_true, train_predictions)
             time_epoch = time.time() - start_time_epoch
 
-            logger.info("EPOCH %d: epoch time %fs, loss %f, train acc. %f" % \
-                        (epoch+1, time_epoch, loss/len(train_labels),
-                         train_accuracy))
+            LOGGER.info("EPOCH %d: epoch time %fs, loss %f, loss+reg %f, "
+                        "train acc. %f",
+                        epoch+1, time_epoch, loss/len(train_labels),
+                        loss_reg/len(train_labels), train_accuracy)
 
             # Eval on dev (every epoch).
             start_time_valid = time.time()
@@ -302,11 +286,11 @@ def train():
                 dev_loss += np.sum(step_loss)
             time_valid = time.time() - start_time_valid
             dev_accuracy = evaluator.accuracy(dev_true, dev_predictions)
-            logger.info("EPOCH %d: validation time %fs, loss %f, dev acc. %f" %
-                        (epoch+1, time_valid, dev_loss/len(dev_labels),
-                         dev_accuracy))
+            LOGGER.info("EPOCH %d: validation time %fs, loss %f, dev acc. %f",
+                        epoch+1, time_valid, dev_loss/len(dev_labels),
+                        dev_accuracy)
             if dev_accuracy > best_valid:
-                logger.info("NEW BEST!")
+                LOGGER.info("NEW BEST!")
                 best_valid = dev_accuracy
                 best_valid_epoch = epoch+1
                 # Save checkpoint.
@@ -314,21 +298,16 @@ def train():
                                  global_step=model.global_step,
                                  write_meta_graph=False)
             else:
-                logger.info("current best: %f at epoch %d" %
-                            (best_valid, best_valid_epoch))
+                LOGGER.info("current best: %f at epoch %d",
+                            best_valid, best_valid_epoch)
 
-        logger.info("Training finished after %d epochs. "
-                    "Best validation result: %f at epoch %d." \
-                    % (epoch+1, best_valid, best_valid_epoch))
+        LOGGER.info("Training finished after %d epochs. "
+                    "Best validation result: %f at epoch %d.",
+                    FLAGS.epochs, best_valid, best_valid_epoch)
 
-# Test the model.
-# TODO: refactor this part.
 def test():
-    """
-    Test a model
-    :return:
-    """
-    logger.info("Testing")
+    '''Test the model.'''
+    LOGGER.info("Testing")
     FLAGS.restore = True  # The model has to be loaded.
     with tf.Session() as sess:
 
@@ -362,7 +341,7 @@ def test():
         num_labels = len(test_label_dict)
 
         # Bucket test data.
-        logger.info("Creating buckets for test data.")
+        LOGGER.info("Creating buckets for test data.")
         factory = BucketFactory()
         test_buckets = factory.build_buckets(np.asarray(test_sentences),
                                               np.asarray(test_labels),
@@ -388,10 +367,9 @@ def test():
             if bucket == None:
                 continue
             # Loss for whole bucket.
-            step_loss, predictions, step_loss_reg = \
-                model.batch_update(sess, bucket_id,
-                                   bucket.data,
-                                   True)
+            step_loss, predictions, _ = model.batch_update(sess, bucket_id,
+                                                           bucket.data,
+                                                           True)
             test_predictions.extend(predictions)
             test_true.extend(bucket.data.labels)
             test_loss += np.sum(step_loss)
@@ -399,11 +377,11 @@ def test():
         test_accuracy = evaluator.accuracy(test_true, test_predictions)
         message = "Test time %fs, loss %f, test acc. %f" % \
                   (time_valid, test_loss/len(test_labels), test_accuracy)
-        logger.info(message)
+        LOGGER.info(message)
         print message
 
-# Main function.
 def main(_):
+    '''Main function.'''
     if not FLAGS.interactive:
         training = FLAGS.train
         if training:
@@ -411,7 +389,7 @@ def main(_):
         else:
             test()
     else:
-        raise NonImplementedError
+        raise NotImplementedError
 
 if __name__ == "__main__":
     tf.app.run()

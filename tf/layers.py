@@ -1,10 +1,11 @@
+# -*- coding: utf-8 -*-
+'''This module implements several neural network layers.'''
+
 import tensorflow as tf
 import numpy as np
-#import logging
-#import cPickle as pkl
-import pdb
 
 class EmbeddingLayer(object):
+    '''A class for an embedding layer.'''
     def __init__(self, vocabulary_size, embedding_size, keep_prob,
                  embedding_table=None, update_embeddings=True):
         self.vocabulary_size = vocabulary_size
@@ -12,8 +13,10 @@ class EmbeddingLayer(object):
         self.keep_prob = keep_prob
         self.embedding_table = embedding_table
         self.update_embeddings = update_embeddings
+        self.M = None
 
     def _create_variables(self):
+        '''Creates the parameter variables.'''
         if self.embedding_table is None:
             self.M = tf.get_variable(name="M",
                                      shape=[self.vocabulary_size,
@@ -32,7 +35,8 @@ class EmbeddingLayer(object):
             assert len(self.embedding_table[0] == self.embedding_size)
 
     def forward(self, input_sequence):
-        # input_sequence is batch_size x sequence_length x num_features.
+        '''Performs a forward step.
+        input_sequence is batch_size x sequence_length x num_features.'''
         self._create_variables()
 
         batch_size = tf.shape(input_sequence)[0]
@@ -51,13 +55,19 @@ class EmbeddingLayer(object):
         return emb
 
 class FeedforwardLayer(object):
-    def __init__(self, sequence_length, input_size, hidden_size, batch_size):
-        self.sequence_lengths = sequence_lengths
+    '''A class for a feedforward layer.'''
+    def __init__(self, sequence_length, input_size, hidden_size, batch_size,
+                 activation=tf.nn.tanh):
+        self.sequence_length = sequence_length
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.batch_size = batch_size
+        self.activation = activation
+        self.W_xh = None
+        self.b_h = None
 
     def _create_variables(self):
+        '''Creates the parameter variables.'''
         self.W_xh = tf.get_variable(name="W_xh",
                                     shape=[self.input_size,
                                            self.hidden_size],
@@ -70,31 +80,36 @@ class FeedforwardLayer(object):
                                            dtype=tf.float32), name="b_h")
 
     def forward(self, input_sequence):
-        # input_sequence is batch_size x sequence_length x input_size.
+        '''Performs a forward step.
+        input_sequence is batch_size x sequence_length x input_size.'''
         self._create_variables()
 
         # fully-connected layer on top of embeddings to reduce size
         x = tf.reshape(input_sequence, [self.batch_size*self.sequence_length,
                                         self.input_size])
-        H = tf.reshape(activation(tf.matmul(x, self.W_xh) + b_h), \
+        H = tf.reshape(self.activation(tf.matmul(x, self.W_xh) + self.b_h), \
                        [self.batch_size,
                         self.sequence_length,
                         self.hidden_size])
         return H
 
 class RNNLayer(object):
+    '''A class for a vanilla recurrent layer.'''
     def __init__(self, sequence_lengths, hidden_size, batch_size, keep_prob):
         self.sequence_lengths = sequence_lengths
         self.hidden_size = hidden_size
         self.batch_size = batch_size
         self.keep_prob = keep_prob
+        self.cell = None
 
     def _create_variables(self):
+        '''Creates the parameter variables.'''
         self.cell = tf.nn.rnn_cell.RNNCell(num_units=self.hidden_size,
                                            state_is_tuple=True)
 
     def forward(self, input_sequence):
-        # input_sequence is batch_size x max_sequence_length x input_size.
+        '''Performs a forward step.
+        input_sequence is batch_size x max_sequence_length x input_size.'''
         self._create_variables()
 
         # Dropout on RNN.
@@ -104,7 +119,7 @@ class RNNLayer(object):
             output_keep_prob=self.keep_prob)
 
         outputs, _, = tf.nn.dynamic_rnn(
-            cell=self.cell, inputs=input_sequence,
+            cell=cell, inputs=input_sequence,
             sequence_length=self.sequence_lengths,
             dtype=tf.float32, time_major=False)
 
@@ -112,25 +127,33 @@ class RNNLayer(object):
         return H
 
 class LSTMLayer(RNNLayer):
+    '''A class for a LSTM recurrent layer. Derives from a vanilla RNN.'''
     def __init__(self, sequence_lengths, hidden_size, batch_size, keep_prob):
-        RNNLayer.__init__(self, sequence_lengths, hidden_size, batch_size, keep_prob)
+        RNNLayer.__init__(self, sequence_lengths, hidden_size, batch_size,
+                          keep_prob)
 
     def _create_variables(self):
+        '''Creates the parameter variables.'''
         self.cell = tf.nn.rnn_cell.LSTMCell(num_units=self.hidden_size,
                                             state_is_tuple=True)
 
 class BILSTMLayer(LSTMLayer):
+    '''A class for a bidirectional LSTM recurrent layer. Derives from a LSTM.'''
     def __init__(self, sequence_lengths, hidden_size, batch_size, keep_prob):
-        LSTMLayer.__init__(self, sequence_lengths, hidden_size, batch_size, keep_prob)
+        LSTMLayer.__init__(self, sequence_lengths, hidden_size, batch_size,
+                           keep_prob)
+        self.bw_cell = None
 
     def _create_variables(self):
+        '''Creates the parameter variables.'''
         LSTMLayer._create_variables(self)
         with tf.name_scope("bw_cell"):
             self.bw_cell = tf.nn.rnn_cell.LSTMCell( \
                 num_units=self.hidden_size, state_is_tuple=True)
 
     def forward(self, input_sequence):
-        # input_sequence is batch_size x max_sequence_length x input_size.
+        '''Performs a forward step.
+        input_sequence is batch_size x max_sequence_length x input_size.'''
         self._create_variables()
 
         # Dropout on LSTM.
@@ -148,13 +171,13 @@ class BILSTMLayer(LSTMLayer):
                 fw_cell, bw_cell, input_sequence,
                 sequence_length=self.sequence_lengths,
                 dtype=tf.float32, time_major=False)
-            outputs = tf.concat(2, outputs)
-            state_size = 2*self.hidden_size # concat of fw and bw lstm output.
+            outputs = tf.concat(2, outputs) # concat of fw and bw lstm output.
 
         H = outputs
         return H
 
 class ScoreLayer(object):
+    '''A class for a score (softmax) layer.'''
     def __init__(self, sequence_length, input_size, num_labels, label_weights,
                  batch_size, batch_mask):
         self.sequence_length = sequence_length
@@ -163,8 +186,11 @@ class ScoreLayer(object):
         self.label_weights = label_weights,
         self.batch_size = batch_size
         self.batch_mask = batch_mask
+        self.w_p = None
+        self.W_sp = None
 
     def _create_variables(self):
+        '''Creates the parameter variables.'''
         # Create matrix and bias variables for computing
         # s = tanh(W_cs*c_bar + w_s).
         self.w_p = tf.get_variable(name="w_p", shape=[self.num_labels],
@@ -178,9 +204,8 @@ class ScoreLayer(object):
                                             uniform=True, dtype=tf.float32))
 
     def _score_predict_loss(self, score_input):
-        """
-        Predict a label for an input, compute the loss and return label and loss
-        """
+        '''Predict a label for an input, compute the loss and return label and
+        loss.'''
         [x, y] = score_input
 
         word_label_score = tf.matmul(tf.reshape(x,
@@ -203,17 +228,17 @@ class ScoreLayer(object):
         return [word_preds, cross_entropy]
 
     def forward(self, input_sequence, y):
+        '''Performs a forward step.'''
+        # TODO: this is not using the label_weights!
         self._create_variables()
-
         if self.label_weights is not None:
             label_weights = tf.constant(self.label_weights,
                                         name="label_weights")
         else:
             label_weigths = None
 
-        f = lambda score_input : self._score_predict_loss(score_input)
         # elems are unpacked along dim 0 -> L
-        scores_pred = tf.map_fn(f,
+        scores_pred = tf.map_fn(self._score_predict_loss,
                                 [tf.transpose(input_sequence, [1, 0, 2]),
                                  tf.transpose(y, [1, 0])],
                                 dtype=[tf.int64, tf.float32])
@@ -229,6 +254,8 @@ class ScoreLayer(object):
 
 
 class SketchLayer(object):
+    '''A class for a sketch layer, which performs a sequence of sketch
+    operations, as defined in the neural easy-first model.'''
     def __init__(self, num_sketches, sequence_length, input_size, context_size,
                  hidden_size, batch_size, batch_mask, keep_prob,
                  activation=tf.nn.tanh):
@@ -241,8 +268,14 @@ class SketchLayer(object):
         self.batch_mask = batch_mask
         self.keep_prob = keep_prob
         self.activation = activation
+        self.W_cs = None
+        self.w_s = None
+        self.W_cz = None
+        self.w_z = None
+        self.v = None
 
     def _create_variables(self):
+        '''Creates the parameter variables.'''
         # Create matrix and bias variables for computing
         # s = tanh(W_cs*c_bar + w_s).
         window_size = 2*self.context_size+1
@@ -274,12 +307,8 @@ class SketchLayer(object):
                                      dtype=tf.float32))
 
     def _convolute(self, input_matrix):
-        """
-        Extract r context columns around each column and concatenate
-        :param padded_matrix: batch_size x L+(2*r) x 2*state_size
-        :param r: context size
-        :return:
-        """
+        '''Extract self.context_size context columns around each column and
+        concatenate.'''
         state_size = tf.shape(input_matrix)[2]
         window_size = 2*self.context_size + 1
         padding_columns = tf.constant([[0, 0],
@@ -313,14 +342,13 @@ class SketchLayer(object):
         return output_matrix
 
     def _softmax_with_mask(self, tensor, mask, tau=1.0):
-        """
-        compute the softmax including the mask
-        the mask is multiplied with exp(x), before the normalization
+        '''Compute the softmax including the mask
+        the mask is multiplied with exp(x), before the normalization.
         :param tensor: 2D
         :param mask: 2D, same shape as tensor
         :param tau: temperature, the cooler the more spiked is distribution
-        :return:
-        """
+        :return: the softmax distribution.
+        '''
         row_max = tf.expand_dims(tf.reduce_max(tensor, 1), 1)
         t_shifted = tensor - row_max
         nom = tf.exp(t_shifted/tau)*tf.cast(mask, tf.float32)
@@ -330,10 +358,7 @@ class SketchLayer(object):
 
     def _compute_attention(self, state_matrix, b,
                            discount_factor=0.0, temperature=1.0):
-        """
-        Compute attention weight for all words in sequence in batch
-        :return:
-        """
+        '''Compute attention weight for all words in sequence in batch.'''
         state_size = tf.shape(state_matrix)[2]
         z = []
         for j in np.arange(self.sequence_length):
@@ -356,6 +381,7 @@ class SketchLayer(object):
         return attention, scores
 
     def forward(self, input_sequence):
+        '''Performs a forward step.'''
         self._create_variables()
 
         # Dropout within sketch.
@@ -420,13 +446,15 @@ class SketchLayer(object):
 
                 # For debug purposes?
                 # append attention to sketch
-                #sketch_attention_cumulative = tf.concat(2, [sketch_update, tf.expand_dims(a_n, 2), tf.expand_dims(b_n, 2)])
-                sketch_attention_cumulative = tf.concat(2, [tf.expand_dims(a_n, 2), tf.expand_dims(b_n, 2)])
+                #sketch_attention_cumulative = \
+                #tf.concat(2, [sketch_update, tf.expand_dims(a_n, 2),
+                #                             tf.expand_dims(b_n, 2)])
+                sketch_attention_cumulative = \
+                    tf.concat(2, [tf.expand_dims(a_n, 2),
+                                  tf.expand_dims(b_n, 2)])
                 sketches.append(sketch_attention_cumulative)
 
         sketches_tf = tf.pack(sketches)
 
         return S, sketches_tf
 
-
-    
