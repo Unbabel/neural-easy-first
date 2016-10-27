@@ -10,11 +10,15 @@ import datetime
 import os
 from easy_first_model import EasyFirstModel
 from embedding import Embedding
-from dataset import DatasetReader
+from dataset import DatasetReader, QualityDatasetReader
 from buckets import BucketFactory
 from evaluator import Evaluator
 
 # Flags.
+tf.app.flags.DEFINE_string("task", "sequence_tagging",
+                           "Can be either 'sequence_tagging' (which subsumes "
+                           "POS tagging) or 'quality_estimation'.")
+
 tf.app.flags.DEFINE_boolean("train", True, "True if training, False if "
                             "testing.")
 
@@ -157,47 +161,107 @@ def train():
         filepath_train = FLAGS.training_file
         filepath_dev = FLAGS.dev_file
 
-        reader = DatasetReader()
-        if FLAGS.embeddings == "":
-            embeddings = None
+        if FLAGS.task == 'sequence_tagging':
+            reader = DatasetReader()
+
+            if FLAGS.embeddings == "":
+                embeddings = None
+            else:
+                embeddings = reader.load_embeddings(FLAGS.embeddings)
+
+            max_sentence_length = FLAGS.max_sentence_length
+            train_sentences, train_labels, train_label_dict, \
+                train_embeddings = reader.load_data(
+                    filepath_train,
+                    embeddings=embeddings,
+                    max_length=max_sentence_length,
+                    label_dict=None,
+                    train=True)
+
+            # Use training vocab/labels for dev.
+            dev_sentences, dev_labels, _ = \
+                reader.load_data(filepath_dev,
+                                 embeddings=train_embeddings,
+                                 max_length=max_sentence_length,
+                                 label_dict=train_label_dict,
+                                 train=False)
+
+            vocabulary_size = train_embeddings.vocabulary_size()
+            num_labels = len(train_label_dict)
+
+            if FLAGS.embeddings == "":
+                embeddings = Embedding(None,
+                                       train_embeddings.word2id,
+                                       train_embeddings.id2word,
+                                       train_embeddings.unk_id,
+                                       train_embeddings.pad_id,
+                                       train_embeddings.end_id,
+                                       train_embeddings.start_id)
+
+            LOGGER.info("Vocabulary size: %d", vocabulary_size)
+            LOGGER.info("Training on %d instances", len(train_labels))
+            LOGGER.info("Validating on %d instances", len(dev_labels))
+            LOGGER.info("Maximum sentence length (train): %d",
+                        max([len(y) for y in train_labels]))
+            LOGGER.info("Maximum sentence length (dev): %d",
+                        max([len(y) for y in dev_labels]))
+
+        elif FLAGS.task == 'quality_estimation':
+            reader = QualityDatasetReader()
+
+            if FLAGS.embeddings == "":
+                embeddings = None
+            else:
+                embeddings = reader.load_embeddings(FLAGS.embeddings)
+
+            if FLAGS.source_embeddings == "":
+                source_embeddings = None
+            else:
+                source_embeddings = reader.load_embeddings(
+                    FLAGS.source_embeddings)
+
+            max_sentence_length = FLAGS.max_sentence_length
+            train_sentences, train_labels, train_label_dict, \
+                train_source_embeddings, train_embeddings = reader.load_data(
+                    filepath_train,
+                    source_embeddings=source_embeddings,
+                    target_embeddings=embeddings,
+                    max_length=max_sentence_length,
+                    label_dict=None,
+                    train=True)
+
+            # Use training vocab/labels for dev.
+            dev_sentences, dev_labels, _ = \
+                reader.load_data(filepath_dev,
+                                 source_embeddings=train_source_embeddings,
+                                 embeddings=train_embeddings,
+                                 max_length=max_sentence_length,
+                                 label_dict=train_label_dict,
+                                 train=False)
+
+            vocabulary_size = train_embeddings.vocabulary_size()
+            num_labels = len(train_label_dict)
+
+            if FLAGS.embeddings == "":
+                embeddings = Embedding(None,
+                                       train_embeddings.word2id,
+                                       train_embeddings.id2word,
+                                       train_embeddings.unk_id,
+                                       train_embeddings.pad_id,
+                                       train_embeddings.end_id,
+                                       train_embeddings.start_id)
+
+            LOGGER.info("Vocabulary size: %d", vocabulary_size)
+            LOGGER.info("Training on %d instances", len(train_labels))
+            LOGGER.info("Validating on %d instances", len(dev_labels))
+            LOGGER.info("Maximum sentence length (train): %d",
+                        max([len(y) for y in train_labels]))
+            LOGGER.info("Maximum sentence length (dev): %d",
+                        max([len(y) for y in dev_labels]))
+
         else:
-            embeddings = reader.load_embeddings(FLAGS.embeddings)
+            raise NotImplementedError
 
-        max_sentence_length = FLAGS.max_sentence_length
-        train_sentences, train_labels, train_label_dict, train_embeddings = \
-            reader.load_data(filepath_train,
-                             embeddings=embeddings,
-                             max_length=max_sentence_length,
-                             label_dict=None,
-                             train=True)
-
-        # Use training vocab/labels for dev.
-        dev_sentences, dev_labels, _ = \
-            reader.load_data(filepath_dev,
-                             embeddings=train_embeddings,
-                             max_length=max_sentence_length,
-                             label_dict=train_label_dict,
-                             train=False)
-
-        vocabulary_size = train_embeddings.vocabulary_size()
-        num_labels = len(train_label_dict)
-
-        if FLAGS.embeddings == "":
-            embeddings = Embedding(None,
-                                   train_embeddings.word2id,
-                                   train_embeddings.id2word,
-                                   train_embeddings.unk_id,
-                                   train_embeddings.pad_id,
-                                   train_embeddings.end_id,
-                                   train_embeddings.start_id)
-
-        LOGGER.info("Vocabulary size: %d", vocabulary_size)
-        LOGGER.info("Training on %d instances", len(train_labels))
-        LOGGER.info("Validating on %d instances", len(dev_labels))
-        LOGGER.info("Maximum sentence length (train): %d",
-                    max([len(y) for y in train_labels]))
-        LOGGER.info("Maximum sentence length (dev): %d",
-                    max([len(y) for y in dev_labels]))
 
         # Bucket training and dev data (equal bucket sizes).
         factory = BucketFactory()
