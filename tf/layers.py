@@ -7,25 +7,29 @@ import numpy as np
 class EmbeddingLayer(object):
     '''A class for an embedding layer.'''
     def __init__(self, vocabulary_size, embedding_size, keep_prob,
-                 embedding_table=None, update_embeddings=True):
+                 embedding_index=0, num_features=1, embedding_table=None,
+                 update_embeddings=True):
         self.vocabulary_size = vocabulary_size
         self.embedding_size = embedding_size
         self.keep_prob = keep_prob
+        self.embedding_index = embedding_index
+        self.num_features = num_features
         self.embedding_table = embedding_table
         self.update_embeddings = update_embeddings
         self.M = None
 
     def _create_variables(self):
         '''Creates the parameter variables.'''
+        name = "M%d" % self.embedding_index
         if self.embedding_table is None:
-            self.M = tf.get_variable(name="M",
+            self.M = tf.get_variable(name=name,
                                      shape=[self.vocabulary_size,
                                             self.embedding_size],
                                      initializer=\
                                          tf.contrib.layers.xavier_initializer( \
                                              uniform=True, dtype=tf.float32))
         else:
-            self.M = tf.get_variable(name="M",
+            self.M = tf.get_variable(name=name,
                                      shape=[self.embedding_table.shape[0],
                                             self.embedding_table.shape[1]],
                                      initializer=\
@@ -41,7 +45,7 @@ class EmbeddingLayer(object):
 
         batch_size = tf.shape(input_sequence)[0]
         sequence_length = tf.shape(input_sequence)[1]
-        num_features = 1 #tf.shape(input_sequence)[2]
+        num_features = self.num_features # tf.shape(input_sequence)[2]
 
         # Dropout on embeddings.
         M = tf.nn.dropout(self.M, self.keep_prob)

@@ -57,7 +57,7 @@ tf.app.flags.DEFINE_string("test_file",
                            "Path to test file.")
 tf.app.flags.DEFINE_string("embeddings",
                            "pos_tagging/data/embeddings/polyglot-en.pkl",
-                           "Path to word embeddings.")
+                           "Paths to embeddings (separated by comma).")
 tf.app.flags.DEFINE_string("model_dir", "pos_tagging/models", "Path to folder "
                            "where the model is stored.")
 
@@ -69,8 +69,8 @@ tf.app.flags.DEFINE_integer("max_sentence_length", 50,
 tf.app.flags.DEFINE_boolean("update_embeddings", True,
                             "True to update the embeddings; False otherwise.")
 tf.app.flags.DEFINE_string("activation", "tanh", "Activation function.")
-tf.app.flags.DEFINE_integer("embedding_size", 64,
-                            "Dimensionality of embeddings.")
+tf.app.flags.DEFINE_string("embedding_sizes", "64",
+                           "Dimensionality of embeddings (separated by comma).")
 tf.app.flags.DEFINE_integer("hidden_size", 20,
                             "Dimensionality of hidden layers.")
 tf.app.flags.DEFINE_string("encoder", "bilstm",
@@ -109,16 +109,18 @@ def print_config():
     '''Print all the flags.'''
     LOGGER.info("Configuration: %s", str(FLAGS.__dict__["__flags"]))
 
-def create_model(session, buckets, vocabulary_size, num_labels, is_train=True,
+def create_model(session, buckets, num_embedding_features, num_labels,
+                 vocabulary_sizes, embedding_sizes, is_train=True,
                  embeddings=None, label_weights=None):
     '''Create a new easy-first model.'''
     np.random.seed(123)
     tf.set_random_seed(123)
-    model = EasyFirstModel(num_labels=num_labels,
-                           embedding_size=FLAGS.embedding_size,
+    model = EasyFirstModel(num_embedding_features=num_embedding_features,
+                           num_labels=num_labels,
+                           embedding_sizes=embedding_sizes,
                            hidden_size=FLAGS.hidden_size,
                            context_size=FLAGS.context_size,
-                           vocabulary_size=vocabulary_size,
+                           vocabulary_sizes=vocabulary_sizes,
                            num_sketches=FLAGS.num_sketches,
                            encoder=FLAGS.encoder,
                            concatenate_last_layer=FLAGS.concatenate_last_layer,
@@ -163,105 +165,64 @@ def train():
 
         if FLAGS.task == 'sequence_tagging':
             reader = DatasetReader()
-
-            if FLAGS.embeddings == "":
-                embeddings = None
-            else:
-                embeddings = reader.load_embeddings(FLAGS.embeddings)
-
-            max_sentence_length = FLAGS.max_sentence_length
-            train_sentences, train_labels, train_label_dict, \
-                train_embeddings = reader.load_data(
-                    filepath_train,
-                    embeddings=embeddings,
-                    max_length=max_sentence_length,
-                    label_dict=None,
-                    train=True)
-
-            # Use training vocab/labels for dev.
-            dev_sentences, dev_labels, _ = \
-                reader.load_data(filepath_dev,
-                                 embeddings=train_embeddings,
-                                 max_length=max_sentence_length,
-                                 label_dict=train_label_dict,
-                                 train=False)
-
-            vocabulary_size = train_embeddings.vocabulary_size()
-            num_labels = len(train_label_dict)
-
-            if FLAGS.embeddings == "":
-                embeddings = Embedding(None,
-                                       train_embeddings.word2id,
-                                       train_embeddings.id2word,
-                                       train_embeddings.unk_id,
-                                       train_embeddings.pad_id,
-                                       train_embeddings.end_id,
-                                       train_embeddings.start_id)
-
-            LOGGER.info("Vocabulary size: %d", vocabulary_size)
-            LOGGER.info("Training on %d instances", len(train_labels))
-            LOGGER.info("Validating on %d instances", len(dev_labels))
-            LOGGER.info("Maximum sentence length (train): %d",
-                        max([len(y) for y in train_labels]))
-            LOGGER.info("Maximum sentence length (dev): %d",
-                        max([len(y) for y in dev_labels]))
-
+            label_dictionary = None
         elif FLAGS.task == 'quality_estimation':
             reader = QualityDatasetReader()
-
-            if FLAGS.embeddings == "":
-                embeddings = None
-            else:
-                embeddings = reader.load_embeddings(FLAGS.embeddings)
-
-            if FLAGS.source_embeddings == "":
-                source_embeddings = None
-            else:
-                source_embeddings = reader.load_embeddings(
-                    FLAGS.source_embeddings)
-
-            max_sentence_length = FLAGS.max_sentence_length
-            train_sentences, train_labels, train_label_dict, \
-                train_source_embeddings, train_embeddings = reader.load_data(
-                    filepath_train,
-                    source_embeddings=source_embeddings,
-                    target_embeddings=embeddings,
-                    max_length=max_sentence_length,
-                    label_dict=None,
-                    train=True)
-
-            # Use training vocab/labels for dev.
-            dev_sentences, dev_labels, _ = \
-                reader.load_data(filepath_dev,
-                                 source_embeddings=train_source_embeddings,
-                                 embeddings=train_embeddings,
-                                 max_length=max_sentence_length,
-                                 label_dict=train_label_dict,
-                                 train=False)
-
-            vocabulary_size = train_embeddings.vocabulary_size()
-            num_labels = len(train_label_dict)
-
-            if FLAGS.embeddings == "":
-                embeddings = Embedding(None,
-                                       train_embeddings.word2id,
-                                       train_embeddings.id2word,
-                                       train_embeddings.unk_id,
-                                       train_embeddings.pad_id,
-                                       train_embeddings.end_id,
-                                       train_embeddings.start_id)
-
-            LOGGER.info("Vocabulary size: %d", vocabulary_size)
-            LOGGER.info("Training on %d instances", len(train_labels))
-            LOGGER.info("Validating on %d instances", len(dev_labels))
-            LOGGER.info("Maximum sentence length (train): %d",
-                        max([len(y) for y in train_labels]))
-            LOGGER.info("Maximum sentence length (dev): %d",
-                        max([len(y) for y in dev_labels]))
-
+            label_dictionary = {'OK': 0, 'BAD': 1}
         else:
             raise NotImplementedError
 
+        if FLAGS.embeddings == "":
+            embeddings = None
+        else:
+            embeddings = []
+            embedding_paths = FLAGS.embeddings.split(',')
+            for embedding_path in embedding_paths:
+                embeddings.append(reader.load_embeddings(embedding_path))
+
+        max_sentence_length = FLAGS.max_sentence_length
+        train_sentences, train_labels, train_label_dict, train_embeddings = \
+            reader.load_data(filepath_train,
+                             embeddings=embeddings,
+                             max_length=max_sentence_length,
+                             label_dict=label_dictionary,
+                             train=True)
+
+        # Use training vocab/labels for dev.
+        dev_sentences, dev_labels, _ = \
+            reader.load_data(filepath_dev,
+                             embeddings=train_embeddings,
+                             max_length=max_sentence_length,
+                             label_dict=train_label_dict,
+                             train=False)
+
+        vocabulary_sizes = [embedding.vocabulary_size()
+                            for embedding in train_embeddings]
+        num_labels = len(train_label_dict)
+
+        if FLAGS.embeddings == "":
+            embeddings = []
+            for embedding in train_embeddings:
+                embeddings.append(Embedding(None,
+                                            embedding.word2id,
+                                            embedding.id2word,
+                                            embedding.unk_id,
+                                            embedding.pad_id,
+                                            embedding.end_id,
+                                            embedding.start_id))
+
+        # This only make sense for the QE task.
+        # TODO: pass label weights as a flag.
+        label_weights = None
+
+        LOGGER.info("Vocabulary sizes: %s",
+                    ' '.join([str(v) for v in vocabulary_sizes]))
+        LOGGER.info("Training on %d instances", len(train_labels))
+        LOGGER.info("Validating on %d instances", len(dev_labels))
+        LOGGER.info("Maximum sentence length (train): %d",
+                    max([len(y) for y in train_labels]))
+        LOGGER.info("Maximum sentence length (dev): %d",
+                    max([len(y) for y in dev_labels]))
 
         # Bucket training and dev data (equal bucket sizes).
         factory = BucketFactory()
@@ -275,8 +236,18 @@ def train():
 
         # Create the model.
         bucket_lengths = [bucket.data.max_length() for bucket in train_buckets]
-        model = create_model(sess, bucket_lengths, vocabulary_size, num_labels,
-                             is_train=True, embeddings=embeddings)
+
+        # Number of features using each embedding.
+        num_embedding_features = reader.num_embedding_features()
+
+        # Embedding sizes.
+        embedding_sizes = [int(e) for e in FLAGS.embedding_sizes.split(',')]
+
+        model = create_model(sess, bucket_lengths, num_embedding_features,
+                             num_labels,
+                             vocabulary_sizes, embedding_sizes,
+                             is_train=True, embeddings=embeddings,
+                             label_weights=label_weights)
 
         # Training in epochs.
         evaluator = Evaluator()
@@ -323,13 +294,27 @@ def train():
                             bucket_loss / bucket.data.num_sequences(),
                             bucket_loss_reg / bucket.data.num_sequences())
 
-            train_accuracy = evaluator.accuracy(train_true, train_predictions)
             time_epoch = time.time() - start_time_epoch
-
-            LOGGER.info("EPOCH %d: epoch time %fs, loss %f, loss+reg %f, "
-                        "train acc. %f",
-                        epoch+1, time_epoch, loss/len(train_labels),
-                        loss_reg/len(train_labels), train_accuracy)
+            if FLAGS.task == 'sequence_tagging':
+                train_accuracy = evaluator.accuracy(train_true,
+                                                    train_predictions)
+                LOGGER.info("EPOCH %d: epoch time %fs, loss %f, loss+reg %f, "
+                            "train acc. %f",
+                            epoch+1, time_epoch, loss/len(train_labels),
+                            loss_reg/len(train_labels), train_accuracy)
+            elif FLAGS.task == 'quality_estimation':
+                train_accuracy = evaluator.accuracy(train_true,
+                                                    train_predictions)
+                f1_ok, f1_bad = evaluator.f1s_binary(train_true,
+                                                     train_predictions)
+                LOGGER.info("EPOCH %d: epoch time %fs, loss %f, loss+reg %f, "
+                            "train acc. %f, train f1_ok %f, train f1_bad %f",
+                            epoch+1, time_epoch, loss/len(train_labels),
+                            loss_reg/len(train_labels), train_accuracy,
+                            f1_ok, f1_bad)
+            else:
+                LOGGER.info("Unknown task: %s", FLAGS.task)
+                raise NotImplementedError
 
             # Eval on dev (every epoch).
             start_time_valid = time.time()
@@ -349,10 +334,25 @@ def train():
                 dev_true.extend(bucket.data.labels)
                 dev_loss += np.sum(step_loss)
             time_valid = time.time() - start_time_valid
-            dev_accuracy = evaluator.accuracy(dev_true, dev_predictions)
-            LOGGER.info("EPOCH %d: validation time %fs, loss %f, dev acc. %f",
-                        epoch+1, time_valid, dev_loss/len(dev_labels),
-                        dev_accuracy)
+            if FLAGS.task == 'sequence_tagging':
+                dev_accuracy = evaluator.accuracy(dev_true, dev_predictions)
+                LOGGER.info("EPOCH %d: validation time %fs, loss %f, "
+                            "dev acc. %f",
+                            epoch+1, time_valid, dev_loss/len(dev_labels),
+                            dev_accuracy)
+            elif FLAGS.task == 'quality_estimation':
+                dev_accuracy = evaluator.accuracy(dev_true, dev_predictions)
+                f1_ok, f1_bad = evaluator.f1s_binary(dev_true,
+                                                     dev_predictions)
+                LOGGER.info("EPOCH %d: validation time %fs, loss %f, "
+                            "dev acc. %f, dev f1_ok %f, dev f1_bad %f",
+                            epoch+1, time_valid, dev_loss/len(dev_labels),
+                            dev_accuracy, f1_ok, f1_bad)
+            else:
+                LOGGER.info("Unknown task: %s", FLAGS.task)
+                raise NotImplementedError
+
+            # TODO: for QE, don't select best model based accuracy!!!
             if dev_accuracy > best_valid:
                 LOGGER.info("NEW BEST!")
                 best_valid = dev_accuracy
@@ -376,8 +376,19 @@ def test():
     with tf.Session() as sess:
 
         # Load the embeddings.
-        reader = DatasetReader()
-        embeddings = reader.load_embeddings(FLAGS.embeddings)
+        if FLAGS.task == 'sequence_tagging':
+            reader = DatasetReader()
+            label_dictionary = None
+        elif FLAGS.task == 'quality_estimation':
+            reader = QualityDatasetReader()
+            label_dictionary = {'OK': 0, 'BAD': 1}
+        else:
+            raise NotImplementedError
+
+        embeddings = []
+        embedding_paths = FLAGS.embeddings.split(',')
+        for embedding_path in embedding_paths:
+            embeddings.append(reader.load_embeddings(embedding_path))
 
         filepath_test = FLAGS.test_file
         max_sentence_length = FLAGS.max_sentence_length
@@ -390,7 +401,7 @@ def test():
             reader.load_data(filepath_train,
                              embeddings=embeddings,
                              max_length=max_sentence_length,
-                             label_dict={},
+                             label_dict=label_dictionary,
                              train=True)
 
         test_sentences, test_labels, test_label_dict = \
@@ -401,7 +412,8 @@ def test():
                              train=False)
 
         assert test_label_dict == train_label_dict
-        vocabulary_size = train_embeddings.vocabulary_size()
+        vocabulary_sizes = [embedding.vocabulary_size()
+                            for embedding in train_embeddings]
         num_labels = len(test_label_dict)
 
         # Bucket test data.
@@ -412,13 +424,26 @@ def test():
                                               num_buckets=FLAGS.buckets)
         bucket_lengths = [bucket.data.max_length() for bucket in test_buckets]
 
+        # This only make sense for the QE task.
+        # TODO: pass label weights as a flag.
+        label_weights = None
+
+        # Number of features using each embedding.
+        num_embedding_features = reader.num_embedding_features()
+
+        # Embedding sizes.
+        embedding_sizes = [int(e) for e in FLAGS.embedding_sizes.split(',')]
+
         # Load model.
         model = create_model(sess,
                              buckets=bucket_lengths,
-                             vocabulary_size=vocabulary_size,
+                             num_embedding_features=num_embedding_features,
                              num_labels=num_labels,
+                             vocabulary_sizes=vocabulary_sizes,
+                             embedding_sizes=embedding_sizes,
                              is_train=False,
-                             embeddings=embeddings)
+                             embeddings=embeddings,
+                             label_weights=label_weights)
 
         # Evaluate on test.
         evaluator = Evaluator()
@@ -438,11 +463,24 @@ def test():
             test_true.extend(bucket.data.labels)
             test_loss += np.sum(step_loss)
         time_valid = time.time() - start_time_valid
-        test_accuracy = evaluator.accuracy(test_true, test_predictions)
-        message = "Test time %fs, loss %f, test acc. %f" % \
-                  (time_valid, test_loss/len(test_labels), test_accuracy)
-        LOGGER.info(message)
-        print message
+        if FLAGS.task == 'sequence_tagging':
+            test_accuracy = evaluator.accuracy(test_true, test_predictions)
+            message = "Test time %fs, loss %f, test acc. %f" % \
+                      (time_valid, test_loss/len(test_labels), test_accuracy)
+            LOGGER.info(message)
+            print message
+        elif FLAGS.task == 'quality_estimation':
+            test_accuracy = evaluator.accuracy(test_true, test_predictions)
+            f1_ok, f1_bad = evaluator.f1s_binary(test_true,
+                                                 test_predictions)
+            message = "Test time %fs, loss %f, test acc. %f, " \
+                      "test f1_ok %f, test f1_bad %f" % \
+                      (time_valid, test_loss/len(test_labels), test_accuracy,
+                       f1_ok, f1_bad)
+            LOGGER.info(message)
+            print message
+        else:
+            LOGGER.info("Unknown task: %s", FLAGS.task)
 
 def main(_):
     '''Main function.'''

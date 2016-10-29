@@ -4,23 +4,26 @@
 import tensorflow as tf
 import logging
 import cPickle as pkl
+import pdb
 
 LOGGER = logging.getLogger("NEF")
 
 class EasyFirstModel(object):
     '''A class for a neural easy-first model.'''
-    def __init__(self, num_labels, embedding_size, hidden_size, context_size,
-                 vocabulary_size, num_sketches, encoder, concatenate_last_layer,
+    def __init__(self, num_embedding_features,
+                 num_labels, embedding_sizes, hidden_size, context_size,
+                 vocabulary_sizes, num_sketches, encoder, concatenate_last_layer,
                  batch_size, optimizer, learning_rate, max_gradient_norm,
                  keep_prob=1.0, keep_prob_sketch=1.0, label_weights=None,
                  l2_scale=0.0, l1_scale=0.0, embeddings=None,
                  update_embeddings=True, activation="tanh", buckets=None,
                  track_sketches=False, model_dir="models/", is_train=True):
+        self.num_embedding_features = num_embedding_features
         self.num_labels = num_labels
-        self.embedding_size = embedding_size
+        self.embedding_sizes = embedding_sizes
         self.hidden_size = hidden_size
         self.context_size = context_size
-        self.vocabulary_size = vocabulary_size
+        self.vocabulary_sizes = vocabulary_sizes
         self.num_sketches = num_sketches
         self.encoder = encoder
         self.concatenate_last_layer = concatenate_last_layer
@@ -48,17 +51,18 @@ class EasyFirstModel(object):
         self.model_dir = model_dir
 
         model = 'easy_first'
-        self.path = "%s/%s_K%d_D%d_J%d_r%d_batch%d_opt%s_lr%0.4f" \
+        self.path = "%s/%s_K%d_D%s_J%d_r%d_batch%d_opt%s_lr%0.4f" \
                     "_gradnorm%0.2f_concat%r_l2r%0.4f_l1r%0.4f_dropout%0.2f" \
-                    "_sketchdrop%0.2f_updateemb%s_voc%d.model" % \
+                    "_sketchdrop%0.2f_updateemb%s_voc%s.model" % \
                     (self.model_dir, model, self.num_labels,
-                     self.embedding_size, self.hidden_size,
+                     '-'.join([str(d) for d in self.embedding_sizes]),
+                     self.hidden_size,
                      self.context_size, self.batch_size, optimizer,
                      self.learning_rate, self.max_gradient_norm,
                      self.concatenate_last_layer,
                      self.l2_scale, self.l1_scale, self.keep_prob,
                      self.keep_prob_sketch, self.update_embeddings,
-                     self.vocabulary_size)
+                     '-'.join([str(v) for v in self.vocabulary_sizes]))
         LOGGER.info("Model path: %s", self.path)
         LOGGER.info("Model with %s encoder", self.encoder)
 
@@ -141,11 +145,11 @@ class EasyFirstModel(object):
         self.keep_probs = []
         self.keep_prob_sketches = []
         self.is_trains = []
-        window_size = 1
+        num_features = sum(self.num_embedding_features)
         for j, max_length in enumerate(self.buckets):
             self.inputs.append(tf.placeholder(tf.int32,
                                               shape=[None, max_length,
-                                                     window_size],
+                                                     num_features],
                                               name="inputs{0}".format(j)))
             self.labels.append(tf.placeholder(tf.int32,
                                               shape=[None, max_length],
@@ -268,12 +272,21 @@ class EasyFirstModel(object):
         batch_size = tf.shape(x)[0]
         with tf.name_scope("embedding"):
             from layers import EmbeddingLayer
-            embedding_layer = EmbeddingLayer(self.vocabulary_size,
-                                             self.embedding_size,
-                                             self.keep_prob,
-                                             self.embeddings.table,
-                                             self.update_embeddings)
-            emb = embedding_layer.forward(x)
+            j = 0
+            embedded_features = []
+            for k, embedding in enumerate(self.embeddings):
+                num_features = self.num_embedding_features[k]
+                embedding_layer = EmbeddingLayer(self.vocabulary_sizes[k],
+                                                 self.embedding_sizes[k],
+                                                 self.keep_prob,
+                                                 k,
+                                                 num_features,
+                                                 embedding.table,
+                                                 self.update_embeddings)
+                embedded_features.append(embedding_layer.forward(
+                    x[:, :, j:(j+num_features)]))
+                j += num_features
+            emb = tf.concat(2, embedded_features)
 
         with tf.name_scope("hidden"):
             from layers import FeedforwardLayer, LSTMLayer, BILSTMLayer
