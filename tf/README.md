@@ -116,7 +116,7 @@
 
 ###3.3 Testing a model###
 
-  1. On batch data from stored model:
+  On batch data from stored model:
   
       python nef.py \
           --task=quality_estimation \
@@ -128,7 +128,7 @@
           --test_file=quality_estimation/data/WMT2016/task2_en-de_test/test.basic_features_with_tags \
           --train=False
 
-  2. Interactively:
+  Interactively:
   
       python nef.py \
           --task=quality_estimation \
