@@ -4,7 +4,6 @@
 import tensorflow as tf
 import logging
 import cPickle as pkl
-import pdb
 
 LOGGER = logging.getLogger("NEF")
 
@@ -12,12 +11,13 @@ class EasyFirstModel(object):
     '''A class for a neural easy-first model.'''
     def __init__(self, num_embedding_features,
                  num_labels, embedding_sizes, hidden_size, context_size,
-                 vocabulary_sizes, num_sketches, encoder, concatenate_last_layer,
-                 batch_size, optimizer, learning_rate, max_gradient_norm,
-                 keep_prob=1.0, keep_prob_sketch=1.0, label_weights=None,
-                 l2_scale=0.0, l1_scale=0.0, embeddings=None,
-                 update_embeddings=True, activation="tanh", buckets=None,
-                 track_sketches=False, model_dir="models/", is_train=True):
+                 vocabulary_sizes, num_sketches, encoder,
+                 concatenate_last_layer, batch_size, optimizer, learning_rate,
+                 max_gradient_norm, keep_prob=1.0, keep_prob_sketch=1.0,
+                 label_weights=None, l2_scale=0.0, l1_scale=0.0,
+                 embeddings=None, update_embeddings=True, activation="tanh",
+                 buckets=None, track_sketches=False, model_dir="models/",
+                 is_train=True):
         self.num_embedding_features = num_embedding_features
         self.num_labels = num_labels
         self.embedding_sizes = embedding_sizes

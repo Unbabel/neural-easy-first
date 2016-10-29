@@ -38,7 +38,7 @@
   
       python nef.py -h
 
-  Train a BILSTM model (and store in `pos_tagging/models` directory)
+  Train a BILSTM model (and store in `pos_tagging/models` directory):
   
       mkdir -p pos_tagging/models
       python nef.py --num_sketches=0
@@ -60,40 +60,82 @@
 
 ##3. Quality estimation ##
 
-  **NOTE: the code is not supporting QE yet; when it does we need to update below.**
-
 ###3.1. Preparing the data ###
   
   The data has to be in the format as distributed at WMT2016.
 
   Pre-trained embeddings as e.g. polyglot (pickle dumps) are merged with new vocabulary introduced by the task.
 
-  To construct the vocabulary and the initial lookup table, use the following script:
-  
-      python prepare_vocab.py <path to training src> <path to training tgt> <path to training feature file>  <path to src embeddings> <path to tgt embeddings> --freq_limit <freq_limit> --tgt_limit <tgt_limit> --src_limit <src_limit>
-  
-  This creates a new embedding dump including the `src_limit` and `tgt_limit` most frequent new words that occur more than `freq_limit` times on either source or target size.
+      mkdir -p quality_estimation/data
+      mkdir -p quality_estimation/data/WMT2016/task2_en-de_training
+      mkdir -p quality_estimation/data/WMT2016/task2_en-de_dev
+      mkdir -p quality_estimation/data/WMT2016/task2_en-de_test
+      mv train.basic_features_with_tags quality_estimation/data/WMT2016/task2_en-de_training
+      mv dev.basic_features_with_tags quality_estimation/data/WMT2016/task2_en-de_dev
+      mv test.basic_features_with_tags quality_estimation/data/WMT2016/task2_en-de_test
+      mkdir -p quality_estimation/data/embeddings
+      mv polyglot-en.pkl quality_estimation/data/embeddings
+      mv polyglot-de.pkl quality_estimation/data/embeddings
 
 ###3.2. Training a model###
 
-  Baseline (QUETCH) and Neural-Easy-First models are both implemented in the same code base.
+  Baseline (QUETCH-BILSTM) and Neural-Easy-First models are both implemented in the same code base.
   
   To run them with according hyper-parameter settings, see all options:
   
       python nef.py -h
 
-  Train a model (and store in `models` directory)
+  Train a QUETCH-BILSTM model (and store in `models` directory):
   
       mkdir -p models
-      python nef.py --train True
+      python nef.py \
+          --task=quality_estimation \
+          --num_sketches=0 \
+          --embeddings=quality_estimation/data/embeddings/polyglot-de.pkl,quality_estimation/data/embeddings/polyglot-en.pkl \
+          --embedding_sizes=64,64 \
+          --model_dir=quality_estimation/models \
+          --training_file=quality_estimation/data/WMT2016/task2_en-de_training/train.basic_features_with_tags \
+          --dev_file=quality_estimation/data/WMT2016/task2_en-de_dev/dev.basic_features_with_tags \
+          --test_file=quality_estimation/data/WMT2016/task2_en-de_test/test.basic_features_with_tags \
+          --train=True
 
+  Note that the arguments --embeddings and --embedding_sizes have two values separated by a comma.
+  The first value corresponds to the target embeddings and the second one to the source embeddings.
+
+  Train a Neural-Easy-First model:
+  
+      python nef.py \
+          --task=quality_estimation \
+          --embeddings=quality_estimation/data/embeddings/polyglot-de.pkl,quality_estimation/data/embeddings/polyglot-en.pkl \
+          --embedding_sizes=64,64 \
+          --model_dir=quality_estimation/models \
+          --training_file=quality_estimation/data/WMT2016/task2_en-de_training/train.basic_features_with_tags \
+          --dev_file=quality_estimation/data/WMT2016/task2_en-de_dev/dev.basic_features_with_tags \
+          --test_file=quality_estimation/data/WMT2016/task2_en-de_test/test.basic_features_with_tags \
+          --train=True
 
 ###3.3 Testing a model###
 
-  1. On batch data from stored model
+  1. On batch data from stored model:
   
-     python nef.py --train False
+      python nef.py \
+          --task=quality_estimation \
+          --embeddings=quality_estimation/data/embeddings/polyglot-de.pkl,quality_estimation/data/embeddings/polyglot-en.pkl \
+          --embedding_sizes=64,64 \
+          --model_dir=quality_estimation/models \
+          --training_file=quality_estimation/data/WMT2016/task2_en-de_training/train.basic_features_with_tags \
+          --dev_file=quality_estimation/data/WMT2016/task2_en-de_dev/dev.basic_features_with_tags \
+          --test_file=quality_estimation/data/WMT2016/task2_en-de_test/test.basic_features_with_tags \
+          --train=False
 
-  2. Interactively
+  2. Interactively:
   
-     python nef.py --interactive
+      python nef.py \
+          --task=quality_estimation \
+          --embeddings=quality_estimation/data/embeddings/polyglot-de.pkl,quality_estimation/data/embeddings/polyglot-en.pkl \
+          --embedding_sizes=64,64 \
+          --model_dir=quality_estimation/models \
+          --training_file=quality_estimation/data/WMT2016/task2_en-de_training/train.basic_features_with_tags \
+          --dev_file=quality_estimation/data/WMT2016/task2_en-de_dev/dev.basic_features_with_tags \
+          --test_file=quality_estimation/data/WMT2016/task2_en-de_test/test.basic_features_with_tags \
+          --interactive

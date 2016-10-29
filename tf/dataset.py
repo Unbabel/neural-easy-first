@@ -14,7 +14,9 @@ class DatasetReader(object):
     def _build_vocabularies(self, filepath, store=False):
         '''Given a dataset file, extracts the vocabularies and optionally
         stores them in a pickle file. Returns each vocabulary as a dictionary.
-        '''
+        This implementation assumes only one vocabulary (for the words).
+        Derive this class and override this function for using additional
+        vocabularies.'''
         # TODO(afm): implement cutoff.
         # TODO(afm): allow filtering by sentence length.
         # Initialize vocabulary with special symbols.
@@ -40,6 +42,12 @@ class DatasetReader(object):
 
     def _process_sentence(self, sentence_fields, embeddings, label_dict,
                           train=False):
+        '''Processes a sentence given a list of sentence fields (one element per
+        token containing a list of fields for that token), a list of embeddings
+        (just word embeddings in this implementation), and a dictionary of
+        labels. Returns two lists of the same size, containing the sentence
+        (a list of lists of features) and the sentence labels (a list of label
+        identifiers)'''
         assert len(embeddings) == 1
         word_embeddings = embeddings[0]
         sentence = []
@@ -64,6 +72,10 @@ class DatasetReader(object):
         return sentence, sentence_labels
 
     def num_embedding_features(self):
+        '''Returns a list whose size is the number of embedding objects, and
+        where each element contains the number of features associated to each
+        embedding object. In this implementation, it's just one embedding object
+        (word embeddings) associated to a single feature (the word).'''
         return [1]
 
     def load_embeddings(self, pkl_file):
@@ -150,10 +162,9 @@ class QualityDatasetReader(DatasetReader):
         pass
 
     def _build_vocabularies(self, filepath, store=False):
-        '''Given a QE dataset file, extracts the vocabulary and optionally
-        stores it in a pickle file. "origin" can "source" or "target" to
-        build a source or target vocabulary. Returns the vocabulary as a
-        dictionary.'''
+        '''Given a QE dataset file, extracts the vocabularies and optionally
+        stores them in a pickle file. Returns a list of two dictionaries,
+        containing the target and source vocabularies respectively.'''
         # TODO(afm): implement cutoff.
         # TODO(afm): allow filtering by sentence length.
         # Initialize vocabulary with special symbols.
@@ -192,6 +203,12 @@ class QualityDatasetReader(DatasetReader):
 
     def _process_sentence(self, sentence_fields, embeddings, label_dict,
                           train=False):
+        '''Processes a sentence given a list of sentence fields (one element per
+        token containing a list of fields for that token), a list of embeddings
+        (containing the target and source embeddings), and a dictionary of
+        labels. Returns two lists of the same size, containing the sentence
+        (a list of lists of features) and the sentence labels (a list of label
+        identifiers).'''
         assert len(embeddings) == 2
         target_embeddings = embeddings[0]
         source_embeddings = embeddings[1]
@@ -245,5 +262,10 @@ class QualityDatasetReader(DatasetReader):
         return sentence, sentence_labels
 
     def num_embedding_features(self):
+        '''Returns a list whose size is the number of embedding objects, and
+        where each element contains the number of features associated to each
+        embedding object. In this implementation, it's just two embedding
+        objects (target and source embeddings) with three features each (word,
+        left context, and right context).'''
         return [3, 3]
 
