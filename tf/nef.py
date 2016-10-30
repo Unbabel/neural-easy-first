@@ -66,6 +66,8 @@ tf.app.flags.DEFINE_integer("max_sentence_length", 50,
                             "Discard sentences longer than this length (both "
                             "for training and dev files. Set this to -1 to "
                             "keep all the sentences.")
+tf.app.flags.DEFINE_float("bad_weight", 3.0, "weight for BAD labels (applies "
+                          "only to the quality estimation task.")
 tf.app.flags.DEFINE_boolean("update_embeddings", True,
                             "True to update the embeddings; False otherwise.")
 tf.app.flags.DEFINE_string("activation", "tanh", "Activation function.")
@@ -166,9 +168,12 @@ def train():
         if FLAGS.task == 'sequence_tagging':
             reader = DatasetReader()
             label_dictionary = None
+            label_weights = None
         elif FLAGS.task == 'quality_estimation':
             reader = QualityDatasetReader()
             label_dictionary = {'OK': 0, 'BAD': 1}
+            label_weights = [1.0, FLAGS.bad_weight]
+            LOGGER.info("Weights for labels: %s", str(label_weights))
         else:
             raise NotImplementedError
 
@@ -210,10 +215,6 @@ def train():
                                             embedding.pad_id,
                                             embedding.end_id,
                                             embedding.start_id))
-
-        # This only make sense for the QE task.
-        # TODO: pass label weights as a flag.
-        label_weights = None
 
         LOGGER.info("Vocabulary sizes: %s",
                     ' '.join([str(v) for v in vocabulary_sizes]))
@@ -308,10 +309,10 @@ def train():
                 f1_ok, f1_bad = evaluator.f1s_binary(train_true,
                                                      train_predictions)
                 LOGGER.info("EPOCH %d: epoch time %fs, loss %f, loss+reg %f, "
-                            "train acc. %f, train f1_ok %f, train f1_bad %f",
+                            "train acc. %f, train f1_bad %f, train f1_mult %f",
                             epoch+1, time_epoch, loss/len(train_labels),
                             loss_reg/len(train_labels), train_accuracy,
-                            f1_ok, f1_bad)
+                            f1_bad, f1_ok*f1_bad)
             else:
                 LOGGER.info("Unknown task: %s", FLAGS.task)
                 raise NotImplementedError
@@ -340,22 +341,24 @@ def train():
                             "dev acc. %f",
                             epoch+1, time_valid, dev_loss/len(dev_labels),
                             dev_accuracy)
+                metric = dev_accuracy
             elif FLAGS.task == 'quality_estimation':
                 dev_accuracy = evaluator.accuracy(dev_true, dev_predictions)
                 f1_ok, f1_bad = evaluator.f1s_binary(dev_true,
                                                      dev_predictions)
                 LOGGER.info("EPOCH %d: validation time %fs, loss %f, "
-                            "dev acc. %f, dev f1_ok %f, dev f1_bad %f",
+                            "dev acc. %f, dev f1_bad %f, dev f1_mult %f",
                             epoch+1, time_valid, dev_loss/len(dev_labels),
-                            dev_accuracy, f1_ok, f1_bad)
+                            dev_accuracy, f1_bad, f1_ok*f1_bad)
+                metric = f1_ok*f1_bad
             else:
                 LOGGER.info("Unknown task: %s", FLAGS.task)
                 raise NotImplementedError
 
             # TODO: for QE, don't select best model based accuracy!!!
-            if dev_accuracy > best_valid:
+            if metric > best_valid:
                 LOGGER.info("NEW BEST!")
-                best_valid = dev_accuracy
+                best_valid = metric
                 best_valid_epoch = epoch+1
                 # Save checkpoint.
                 model.saver.save(sess, model.path,
@@ -379,9 +382,12 @@ def test():
         if FLAGS.task == 'sequence_tagging':
             reader = DatasetReader()
             label_dictionary = None
+            label_weights = None
         elif FLAGS.task == 'quality_estimation':
             reader = QualityDatasetReader()
             label_dictionary = {'OK': 0, 'BAD': 1}
+            label_weights = [1.0, FLAGS.bad_weight]
+            LOGGER.info("Weights for labels: %s", str(label_weights))
         else:
             raise NotImplementedError
 
@@ -423,10 +429,6 @@ def test():
                                               np.asarray(test_labels),
                                               num_buckets=FLAGS.buckets)
         bucket_lengths = [bucket.data.max_length() for bucket in test_buckets]
-
-        # This only make sense for the QE task.
-        # TODO: pass label weights as a flag.
-        label_weights = None
 
         # Number of features using each embedding.
         num_embedding_features = reader.num_embedding_features()
