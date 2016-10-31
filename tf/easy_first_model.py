@@ -15,6 +15,7 @@ class EasyFirstModel(object):
                  concatenate_last_layer, batch_size, optimizer, learning_rate,
                  max_gradient_norm, keep_prob=1.0, keep_prob_sketch=1.0,
                  label_weights=None, l2_scale=0.0, l1_scale=0.0,
+                 discount_factor=0.0, temperature=1.0,
                  embeddings=None, update_embeddings=True, activation="tanh",
                  buckets=None, track_sketches=False, model_dir="models/",
                  is_train=True):
@@ -41,6 +42,8 @@ class EasyFirstModel(object):
                 tf.train.GradientDescentOptimizer)(self.learning_rate)
         self.l2_scale = l2_scale
         self.l1_scale = l1_scale
+        self.discount_factor = discount_factor
+        self.temperature = temperature
         self.label_weights = label_weights \
             if label_weights is not None else [1.]*num_labels
         self.keep_prob = keep_prob
@@ -327,7 +330,9 @@ class EasyFirstModel(object):
                                        hidden_size=self.hidden_size,
                                        batch_size=batch_size,
                                        batch_mask=mask,
-                                       keep_prob=self.keep_prob_sketch)
+                                       keep_prob=self.keep_prob_sketch,
+                                       discount_factor=self.discount_factor,
+                                       temperature=self.temperature)
             S, sketches_tf = sketch_layer.forward(H)
 
         with tf.name_scope("scoring"):

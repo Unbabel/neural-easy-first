@@ -262,7 +262,7 @@ class SketchLayer(object):
     operations, as defined in the neural easy-first model.'''
     def __init__(self, num_sketches, sequence_length, input_size, context_size,
                  hidden_size, batch_size, batch_mask, keep_prob,
-                 activation=tf.nn.tanh):
+                 discount_factor=0.0, temperature=1.0, activation=tf.nn.tanh):
         self.num_sketches = num_sketches
         self.sequence_length = sequence_length
         self.input_size = input_size
@@ -271,6 +271,8 @@ class SketchLayer(object):
         self.batch_size = batch_size
         self.batch_mask = batch_mask
         self.keep_prob = keep_prob
+        self.discount_factor = discount_factor
+        self.temperature = temperature
         self.activation = activation
         self.W_cs = None
         self.w_s = None
@@ -379,9 +381,9 @@ class SketchLayer(object):
         # subtract cumulative attention
         d = discount_factor # 5.0  # discount factor
         tau = temperature # 0.2 # temperature.
-        #attention = scores - discount_factor*b
-        #attention = self._softmax_with_mask(attention, mask, tau=tau)
-        attention = self._softmax_with_mask(scores, self.batch_mask, tau=1.0)
+        attention = scores - discount_factor*b
+        attention = self._softmax_with_mask(attention, self.batch_mask, tau=tau)
+        #attention = self._softmax_with_mask(scores, self.batch_mask, tau=1.0)
         return attention, scores
 
     def forward(self, input_sequence):
@@ -423,7 +425,9 @@ class SketchLayer(object):
                 C = self._convolute(HS)
 
                 # Compute attention for where to focus next.
-                a_n, _ = self._compute_attention(C, b)
+                a_n, _ = self._compute_attention(
+                    C, b, discount_factor=self.discount_factor,
+                    temperature=self.temperature)
 
                 # Cumulative attention scores.
                 #b_n = b + a_n
