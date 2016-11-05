@@ -282,7 +282,7 @@ def train():
                 for batch_samples in batch_ids:
                     batch_data = bucket.data.select(batch_samples)
                     # Loss for each instance in batch.
-                    step_loss, predictions, step_loss_reg = \
+                    step_loss, predictions, step_loss_reg, _ = \
                         model.batch_update(sess, bucket_id, batch_data, False)
                     loss_reg += np.sum(step_loss_reg)
                     loss += np.sum(step_loss)  # Sum over batch.
@@ -329,10 +329,13 @@ def train():
                 if bucket == None:
                     continue
                 # Loss for whole bucket.
-                step_loss, predictions, step_loss_reg = \
+                step_loss, predictions, step_loss_reg, sketches = \
                     model.batch_update(sess, bucket_id,
                                        bucket.data,
                                        True)
+                #import pdb
+                #pdb.set_trace()
+                #a = sketches[step][sequence_id][:, 0]
                 dev_predictions.extend(predictions)
                 dev_true.extend(bucket.data.labels)
                 dev_loss += np.sum(step_loss)

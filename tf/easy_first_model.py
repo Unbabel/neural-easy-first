@@ -245,12 +245,14 @@ class EasyFirstModel(object):
             output_feed = [self.losses[bucket_id],
                            self.predictions[bucket_id],
                            self.losses_reg[bucket_id],
+                           self.sketches_tfs[bucket_id],
                            self.updates[bucket_id],
                            self.gradient_norms[bucket_id]]
         else:
             output_feed = [self.losses[bucket_id],
                            self.predictions[bucket_id],
-                           self.losses_reg[bucket_id]]
+                           self.losses_reg[bucket_id],
+                           self.sketches_tfs[bucket_id]]
 
         outputs = session.run(output_feed, input_feed)
         predictions = []
@@ -258,7 +260,7 @@ class EasyFirstModel(object):
             predictions.append(pred[:length].tolist())
 
         # Outputs are: loss, predictions, regularized loss.
-        return outputs[0], predictions, outputs[2]
+        return outputs[0], predictions, outputs[2], outputs[3]
 
     def forward(self, x, y, mask, max_sequence_length, sequence_lengths,
                 label_weights):
