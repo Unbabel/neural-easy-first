@@ -324,6 +324,8 @@ def train():
             dev_loss = 0.0
             dev_predictions = []
             dev_true = []
+            if FLAGS.track_sketches:
+                sequence_sketches = [None for _ in xrange(len(dev_sentences))]
             for bucket_id in xrange(len(dev_buckets)):
                 bucket = dev_buckets[bucket_id]
                 if bucket == None:
@@ -333,9 +335,10 @@ def train():
                     model.batch_update(sess, bucket_id,
                                        bucket.data,
                                        True)
-                #import pdb
-                #pdb.set_trace()
-                #a = sketches[step][sequence_id][:, 0]
+                # Save the sketches for each sentence in the bucket.
+                if FLAGS.track_sketches:
+                    for i, sequence_index in enumerate(bucket.indices):
+                        sequence_sketches[sequence_index] = sketches[:, i, :, 0]
                 dev_predictions.extend(predictions)
                 dev_true.extend(bucket.data.labels)
                 dev_loss += np.sum(step_loss)
@@ -369,9 +372,31 @@ def train():
                 model.saver.save(sess, model.path,
                                  global_step=model.global_step,
                                  write_meta_graph=False)
+                # Write sketch information.
+                if FLAGS.track_sketches:
+                    LOGGER.info("Writing sketch information.")
+                    filepath_sketches = FLAGS.sketch_dir + os.sep + \
+                                        'sketches.txt'
+                    f = open(filepath_sketches, 'w')
+                    for sequence_index in xrange(len(sequence_sketches)):
+                        sentence = dev_sentences[sequence_index]
+                        words = [train_embeddings[0].id2word[fids[0]] \
+                                 for fids in sentence]
+                        f.write('# ' + ' '.join(words) + '\n')
+                        sketches = sequence_sketches[sequence_index]
+                        for step in xrange(sketches.shape[0]):
+                            f.write(
+                                'Step %d: %s' % (
+                                    step+1,
+                                    ' '.join([str(p)
+                                              for p in sketches[step, :]]))
+                                + '\n')
+                        f.write('\n')
+                    f.close()
             else:
                 LOGGER.info("current best: %f at epoch %d",
                             best_valid, best_valid_epoch)
+
 
         LOGGER.info("Training finished after %d epochs. "
                     "Best validation result: %f at epoch %d.",
