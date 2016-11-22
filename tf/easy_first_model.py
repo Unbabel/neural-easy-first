@@ -273,7 +273,7 @@ class EasyFirstModel(object):
 
         # Outputs are: loss, predictions, regularized loss.
         return outputs[0], predictions, outputs[2], \
-               feeoutputs[3] if self.track_sketches else None
+               outputs[3] if self.track_sketches else None
 
 
     def forward(self, x, y, mask, max_sequence_length, sequence_lengths,
@@ -324,7 +324,7 @@ class EasyFirstModel(object):
                 H = rnn_layer.forward(emb)
                 state_size = 2*self.hidden_size
             else:
-                input_size = tf.shape(emb)[2]
+                input_size = emb.get_shape().as_list()[2]
                 feedforward_layer = \
                     FeedforwardLayer(sequence_length=max_sequence_length,
                                      input_size=input_size,
