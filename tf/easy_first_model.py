@@ -244,20 +244,32 @@ class EasyFirstModel(object):
         input_feed[self.is_trains[bucket_id].name] = not forward_only
 
         if not forward_only:
-            # I'm passing the gradients in the output feed since it's often
-            # useful to debug. We should remove it later.
-            output_feed = [self.losses[bucket_id],
-                           self.predictions[bucket_id],
-                           self.losses_reg[bucket_id],
-                           self.sketches_tfs[bucket_id],
-                           self.updates[bucket_id],
-                           self.gradient_norms[bucket_id],
-                           self.gradients[bucket_id]]
+            if self.track_sketches:
+                # I'm passing the gradients in the output feed since it's often
+                # useful to debug. We should remove it later.
+                output_feed = [self.losses[bucket_id],
+                               self.predictions[bucket_id],
+                               self.losses_reg[bucket_id],
+                               self.sketches_tfs[bucket_id],
+                               self.updates[bucket_id],
+                               self.gradient_norms[bucket_id],
+                               self.gradients[bucket_id]]
+            else:
+                output_feed = [self.losses[bucket_id],
+                               self.predictions[bucket_id],
+                               self.losses_reg[bucket_id],
+                               self.updates[bucket_id],
+                               self.gradient_norms[bucket_id]]
         else:
-            output_feed = [self.losses[bucket_id],
-                           self.predictions[bucket_id],
-                           self.losses_reg[bucket_id],
-                           self.sketches_tfs[bucket_id]]
+            if self.track_sketches:
+                output_feed = [self.losses[bucket_id],
+                               self.predictions[bucket_id],
+                               self.losses_reg[bucket_id],
+                               self.sketches_tfs[bucket_id]]
+            else:
+                output_feed = [self.losses[bucket_id],
+                               self.predictions[bucket_id],
+                               self.losses_reg[bucket_id]]
 
         outputs = session.run(output_feed, input_feed)
         predictions = []
@@ -271,7 +283,9 @@ class EasyFirstModel(object):
         #        pdb.set_trace()
 
         # Outputs are: loss, predictions, regularized loss.
-        return outputs[0], predictions, outputs[2], outputs[3]
+        return outputs[0], predictions, outputs[2], \
+               outputs[3] if self.track_sketches else None
+
 
     def forward(self, x, y, mask, max_sequence_length, sequence_lengths,
                 label_weights):
@@ -321,7 +335,7 @@ class EasyFirstModel(object):
                 H = rnn_layer.forward(emb)
                 state_size = 2*self.hidden_size
             else:
-                input_size = tf.shape(emb)[2]
+                input_size = emb.get_shape().as_list()[2]
                 feedforward_layer = \
                     FeedforwardLayer(sequence_length=max_sequence_length,
                                      input_size=input_size,
