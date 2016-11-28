@@ -282,8 +282,10 @@ def train():
                 for batch_samples in batch_ids:
                     batch_data = bucket.data.select(batch_samples)
                     # Loss for each instance in batch.
-                    step_loss, predictions, step_loss_reg, _ = \
+                    step_loss, predictions, step_loss_reg, sketches = \
                         model.batch_update(sess, bucket_id, batch_data, False)
+                    #import pdb
+                    #pdb.set_trace()
                     loss_reg += np.sum(step_loss_reg)
                     loss += np.sum(step_loss)  # Sum over batch.
                     bucket_loss += np.sum(step_loss)
@@ -326,6 +328,7 @@ def train():
             dev_true = []
             if FLAGS.track_sketches:
                 sequence_sketches = [None for _ in xrange(len(dev_sentences))]
+                sequence_predictions = [None for _ in xrange(len(dev_sentences))]
             for bucket_id in xrange(len(dev_buckets)):
                 bucket = dev_buckets[bucket_id]
                 if bucket == None:
@@ -339,6 +342,7 @@ def train():
                 if FLAGS.track_sketches:
                     for i, sequence_index in enumerate(bucket.indices):
                         sequence_sketches[sequence_index] = sketches[:, i, :, 0]
+                        sequence_predictions[sequence_index] = predictions[i]
                 dev_predictions.extend(predictions)
                 dev_true.extend(bucket.data.labels)
                 dev_loss += np.sum(step_loss)
@@ -378,17 +382,32 @@ def train():
                     filepath_sketches = FLAGS.sketch_dir + os.sep + \
                                         'sketches.txt'
                     f = open(filepath_sketches, 'w')
+                    labels = ['' for key in train_label_dict]
+                    for key, value in train_label_dict.iteritems():
+                        labels[value] = key
+                        [labels[lid] for lid in dev_labels[0]]
+
+                    #import pdb
+                    #pdb.set_trace()
                     for sequence_index in xrange(len(sequence_sketches)):
                         sentence = dev_sentences[sequence_index]
+                        sentence_labels = dev_labels[sequence_index]
+                        sentence_predictions = \
+                            sequence_predictions[sequence_index]
                         words = [train_embeddings[0].id2word[fids[0]] \
                                  for fids in sentence]
+                        gold_tags =  [labels[lid] for lid in sentence_labels]
+                        predicted_tags = [labels[lid]
+                                          for lid in sentence_predictions]
                         f.write('# ' + ' '.join(words) + '\n')
+                        f.write('# ' + ' '.join(gold_tags) + '\n')
+                        f.write('# ' + ' '.join(predicted_tags) + '\n')
                         sketches = sequence_sketches[sequence_index]
                         for step in xrange(sketches.shape[0]):
                             f.write(
                                 'Step %d: %s' % (
                                     step+1,
-                                    ' '.join([str(p)
+                                    ' '.join(['{:.3f}'.format(p)
                                               for p in sketches[step, :]]))
                                 + '\n')
                         f.write('\n')
@@ -396,7 +415,6 @@ def train():
             else:
                 LOGGER.info("current best: %f at epoch %d",
                             best_valid, best_valid_epoch)
-
 
         LOGGER.info("Training finished after %d epochs. "
                     "Best validation result: %f at epoch %d.",

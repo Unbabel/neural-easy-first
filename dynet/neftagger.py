@@ -85,6 +85,8 @@ class NeuralEasyFirstTagger(object):
         # Make several sketch steps.
         if num_sketches < 0:
             num_sketches = len(words)
+        cumulative_attention = dy.vecInput(len(words))
+        cumulative_attention.set(np.ones(len(words)) / len(words))
         for j in xrange(num_sketches):
             z = []
             states = []
@@ -115,8 +117,12 @@ class NeuralEasyFirstTagger(object):
                 z.append(z_i)
                 states_with_context.append(state_with_context)
             temperature = 10. # 1.
+            discount_factor = 50. # 0.
             #attention_weights = dy.softmax(dy.concatenate(z)/temperature)
-            attention_weights = dy.sparsemax(dy.concatenate(z)/temperature)
+            scores = dy.concatenate(z) - cumulative_attention * discount_factor
+            attention_weights = dy.sparsemax(scores / temperature)
+            cumulative_attention = \
+                (attention_weights + cumulative_attention * i) / (i+1)
             #if not training:
             #    pdb.set_trace()
             cbar = dy.esum([vector*attention_weight
