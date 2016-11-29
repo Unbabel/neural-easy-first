@@ -33,9 +33,9 @@ class EasyFirstModel(object):
         self.global_step = tf.Variable(0, trainable=False)
         optimizer_map = {"sgd": tf.train.GradientDescentOptimizer,
                          "adam": tf.train.AdamOptimizer,
-                        "adagrad": tf.train.AdagradOptimizer,
+                         "adagrad": tf.train.AdagradOptimizer,
                          "adadelta": tf.train.AdadeltaOptimizer,
-                        "rmsprop": tf.train.RMSPropOptimizer,
+                         "rmsprop": tf.train.RMSPropOptimizer,
                          "momemtum": tf.train.MomentumOptimizer}
         self.optimizer = optimizer_map. \
             get(optimizer,
@@ -196,9 +196,11 @@ class EasyFirstModel(object):
             params = tf.trainable_variables()
             self.gradient_norms = []
             self.updates = []
+            self.gradients = [] # Remove this later. 
             for j in xrange(len(self.buckets)):
                 gradients = tf.gradients(tf.reduce_mean(self.losses_reg[j], 0),
                                          params)  # batch normalization
+                self.gradients.append(gradients)
                 if self.max_gradient_norm > -1:
                     clipped_gradients, norm = \
                         tf.clip_by_global_norm(gradients,
@@ -243,12 +245,15 @@ class EasyFirstModel(object):
 
         if not forward_only:
             if self.track_sketches:
+                # I'm passing the gradients in the output feed since it's often
+                # useful to debug. We should remove it later.
                 output_feed = [self.losses[bucket_id],
                                self.predictions[bucket_id],
                                self.losses_reg[bucket_id],
                                self.sketches_tfs[bucket_id],
                                self.updates[bucket_id],
-                               self.gradient_norms[bucket_id]]
+                               self.gradient_norms[bucket_id],
+                               self.gradients[bucket_id]]
             else:
                 output_feed = [self.losses[bucket_id],
                                self.predictions[bucket_id],
@@ -270,6 +275,12 @@ class EasyFirstModel(object):
         predictions = []
         for length, pred in zip(batch_data.lengths, outputs[1]):
             predictions.append(pred[:length].tolist())
+
+        #import pdb
+        #import numpy as np
+        #if not forward_only:
+        #    if np.isnan(outputs[5]):
+        #        pdb.set_trace()
 
         # Outputs are: loss, predictions, regularized loss.
         return outputs[0], predictions, outputs[2], \

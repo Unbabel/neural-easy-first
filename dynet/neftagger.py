@@ -20,6 +20,8 @@ class NeuralEasyFirstTagger(object):
         self.model = None
         self.parameters = {}
         self.builders = []
+        self.track_sketches = False
+        self.sketch_file = None
 
     def create_model(self):
         model = dy.Model()
@@ -85,6 +87,8 @@ class NeuralEasyFirstTagger(object):
         # Make several sketch steps.
         if num_sketches < 0:
             num_sketches = len(words)
+        cumulative_attention = dy.vecInput(len(words))
+        cumulative_attention.set(np.ones(len(words)) / len(words))
         for j in xrange(num_sketches):
             z = []
             states = []
@@ -114,9 +118,16 @@ class NeuralEasyFirstTagger(object):
                 z_i = v * dy.tanh(W_cz * state_with_context + w_z)
                 z.append(z_i)
                 states_with_context.append(state_with_context)
-            temperature = 10. # 1.
+            temperature = 1. #10. # 1.
+            discount_factor = 5. #10. #50. # 0.
             #attention_weights = dy.softmax(dy.concatenate(z)/temperature)
-            attention_weights = dy.sparsemax(dy.concatenate(z)/temperature)
+            scores = dy.concatenate(z) - cumulative_attention * discount_factor
+            attention_weights = dy.sparsemax(scores / temperature)
+            if self.track_sketches:
+                self.sketch_file.write('%s\n' % ' '.join(['{:.3f}'.format(p) \
+                    for p in attention_weights.npvalue()]))
+            cumulative_attention = \
+                (attention_weights + cumulative_attention * i) / (i+1)
             #if not training:
             #    pdb.set_trace()
             cbar = dy.esum([vector*attention_weight
@@ -126,10 +137,14 @@ class NeuralEasyFirstTagger(object):
             sketches = [sketch + s_n * weight
                         for sketch, weight in zip(sketches, attention_weights)]
 
+        if self.track_sketches:
+            self.sketch_file.write('\n')
+
         # Now use the last sketch to make a prediction.
         O = dy.parameter(self.parameters['O'])
         if training:
             errs = []
+            predicted_tags = []
             for i, t in enumerate(tags):
                 if self.concatenate_last_layer:
                     state = dy.concatenate([hidden_states[i], sketches[i]])
@@ -138,9 +153,11 @@ class NeuralEasyFirstTagger(object):
                 r_t = O * state
                 err = dy.pickneglogsoftmax(r_t, t)
                 errs.append(err)
-            return dy.esum(errs)
+                chosen = np.argmax(r_t.npvalue())
+                predicted_tags.append(self.tag_vocabulary.i2w[chosen])
+            return dy.esum(errs), predicted_tags
         else:
-            predicted_tags=[]
+            predicted_tags = []
             for i in xrange(len(words)):
                 if self.concatenate_last_layer:
                     state = dy.concatenate([hidden_states[i], sketches[i]])
@@ -232,19 +249,28 @@ def main():
     print >> sys.stderr
     print >> sys.stderr, 'Training...'
     tic = time.time()
-    sgd = dy.SimpleSGDTrainer(tagger.model, e0=0.1)
+    trainer = dy.AdagradTrainer(tagger.model, e0=0.1)
+    #sgd = dy.SimpleSGDTrainer(tagger.model, e0=0.1)
     for epoch in xrange(num_epochs):
-        tagged = loss = 0
+        tagged = correct = loss = 0
         #random.shuffle(train_instances)
         for i, instance in enumerate(train_instances, 1):
-            sum_errs = tagger.build_graph(instance, num_sketches=num_sketches,
-                                          noise_level=0.1)
+            gold_tags = [t for _, t in instance]
+            sum_errs, predicted_tags = \
+                tagger.build_graph(instance,
+                                   num_sketches=num_sketches,
+                                   noise_level=0.1)
             loss += sum_errs.scalar_value()
             tagged += len(instance)
+            correct += sum([int(g == p)
+                            for g, p in zip(gold_tags, predicted_tags)])
             sum_errs.backward()
-            sgd.update()
+            trainer.update()
+        train_accuracy = float(correct) / tagged
 
         # Check accuracy in dev set.
+        tagger.track_sketches = True
+        tagger.sketch_file = open('sketches.txt', 'w')
         correct = 0
         total = 0
         for instance in dev_instances:
@@ -257,10 +283,15 @@ def main():
                             for g, p in zip(gold_tags, predicted_tags)])
             total += len(gold_tags)
         dev_accuracy = float(correct) / total
-        sgd.status()
-        print >> sys.stderr, 'Epoch: %d, Loss: %f, Dev Acc: %f' % (epoch+1,
-                                                                   loss/tagged,
-                                                                   dev_accuracy)
+        trainer.status()
+        print >> sys.stderr, 'Epoch: %d, Loss: %f, Train acc: %f, Dev Acc: %f' \
+            % (epoch+1,
+               loss/tagged,
+               train_accuracy,
+               dev_accuracy)
+        tagger.sketch_file.close()
+        tagger.track_sketches = False
+
     toc = time.time()
     print >> sys.stderr, 'Training took %f miliseconds.' % (toc - tic)
 

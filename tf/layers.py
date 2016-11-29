@@ -211,15 +211,13 @@ class ScoreLayer(object):
         '''Predict a label for an input, compute the loss and return label and
         loss.'''
         [x, y] = score_input
-
         word_label_score = tf.matmul(tf.reshape(x,
                                                 [self.batch_size,
                                                  self.input_size]),
                                      self.W_sp) + self.w_p
-
         word_label_probs = tf.nn.softmax(word_label_score)
         word_preds = tf.argmax(word_label_probs, 1)
-        y_full = tf.one_hot(tf.squeeze(y),
+        y_full = tf.one_hot(y,
                             depth=self.num_labels,
                             on_value=1.0,
                             off_value=0.0)
@@ -355,9 +353,18 @@ class SketchLayer(object):
         :param tau: temperature, the cooler the more spiked is distribution
         :return: the softmax distribution.
         '''
-        row_max = tf.expand_dims(tf.reduce_max(tensor, 1), 1)
-        t_shifted = tensor - row_max
-        nom = tf.exp(t_shifted/tau)*tf.cast(mask, tf.float32)
+        penalty = 10.0
+        value = tensor*tf.cast(mask, tf.float32) - \
+                penalty*(1.0 - tf.cast(mask, tf.float32))
+        row_max = tf.expand_dims(tf.reduce_max(value, 1), 1)
+        t_shifted = value - row_max
+        # Note: before, we had this:
+        # nom = tf.exp(t_shifted/tau)*tf.cast(mask, tf.float32)
+        # However, this pointwise multiplication seems to lead to numerical
+        # problems (gradient of v goes to nan).
+        # So I replaced this by a penalty to be applied before exponentiating.
+        # I'm not very happy with this solution, but it seems to work.
+        nom = tf.exp(t_shifted/tau)
         row_sum = tf.expand_dims(tf.reduce_sum(nom, 1), 1)
         softmax = nom / row_sum
         return softmax
@@ -381,7 +388,7 @@ class SketchLayer(object):
         # subtract cumulative attention
         d = discount_factor # 5.0  # discount factor
         tau = temperature # 0.2 # temperature.
-        attention = scores - discount_factor*b
+        attention = scores - d*b
         attention = self._softmax_with_mask(attention, self.batch_mask, tau=tau)
         #attention = self._softmax_with_mask(scores, self.batch_mask, tau=1.0)
         return attention, scores
@@ -425,13 +432,13 @@ class SketchLayer(object):
                 C = self._convolute(HS)
 
                 # Compute attention for where to focus next.
-                a_n, _ = self._compute_attention(
-                    C, b, discount_factor=self.discount_factor,
+                a_n, scores = self._compute_attention(
+                    C, b_n, discount_factor=self.discount_factor,
                     temperature=self.temperature)
 
                 # Cumulative attention scores.
                 #b_n = b + a_n
-                b_n = (tf.cast(sketch_counter, tf.float32)-1)*b + a_n #rz
+                b_n = (tf.cast(sketch_counter, tf.float32)-1)*b_n + a_n #rz
                 b_n /= tf.cast(sketch_counter, tf.float32)
 
                 state_size = tf.shape(C)[2]
@@ -442,9 +449,9 @@ class SketchLayer(object):
                 # Same dropout for all steps:
                 # (http://arxiv.org/pdf/1512.05287v3.pdf), mask is ones if
                 # no dropout.
-                a = tf.matmul(c_bar, tf.mul(self.W_cs, W_cs_mask))
+                value = tf.matmul(c_bar, tf.mul(self.W_cs, W_cs_mask))
                 # batch_size x hidden_size
-                s_n = self.activation(a + self.w_s)
+                s_n = self.activation(value + self.w_s)
 
                 # batch_size x L x state_size.
                 sketch_update = tf.batch_matmul(tf.expand_dims(a_n, [2]),

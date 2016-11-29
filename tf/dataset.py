@@ -135,6 +135,11 @@ class DatasetReader(object):
             for line in data:
                 line = line.rstrip()
                 if line == '':  # End of sentence.
+                    # REMOVE THIS.
+                    #for _ in xrange(len(sentence_fields), max_length-1):
+                    #   sentence_fields.append(['<UNK>', 'NOUN'])
+                    #sentence_fields = sentence_fields[:(max_length-1)]
+                    # END OF REMOVE THIS.
                     if max_length < 0 or len(sentence_fields) < max_length:
                         sentence, sentence_labels = self._process_sentence(
                             sentence_fields, embeddings, label_dict, train)
