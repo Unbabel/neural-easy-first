@@ -20,6 +20,7 @@ class NeuralEasyFirstTagger(object):
         self.model = None
         self.parameters = {}
         self.builders = []
+        self.single_state_model = False # True
         self.track_sketches = False
         self.sketch_file = None
 
@@ -130,12 +131,18 @@ class NeuralEasyFirstTagger(object):
                 (attention_weights + cumulative_attention * i) / (i+1)
             #if not training:
             #    pdb.set_trace()
-            cbar = dy.esum([vector*attention_weight
-                            for vector, attention_weight in
-                            zip(states_with_context, attention_weights)])
-            s_n = dy.tanh(W_cs * cbar + w_s)
-            sketches = [sketch + s_n * weight
-                        for sketch, weight in zip(sketches, attention_weights)]
+            if self.single_state_model:
+                cbar = dy.esum([vector*attention_weight
+                                for vector, attention_weight in
+                                zip(states_with_context, attention_weights)])
+                s_n = dy.tanh(W_cs * cbar + w_s)
+                sketches = [sketch + s_n * weight
+                            for sketch, weight in \
+                            zip(sketches, attention_weights)]
+            else:
+                for i in xrange(len(words)):
+                    s_n = dy.tanh(W_cs * states_with_context[i] + w_s)
+                    sketches[i] += s_n * attention_weights[i]
 
         if self.track_sketches:
             self.sketch_file.write('\n')
