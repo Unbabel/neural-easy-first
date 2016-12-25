@@ -9,10 +9,15 @@ import util
 import pdb
 
 class NeuralEasyFirstTagger(object):
-    def __init__(self, word_vocabulary, tag_vocabulary, embedding_size,
+    def __init__(self, word_vocabulary, tag_vocabulary, model_type,
+                 attention_type, temperature, discount_factor, embedding_size,
                  hidden_size, context_size, concatenate_last_layer):
         self.word_vocabulary = word_vocabulary
         self.tag_vocabulary = tag_vocabulary
+        self.model_type = model_type
+        self.attention_type = attention_type
+        self.temperature = temperature
+        self.discount_factor = discount_factor
         self.embedding_size = embedding_size
         self.hidden_size = hidden_size
         self.context_size = context_size
@@ -20,7 +25,6 @@ class NeuralEasyFirstTagger(object):
         self.model = None
         self.parameters = {}
         self.builders = []
-        self.single_state_model = False # True
         self.track_sketches = False
         self.sketch_file = None
 
@@ -51,6 +55,17 @@ class NeuralEasyFirstTagger(object):
                                         self.hidden_size, self.model),
                          dy.LSTMBuilder(1, self.embedding_size,
                                         self.hidden_size, self.model)]
+
+    def squared_norm_of_parameters(self):
+        squared_norm = dy.scalarInput(0.)
+        for key in self.parameters:
+            if type(self.parameters[key]) == dy.LookupParameters:
+                continue
+                #w = self.parameters[key]
+            else:
+                w = dy.parameter(self.parameters[key])
+            squared_norm += dy.trace_of_product(w, w)
+        return squared_norm
 
     def build_graph(self, instance, num_sketches=-1, noise_level=0.1,
                     training=True):
@@ -119,11 +134,16 @@ class NeuralEasyFirstTagger(object):
                 z_i = v * dy.tanh(W_cz * state_with_context + w_z)
                 z.append(z_i)
                 states_with_context.append(state_with_context)
-            temperature = 1. #10. # 1.
-            discount_factor = 5. #10. #50. # 0.
+            temperature = self.temperature #10. # 1.
+            discount_factor = self.discount_factor #5. #10. #50. # 0.
             #attention_weights = dy.softmax(dy.concatenate(z)/temperature)
             scores = dy.concatenate(z) - cumulative_attention * discount_factor
-            attention_weights = dy.sparsemax(scores / temperature)
+            if self.attention_type == 'softmax':
+                attention_weights = dy.softmax(scores / temperature)
+            elif self.attention_type == 'sparsemax':
+                attention_weights = dy.sparsemax(scores / temperature)
+            else:
+                raise NotImplementedError
             if self.track_sketches:
                 self.sketch_file.write('%s\n' % ' '.join(['{:.3f}'.format(p) \
                     for p in attention_weights.npvalue()]))
@@ -131,7 +151,7 @@ class NeuralEasyFirstTagger(object):
                 (attention_weights + cumulative_attention * i) / (i+1)
             #if not training:
             #    pdb.set_trace()
-            if self.single_state_model:
+            if self.model_type == 'single_state':
                 cbar = dy.esum([vector*attention_weight
                                 for vector, attention_weight in
                                 zip(states_with_context, attention_weights)])
@@ -139,10 +159,12 @@ class NeuralEasyFirstTagger(object):
                 sketches = [sketch + s_n * weight
                             for sketch, weight in \
                             zip(sketches, attention_weights)]
-            else:
+            elif self.model_type == 'all_states':
                 for i in xrange(len(words)):
                     s_n = dy.tanh(W_cs * states_with_context[i] + w_s)
                     sketches[i] += s_n * attention_weights[i]
+            else:
+                raise NotImplementedError
 
         if self.track_sketches:
             self.sketch_file.write('\n')
@@ -215,6 +237,9 @@ def main():
         prog='Neural Easy-First POS Tagger',
         description='Trains/test a neural easy-first POS tagger.')
 
+    # Need to be here as an argument to allow specifying a seed.
+    parser.add_argument('--dynet-seed', type=str, default=0)
+
     parser.add_argument('-train_file', type=str, default='')
     parser.add_argument('-dev_file', type=str, default='')
     parser.add_argument('-test_file', type=str, default='')
@@ -224,6 +249,12 @@ def main():
     parser.add_argument('-context_size', type=int, default=1) # 0
     parser.add_argument('-num_sketches', type=int, default=-1)
     parser.add_argument('-num_epochs', type=int, default=50)
+    parser.add_argument('-l2_regularization', type=float, default=0.)
+    parser.add_argument('-model_type', type=str, default='single_state')
+    parser.add_argument('-attention_type', type=str, default='softmax')
+    parser.add_argument('-temperature', type=float, default=1.)
+    parser.add_argument('-discount_factor', type=float, default=0.)
+    parser.add_argument('-sketch_file', type=str, required=True)
 
     args = vars(parser.parse_args())
     print >> sys.stderr, args
@@ -237,6 +268,18 @@ def main():
     context_size = args['context_size']
     num_sketches = args['num_sketches']
     num_epochs = args['num_epochs']
+    l2_regularization = args['l2_regularization']
+    model_type = args['model_type']
+    attention_type = args['attention_type']
+    temperature = args['temperature']
+    discount_factor = args['discount_factor']
+    sketch_file = args['sketch_file']
+
+#    suffix = 'model-%s_attention-%s_temp-%f_disc-%f_C-%f_sketches-%d_' \
+#             'cat-%d_emb-%d_hid-%d_ctx-%d' % \
+#             (model_type, attention_type, temperature, discount_factor,
+#              l2_regularization, num_sketches, concatenate_last_layer,
+#              embedding_size, hidden_size, context_size)
 
     # Read corpus (train, dev, test).
     print >> sys.stderr
@@ -247,7 +290,8 @@ def main():
     word_vocabulary, tag_vocabulary = create_vocabularies([train_instances])
 
     # Create model.
-    tagger = NeuralEasyFirstTagger(word_vocabulary, tag_vocabulary,
+    tagger = NeuralEasyFirstTagger(word_vocabulary, tag_vocabulary, model_type,
+                                   attention_type, temperature, discount_factor,
                                    embedding_size, hidden_size, context_size,
                                    concatenate_last_layer)
     tagger.create_model()
@@ -258,8 +302,10 @@ def main():
     tic = time.time()
     trainer = dy.AdagradTrainer(tagger.model, e0=0.1)
     #sgd = dy.SimpleSGDTrainer(tagger.model, e0=0.1)
+    best_epoch = -1
+    best_dev_accuracy = 0.
     for epoch in xrange(num_epochs):
-        tagged = correct = loss = 0
+        tagged = correct = loss = reg = 0
         #random.shuffle(train_instances)
         for i, instance in enumerate(train_instances, 1):
             gold_tags = [t for _, t in instance]
@@ -267,7 +313,11 @@ def main():
                 tagger.build_graph(instance,
                                    num_sketches=num_sketches,
                                    noise_level=0.1)
-            loss += sum_errs.scalar_value()
+            val = sum_errs.scalar_value()
+            loss += val
+            sum_errs += tagger.squared_norm_of_parameters() * \
+                        l2_regularization
+            reg += (sum_errs.scalar_value() - val)
             tagged += len(instance)
             correct += sum([int(g == p)
                             for g, p in zip(gold_tags, predicted_tags)])
@@ -277,7 +327,7 @@ def main():
 
         # Check accuracy in dev set.
         tagger.track_sketches = True
-        tagger.sketch_file = open('sketches.txt', 'w')
+        tagger.sketch_file = open(sketch_file + '.tmp', 'w')
         correct = 0
         total = 0
         for instance in dev_instances:
@@ -290,16 +340,30 @@ def main():
                             for g, p in zip(gold_tags, predicted_tags)])
             total += len(gold_tags)
         dev_accuracy = float(correct) / total
-        trainer.status()
-        print >> sys.stderr, 'Epoch: %d, Loss: %f, Train acc: %f, Dev Acc: %f' \
-            % (epoch+1,
-               loss/tagged,
-               train_accuracy,
-               dev_accuracy)
         tagger.sketch_file.close()
         tagger.track_sketches = False
 
+        # Check if this is the best model so far.
+        if epoch == 0 or dev_accuracy > best_dev_accuracy:
+            best_epoch = epoch
+            best_dev_accuracy = dev_accuracy
+            from shutil import copyfile
+            copyfile(sketch_file + '.tmp', sketch_file)
+
+        # Plot epoch statistics.
+        trainer.status()
+        print >> sys.stderr, \
+            'Epoch: %d, Loss: %f, Reg: %f, Train acc: %f, Dev Acc: %f, ' \
+            'Best Dev acc: %f' \
+            % (epoch+1,
+               loss/tagged,
+               reg/tagged,
+               train_accuracy,
+               dev_accuracy,
+               best_dev_accuracy)
+
     toc = time.time()
+    print >> sys.stderr, 'Final Dev Accuracy: %f.' % best_dev_accuracy
     print >> sys.stderr, 'Training took %f miliseconds.' % (toc - tic)
 
 
