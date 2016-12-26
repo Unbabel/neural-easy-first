@@ -1,0 +1,43 @@
+BASELINE (BILSTM): 0.918522
+
+logs/log_model-single_state_attention-sparsemax_temp-1._disc-10._C-0._sketches--1_cat-0_emb-64_hid-20_ctx-1.txt
+90.93
+(becomes right-to-left)
+
+logs/log_model-single_state_attention-softmax_temp-10._disc-0._C-0._sketches--1_cat-0_emb-64_hid-20_ctx-1.txt
+88.17
+
+logs/log_model-single_state_attention-sparsemax_temp-1._disc-0._C-0.001_sketches--1_cat-0_emb-64_hid-20_ctx-1.txt
+91.32
+(becomes right-to-left)
+
+logs/log_model-single_state_attention-softmax_temp-1._disc-10._C-0.01_sketches--1_cat-0_emb-64_hid-20_ctx-1.txt
+90.03
+(approximately left-to-right)
+
+
+
+logs/log_model-single_state_attention-sparsemax_temp-10._disc-0._C-0._sketches--1_cat-1_emb-64_hid-20_ctx-1.txt
+91.92
+(nearly constant sketches for every step)
+
+logs/log_model-single_state_attention-softmax_temp-5._disc-0._C-0._sketches--1_cat-1_emb-64_hid-20_ctx-1.txt
+91.88
+
+
+
+
+
+logs/log_model-all_states_attention-sparsemax_temp-5._disc-10._C-0._sketches-5_cat-0_emb-64_hid-20_ctx-1.txt
+90.95
+
+logs/log_model-all_states_attention-softmax_temp-5._disc-10._C-0._sketches-5_cat-0_emb-64_hid-20_ctx-1.txt
+90.94
+(attention from uniform to peaked)
+
+logs/log_model-all_states_attention-sparsemax_temp-5._disc-10._C-0._sketches-5_cat-1_emb-64_hid-20_ctx-1.txt
+91.77
+
+logs/log_model-all_states_attention-softmax_temp-5._disc-5._C-0._sketches-5_cat-1_emb-64_hid-20_ctx-1.txt
+91.64
+(attention from uniform to peaked)

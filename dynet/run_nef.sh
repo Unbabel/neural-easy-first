@@ -5,13 +5,14 @@ discount_factor=$4 #0.
 l2_regularization=$5 #0.001
 num_sketches=$6 #5
 concatenate_last_layer=$7 #1
+use_sketch_losses=$8
 embedding_size=64
 hidden_size=20
 context_size=1
 
 suffix=model-${model_type}_attention-${attention_type}_temp-${temperature}_\
 disc-${discount_factor}_C-${l2_regularization}_sketches-${num_sketches}_\
-cat-${concatenate_last_layer}_emb-${embedding_size}_hid-${hidden_size}_\
+cat-${concatenate_last_layer}_skloss-${use_sketch_losses}_emb-${embedding_size}_hid-${hidden_size}_\
 ctx-${context_size}
 
 echo $suffix
@@ -25,6 +26,7 @@ python neftagger.py \
     -model_type ${model_type} \
     -attention_type ${attention_type} \
     -concatenate_last_layer ${concatenate_last_layer} \
+    -use_sketch_losses ${use_sketch_losses} \
     -temperature ${temperature} \
     -discount_factor ${discount_factor} \
     -num_sketches ${num_sketches} \

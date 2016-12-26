@@ -11,7 +11,8 @@ import pdb
 class NeuralEasyFirstTagger(object):
     def __init__(self, word_vocabulary, tag_vocabulary, model_type,
                  attention_type, temperature, discount_factor, embedding_size,
-                 hidden_size, context_size, concatenate_last_layer):
+                 hidden_size, context_size, concatenate_last_layer,
+                 use_sketch_losses):
         self.word_vocabulary = word_vocabulary
         self.tag_vocabulary = tag_vocabulary
         self.model_type = model_type
@@ -22,6 +23,7 @@ class NeuralEasyFirstTagger(object):
         self.hidden_size = hidden_size
         self.context_size = context_size
         self.concatenate_last_layer = concatenate_last_layer
+        self.use_sketch_losses = use_sketch_losses
         self.model = None
         self.parameters = {}
         self.builders = []
@@ -73,6 +75,9 @@ class NeuralEasyFirstTagger(object):
         words = [self.word_vocabulary.w2i.get(w, unk) for w, _ in instance]
         tags = [self.tag_vocabulary.w2i[t] for _, t in instance]
 
+        if training:
+            errs = []
+
         dy.renew_cg()
         f_init, b_init = [b.initial_state() for b in self.builders]
 
@@ -92,6 +97,7 @@ class NeuralEasyFirstTagger(object):
         v = dy.parameter(self.parameters['v'])
         W_cs = dy.parameter(self.parameters['W_cs'])
         w_s = dy.parameter(self.parameters['w_s'])
+        O = dy.parameter(self.parameters['O'])
 
         # Initialize all word sketches as zero vectors.
         sketches = []
@@ -156,6 +162,13 @@ class NeuralEasyFirstTagger(object):
                                 for vector, attention_weight in
                                 zip(states_with_context, attention_weights)])
                 s_n = dy.tanh(W_cs * cbar + w_s)
+                if training and self.use_sketch_losses:
+                    assert not self.concatenate_last_layer
+                    state = s_n
+                    r_t = O * state
+                    for i, t in enumerate(tags):
+                        err = dy.pickneglogsoftmax(r_t, t)
+                        errs.append(err * attention_weights[i] / float(num_sketches))
                 sketches = [sketch + s_n * weight
                             for sketch, weight in \
                             zip(sketches, attention_weights)]
@@ -170,9 +183,7 @@ class NeuralEasyFirstTagger(object):
             self.sketch_file.write('\n')
 
         # Now use the last sketch to make a prediction.
-        O = dy.parameter(self.parameters['O'])
         if training:
-            errs = []
             predicted_tags = []
             for i, t in enumerate(tags):
                 if self.concatenate_last_layer:
@@ -244,6 +255,7 @@ def main():
     parser.add_argument('-dev_file', type=str, default='')
     parser.add_argument('-test_file', type=str, default='')
     parser.add_argument('-concatenate_last_layer', type=int, default=1)
+    parser.add_argument('-use_sketch_losses', type=int, default=0)
     parser.add_argument('-embedding_size', type=int, default=64) # 128
     parser.add_argument('-hidden_size', type=int, default=20) # 50
     parser.add_argument('-context_size', type=int, default=1) # 0
@@ -263,6 +275,7 @@ def main():
     dev_file = args['dev_file']
     test_file = args['test_file']
     concatenate_last_layer = args['concatenate_last_layer']
+    use_sketch_losses = args['use_sketch_losses']
     embedding_size = args['embedding_size']
     hidden_size = args['hidden_size']
     context_size = args['context_size']
@@ -293,13 +306,14 @@ def main():
     tagger = NeuralEasyFirstTagger(word_vocabulary, tag_vocabulary, model_type,
                                    attention_type, temperature, discount_factor,
                                    embedding_size, hidden_size, context_size,
-                                   concatenate_last_layer)
+                                   concatenate_last_layer, use_sketch_losses)
     tagger.create_model()
 
     # Train.
     print >> sys.stderr
     print >> sys.stderr, 'Training...'
     tic = time.time()
+    #trainer = dy.AdamTrainer(tagger.model, alpha=0.0001)
     trainer = dy.AdagradTrainer(tagger.model, e0=0.1)
     #sgd = dy.SimpleSGDTrainer(tagger.model, e0=0.1)
     best_epoch = -1
