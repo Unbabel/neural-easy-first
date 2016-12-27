@@ -40,17 +40,24 @@ class NeuralEasyFirstTagger(object):
                                                        self.embedding_size))
         parameters['W_cz'] = model.add_parameters(
             (self.hidden_size, 3*window_size*self.hidden_size))
-        parameters['w_z'] = model.add_parameters((self.hidden_size, 1))
+        #parameters['w_z'] = model.add_parameters((self.hidden_size, 1))
+        parameters['w_z'] = model.parameters_from_numpy(
+            np.zeros((self.hidden_size, 1)))
         parameters['v'] = model.add_parameters((1, self.hidden_size))
+        #parameters['v'] = model.parameters_from_numpy(
+        #    np.zeros((1, self.hidden_size)))
         parameters['W_cs'] = model.add_parameters(
             (self.hidden_size, 3*window_size*self.hidden_size))
-        parameters['w_s'] = model.add_parameters((self.hidden_size, 1))
+        #parameters['w_s'] = model.add_parameters((self.hidden_size, 1))
+        parameters['w_s'] = model.parameters_from_numpy(
+            np.zeros((self.hidden_size, 1)))
         if self.concatenate_last_layer:
             parameters['O'] = model.add_parameters((num_tags,
                                                     3*self.hidden_size))
         else:
             parameters['O'] = model.add_parameters((num_tags,
                                                     self.hidden_size))
+
         self.model = model
         self.parameters = parameters
         self.builders = [dy.LSTMBuilder(1, self.embedding_size,
@@ -70,7 +77,7 @@ class NeuralEasyFirstTagger(object):
         return squared_norm
 
     def build_graph(self, instance, num_sketches=-1, noise_level=0.1,
-                    training=True):
+                    training=True, epoch=-1):
         unk = self.word_vocabulary.w2i['_UNK_']
         words = [self.word_vocabulary.w2i.get(w, unk) for w, _ in instance]
         tags = [self.tag_vocabulary.w2i[t] for _, t in instance]
@@ -137,6 +144,8 @@ class NeuralEasyFirstTagger(object):
                         state = states[i+l]
                     state_with_context = dy.concatenate([state_with_context,
                                                          state])
+                #if epoch > -2:
+                #    print dy.tanh(W_cz * state_with_context + w_z).npvalue()
                 z_i = v * dy.tanh(W_cz * state_with_context + w_z)
                 z.append(z_i)
                 states_with_context.append(state_with_context)
@@ -181,6 +190,8 @@ class NeuralEasyFirstTagger(object):
 
         if self.track_sketches:
             self.sketch_file.write('\n')
+
+        #pdb.set_trace()
 
         # Now use the last sketch to make a prediction.
         if training:
@@ -326,7 +337,7 @@ def main():
             sum_errs, predicted_tags = \
                 tagger.build_graph(instance,
                                    num_sketches=num_sketches,
-                                   noise_level=0.1)
+                                   noise_level=0.) #0.1)
             val = sum_errs.scalar_value()
             loss += val
             sum_errs += tagger.squared_norm_of_parameters() * \
@@ -349,7 +360,8 @@ def main():
             predicted_tags = tagger.build_graph(instance,
                                                 num_sketches=num_sketches,
                                                 noise_level=0.,
-                                                training=False)
+                                                training=False,
+                                                epoch=epoch)
             correct += sum([int(g == p)
                             for g, p in zip(gold_tags, predicted_tags)])
             total += len(gold_tags)
