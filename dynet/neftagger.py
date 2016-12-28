@@ -30,6 +30,13 @@ class NeuralEasyFirstTagger(object):
         self.track_sketches = False
         self.sketch_file = None
 
+    def init_parameters(self, model, dims):
+        assert len(dims) == 2
+        #return model.add_parameters(dims)
+        u = np.sqrt(6. / (dims[0] + dims[1]))
+        W = u * (2. * np.random.rand(dims[0], dims[1]) - 1.)
+        return model.parameters_from_numpy(W)
+
     def create_model(self):
         model = dy.Model()
         parameters = {}
@@ -38,15 +45,20 @@ class NeuralEasyFirstTagger(object):
         window_size = 1+2*self.context_size
         parameters['E'] = model.add_lookup_parameters((num_words,
                                                        self.embedding_size))
-        parameters['W_cz'] = model.add_parameters(
+        #parameters['W_cz'] = model.add_parameters(
+        #    (self.hidden_size, 3*window_size*self.hidden_size))
+        parameters['W_cz'] = self.init_parameters(model, \
             (self.hidden_size, 3*window_size*self.hidden_size))
         #parameters['w_z'] = model.add_parameters((self.hidden_size, 1))
         parameters['w_z'] = model.parameters_from_numpy(
             np.zeros((self.hidden_size, 1)))
-        parameters['v'] = model.add_parameters((1, self.hidden_size))
+        #parameters['v'] = model.add_parameters((1, self.hidden_size))
+        parameters['v'] = self.init_parameters(model, (1, self.hidden_size))
         #parameters['v'] = model.parameters_from_numpy(
         #    np.zeros((1, self.hidden_size)))
-        parameters['W_cs'] = model.add_parameters(
+        #parameters['W_cs'] = model.add_parameters(
+        #    (self.hidden_size, 3*window_size*self.hidden_size))
+        parameters['W_cs'] = self.init_parameters(model, \
             (self.hidden_size, 3*window_size*self.hidden_size))
         #parameters['w_s'] = model.add_parameters((self.hidden_size, 1))
         parameters['w_s'] = model.parameters_from_numpy(
@@ -298,6 +310,8 @@ def main():
     temperature = args['temperature']
     discount_factor = args['discount_factor']
     sketch_file = args['sketch_file']
+
+    np.random.seed(42)
 
 #    suffix = 'model-%s_attention-%s_temp-%f_disc-%f_C-%f_sketches-%d_' \
 #             'cat-%d_emb-%d_hid-%d_ctx-%d' % \
