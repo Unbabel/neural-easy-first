@@ -23,7 +23,7 @@ def constrained_softmax(z, u):
     #print active
     return p, active, mass
 
-def gradient_constrained_softmax(z, u, dp, p, active, mass):
+def gradient_constrained_softmax_old(z, u, dp, p, active, mass):
     n = len(z)
     inds = active.nonzero()[0]
     Jz = np.zeros((n, n))
@@ -45,6 +45,15 @@ def gradient_constrained_softmax(z, u, dp, p, active, mass):
     dz = Jz.transpose().dot(dp)
     du = Ju.transpose().dot(dp)
     #import pdb; pdb.set_trace()
+    return dz, du
+
+def gradient_constrained_softmax(z, u, dp, p, active, mass):
+    n = len(z)
+    dp_av = sum(active * p * dp) / (1. - mass)
+    # inds = active.nonzero()[0]
+    # dp_av = p[inds].dot(dp[inds]) / (1. - mass)
+    dz = active * p * (dp - dp_av)
+    du = (1 - active) * (dp - dp_av)
     return dz, du
 
 def numeric_gradient_constrained_softmax(z, u, dp, p, active, mass):

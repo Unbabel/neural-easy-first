@@ -32,10 +32,10 @@ class NeuralEasyFirstTagger(object):
 
     def init_parameters(self, model, dims):
         assert len(dims) == 2
-        #return model.add_parameters(dims)
-        u = np.sqrt(6. / (dims[0] + dims[1]))
-        W = u * (2. * np.random.rand(dims[0], dims[1]) - 1.)
-        return model.parameters_from_numpy(W)
+        return model.add_parameters(dims)
+        #u = np.sqrt(6. / (dims[0] + dims[1]))
+        #W = u * (2. * np.random.rand(dims[0], dims[1]) - 1.)
+        #return model.parameters_from_numpy(W)
 
     def create_model(self):
         model = dy.Model()

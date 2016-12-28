@@ -35,7 +35,7 @@ python neftagger.py \
     -hidden_size ${hidden_size} \
     -context_size ${context_size} \
     -sketch_file sketches/sketch_${suffix}.txt \
-    >& logs/log_${suffix}.txt
+    >& logs/log2_${suffix}.txt
 
 
 
