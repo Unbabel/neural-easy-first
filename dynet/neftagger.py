@@ -11,7 +11,7 @@ import pdb
 class NeuralEasyFirstTagger(object):
     def __init__(self, word_vocabulary, tag_vocabulary, model_type,
                  attention_type, temperature, discount_factor, embedding_size,
-                 hidden_size, context_size, concatenate_last_layer,
+                 hidden_size, sketch_size, context_size, concatenate_last_layer,
                  use_sketch_losses):
         self.word_vocabulary = word_vocabulary
         self.tag_vocabulary = tag_vocabulary
@@ -21,6 +21,7 @@ class NeuralEasyFirstTagger(object):
         self.discount_factor = discount_factor
         self.embedding_size = embedding_size
         self.hidden_size = hidden_size
+        self.sketch_size = sketch_size
         self.context_size = context_size
         self.concatenate_last_layer = concatenate_last_layer
         self.use_sketch_losses = use_sketch_losses
@@ -47,8 +48,9 @@ class NeuralEasyFirstTagger(object):
                                                        self.embedding_size))
         #parameters['W_cz'] = model.add_parameters(
         #    (self.hidden_size, 3*window_size*self.hidden_size))
-        parameters['W_cz'] = self.init_parameters(model, \
-            (self.hidden_size, 3*window_size*self.hidden_size))
+        parameters['W_cz'] = self.init_parameters(
+            model, (self.hidden_size,
+                    window_size*(2*self.hidden_size + self.sketch_size)))
         #parameters['w_z'] = model.add_parameters((self.hidden_size, 1))
         parameters['w_z'] = model.parameters_from_numpy(
             np.zeros((self.hidden_size, 1)))
@@ -58,17 +60,18 @@ class NeuralEasyFirstTagger(object):
         #    np.zeros((1, self.hidden_size)))
         #parameters['W_cs'] = model.add_parameters(
         #    (self.hidden_size, 3*window_size*self.hidden_size))
-        parameters['W_cs'] = self.init_parameters(model, \
-            (self.hidden_size, 3*window_size*self.hidden_size))
+        parameters['W_cs'] = self.init_parameters(
+            model, (self.sketch_size,
+                    window_size*(2*self.hidden_size + self.sketch_size)))
         #parameters['w_s'] = model.add_parameters((self.hidden_size, 1))
         parameters['w_s'] = model.parameters_from_numpy(
-            np.zeros((self.hidden_size, 1)))
+            np.zeros((self.sketch_size, 1)))
         if self.concatenate_last_layer:
-            parameters['O'] = model.add_parameters((num_tags,
-                                                    3*self.hidden_size))
+            parameters['O'] = model.add_parameters(
+                (num_tags, 2*self.hidden_size + self.sketch_size))
         else:
             parameters['O'] = model.add_parameters((num_tags,
-                                                    self.hidden_size))
+                                                    self.sketch_size))
 
         self.model = model
         self.parameters = parameters
@@ -77,7 +80,7 @@ class NeuralEasyFirstTagger(object):
                          dy.LSTMBuilder(1, self.embedding_size,
                                         self.hidden_size, self.model)]
 
-    def squared_norm_of_parameters(self):
+    def squared_norm_of_parameters(self, print_norms=False):
         squared_norm = dy.scalarInput(0.)
         for key in self.parameters:
             if type(self.parameters[key]) == dy.LookupParameters:
@@ -85,7 +88,11 @@ class NeuralEasyFirstTagger(object):
                 #w = self.parameters[key]
             else:
                 w = dy.parameter(self.parameters[key])
-            squared_norm += dy.trace_of_product(w, w)
+            tmp = dy.trace_of_product(w, w)
+            if print_norms:
+                print 'Norm of %s: %f' % (key, tmp.npvalue())
+            squared_norm += tmp
+            #squared_norm += dy.trace_of_product(w, w)
         return squared_norm
 
     def build_graph(self, instance, num_sketches=-1, noise_level=0.1,
@@ -121,8 +128,8 @@ class NeuralEasyFirstTagger(object):
         # Initialize all word sketches as zero vectors.
         sketches = []
         for word in words:
-            sketch = dy.vecInput(self.hidden_size)
-            sketch.set(np.zeros(self.hidden_size))
+            sketch = dy.vecInput(self.sketch_size)
+            sketch.set(np.zeros(self.sketch_size))
             sketches.append(sketch)
 
         # Make several sketch steps.
@@ -142,16 +149,20 @@ class NeuralEasyFirstTagger(object):
                 state_with_context = state
                 for l in xrange(1, self.context_size+1):
                     if i-l < 0:
-                        state = dy.vecInput(3*self.hidden_size)
-                        state.set(np.zeros(3*self.hidden_size))
+                        state = dy.vecInput(2*self.hidden_size +
+                                            self.sketch_size)
+                        state.set(np.zeros(2*self.hidden_size +
+                                           self.sketch_size))
                     else:
                         state = states[i-l]
                     state_with_context = dy.concatenate([state_with_context,
                                                          state])
                 for l in xrange(1, self.context_size+1):
                     if i+l >= len(states):
-                        state = dy.vecInput(3*self.hidden_size)
-                        state.set(np.zeros(3*self.hidden_size))
+                        state = dy.vecInput(2*self.hidden_size +
+                                            self.sketch_size)
+                        state.set(np.zeros(2*self.hidden_size +
+                                           self.sketch_size))
                     else:
                         state = states[i+l]
                     state_with_context = dy.concatenate([state_with_context,
@@ -175,7 +186,7 @@ class NeuralEasyFirstTagger(object):
                 self.sketch_file.write('%s\n' % ' '.join(['{:.3f}'.format(p) \
                     for p in attention_weights.npvalue()]))
             cumulative_attention = \
-                (attention_weights + cumulative_attention * i) / (i+1)
+                (attention_weights + cumulative_attention * j) / (j+1)
             #if not training:
             #    pdb.set_trace()
             if self.model_type == 'single_state':
@@ -189,7 +200,8 @@ class NeuralEasyFirstTagger(object):
                     r_t = O * state
                     for i, t in enumerate(tags):
                         err = dy.pickneglogsoftmax(r_t, t)
-                        errs.append(err * attention_weights[i] / float(num_sketches))
+                        errs.append(err * attention_weights[i] / float(j+1))
+                        #errs.append(err * attention_weights[i] / float(num_sketches))
                 sketches = [sketch + s_n * weight
                             for sketch, weight in \
                             zip(sketches, attention_weights)]
@@ -233,12 +245,14 @@ class NeuralEasyFirstTagger(object):
             return predicted_tags
 
 
-def read_dataset(fname):
+def read_dataset(fname, maximum_sentence_length=-1):
     sent = []
     for line in file(fname):
         line = line.strip().split()
         if not line:
-            if sent: yield sent
+            if sent and (maximum_sentence_length < 0 or
+                         len(sent) < maximum_sentence_length):
+                yield sent
             sent = []
         else:
             w, t = line
@@ -281,6 +295,7 @@ def main():
     parser.add_argument('-use_sketch_losses', type=int, default=0)
     parser.add_argument('-embedding_size', type=int, default=64) # 128
     parser.add_argument('-hidden_size', type=int, default=20) # 50
+    parser.add_argument('-sketch_size', type=int, default=20) # 50
     parser.add_argument('-context_size', type=int, default=1) # 0
     parser.add_argument('-num_sketches', type=int, default=-1)
     parser.add_argument('-num_epochs', type=int, default=50)
@@ -301,6 +316,7 @@ def main():
     use_sketch_losses = args['use_sketch_losses']
     embedding_size = args['embedding_size']
     hidden_size = args['hidden_size']
+    sketch_size = args['sketch_size']
     context_size = args['context_size']
     num_sketches = args['num_sketches']
     num_epochs = args['num_epochs']
@@ -322,7 +338,8 @@ def main():
     # Read corpus (train, dev, test).
     print >> sys.stderr
     print >> sys.stderr, 'Loading train/dev/test datasets...'
-    train_instances = list(read_dataset(train_file))
+    train_instances = list(read_dataset(train_file,
+                                        maximum_sentence_length=100))
     dev_instances = list(read_dataset(dev_file))
     test_instances = list(read_dataset(test_file))
     word_vocabulary, tag_vocabulary = create_vocabularies([train_instances])
@@ -330,7 +347,8 @@ def main():
     # Create model.
     tagger = NeuralEasyFirstTagger(word_vocabulary, tag_vocabulary, model_type,
                                    attention_type, temperature, discount_factor,
-                                   embedding_size, hidden_size, context_size,
+                                   embedding_size, hidden_size, sketch_size,
+                                   context_size,
                                    concatenate_last_layer, use_sketch_losses)
     tagger.create_model()
 
@@ -340,6 +358,7 @@ def main():
     tic = time.time()
     #trainer = dy.AdamTrainer(tagger.model, alpha=0.0001)
     trainer = dy.AdagradTrainer(tagger.model, e0=0.1)
+    #trainer.set_clip_threshold(5.0)
     #sgd = dy.SimpleSGDTrainer(tagger.model, e0=0.1)
     best_epoch = -1
     best_dev_accuracy = 0.
@@ -362,6 +381,7 @@ def main():
                             for g, p in zip(gold_tags, predicted_tags)])
             sum_errs.backward()
             trainer.update()
+
         train_accuracy = float(correct) / tagged
 
         # Check accuracy in dev set.
