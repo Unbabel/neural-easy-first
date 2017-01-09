@@ -129,7 +129,8 @@ class NeuralEasyFirstTagger(object):
         if num_sketches < 0:
             num_sketches = len(words)
         cumulative_attention = dy.vecInput(len(words))
-        cumulative_attention.set(np.ones(len(words)) / len(words))
+        cumulative_attention.set(np.zeros(len(words)))
+        #cumulative_attention.set(np.ones(len(words)) / len(words))
         for j in xrange(num_sketches):
             z = []
             states = []
@@ -169,13 +170,18 @@ class NeuralEasyFirstTagger(object):
                 attention_weights = dy.softmax(scores / temperature)
             elif self.attention_type == 'sparsemax':
                 attention_weights = dy.sparsemax(scores / temperature)
+            elif self.attention_type == 'constrained_softmax':
+                constraints = -cumulative_attention + 1.
+                attention_weights = dy.constrained_softmax(scores / temperature,
+                                                           constraints)
             else:
                 raise NotImplementedError
             if self.track_sketches:
                 self.sketch_file.write('%s\n' % ' '.join(['{:.3f}'.format(p) \
                     for p in attention_weights.npvalue()]))
-            cumulative_attention = \
-                (attention_weights + cumulative_attention * i) / (i+1)
+            cumulative_attention += attention_weights
+            #cumulative_attention = \
+            #    (attention_weights + cumulative_attention * j) / (j+1)
             #if not training:
             #    pdb.set_trace()
             if self.model_type == 'single_state':
@@ -361,6 +367,7 @@ def main():
             correct += sum([int(g == p)
                             for g, p in zip(gold_tags, predicted_tags)])
             sum_errs.backward()
+            #if len(gold_tags) <= 5: pdb.set_trace()
             trainer.update()
         train_accuracy = float(correct) / tagged
 

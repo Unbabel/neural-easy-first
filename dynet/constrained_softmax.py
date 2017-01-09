@@ -1,4 +1,5 @@
 import numpy as np
+import pdb
 
 def constrained_softmax(z, u):
     z -= np.mean(z)
@@ -22,6 +23,9 @@ def constrained_softmax(z, u):
     #print mass
     #print active
     return p, active, mass
+
+def constrained_softmax_matrix(Z, U):
+    raise NotImplementedError
 
 def gradient_constrained_softmax_old(z, u, dp, p, active, mass):
     n = len(z)
@@ -88,21 +92,23 @@ def numeric_gradient_constrained_softmax(z, u, dp, p, active, mass):
 if __name__ == "__main__":
     n = 6
     z = np.random.randn(n)
-    u = 0.5*np.random.rand(n)
-    print sum(u)
+    uc = 0.5*np.random.rand(n)
+    pdb.set_trace()
+    print sum(uc)
     print z
-    print u
-    p, active, mass = constrained_softmax(z, u)
+    print uc
+    p, active, mass = constrained_softmax(z, uc)
     print p
     print sum(p)
 
-    dp = np.random.randn(n)
-    dz, du = gradient_constrained_softmax(z, u, dp, p, active, mass)
+    dp = np.random.randn(len(z))
+    pdb.set_trace()
+    dz, du = gradient_constrained_softmax(z, uc, dp, p, active, mass)
     print dp
     print dz
     print du
 
-    dz_, du_ = numeric_gradient_constrained_softmax(z, u, dp, p, active, mass)
+    dz_, du_ = numeric_gradient_constrained_softmax(z, uc, dp, p, active, mass)
     print dz_
     print du_
 
