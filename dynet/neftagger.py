@@ -12,6 +12,7 @@ class NeuralEasyFirstTagger(object):
     def __init__(self, word_vocabulary, tag_vocabulary, model_type,
                  attention_type, temperature, discount_factor, embedding_size,
                  hidden_size, sketch_size, context_size, concatenate_last_layer,
+                 sum_hidden_states_and_sketches,
                  share_attention_sketch_parameters, use_sketch_losses):
         self.word_vocabulary = word_vocabulary
         self.tag_vocabulary = tag_vocabulary
@@ -24,6 +25,7 @@ class NeuralEasyFirstTagger(object):
         self.sketch_size = sketch_size
         self.context_size = context_size
         self.concatenate_last_layer = concatenate_last_layer
+        self.sum_hidden_states_and_sketches = sum_hidden_states_and_sketches
         self.share_attention_sketch_parameters = \
             share_attention_sketch_parameters
         self.use_sketch_losses = use_sketch_losses
@@ -48,29 +50,26 @@ class NeuralEasyFirstTagger(object):
         window_size = 1+2*self.context_size
         parameters['E'] = model.add_lookup_parameters((num_words,
                                                        self.embedding_size))
-        #parameters['W_cz'] = model.add_parameters(
-        #    (self.hidden_size, 3*window_size*self.hidden_size))
+        if self.sum_hidden_states_and_sketches:
+            assert not self.concatenate_last_layer
+            assert self.sketch_size == 2*self.hidden_size
+            state_size = self.sketch_size
+        else:
+            state_size = 2*self.hidden_size + self.sketch_size
+
         parameters['W_cz'] = self.init_parameters(
-            model, (self.hidden_size,
-                    window_size*(2*self.hidden_size + self.sketch_size)))
-        #parameters['w_z'] = model.add_parameters((self.hidden_size, 1))
+            model, (self.hidden_size, window_size*state_size))
         parameters['w_z'] = model.parameters_from_numpy(
             np.zeros((self.hidden_size, 1)))
-        #parameters['v'] = model.add_parameters((1, self.hidden_size))
         parameters['v'] = self.init_parameters(model, (1, self.hidden_size))
-        #parameters['v'] = model.parameters_from_numpy(
-        #    np.zeros((1, self.hidden_size)))
-        #parameters['W_cs'] = model.add_parameters(
-        #    (self.hidden_size, 3*window_size*self.hidden_size))
+
         if self.share_attention_sketch_parameters:
             assert self.sketch_size == self.hidden_size
             parameters['W_cs'] = parameters['W_cz']
             parameters['w_s'] = parameters['w_z']
         else:
             parameters['W_cs'] = self.init_parameters(
-                model, (self.sketch_size,
-                        window_size*(2*self.hidden_size + self.sketch_size)))
-            #parameters['w_s'] = model.add_parameters((self.hidden_size, 1))
+                model, (self.sketch_size, window_size*state_size))
             parameters['w_s'] = model.parameters_from_numpy(
                 np.zeros((self.sketch_size, 1)))
         if self.concatenate_last_layer:
@@ -137,9 +136,13 @@ class NeuralEasyFirstTagger(object):
 
         # Initialize all word sketches as zero vectors.
         sketches = []
-        for word in words:
-            sketch = dy.vecInput(self.sketch_size)
-            sketch.set(np.zeros(self.sketch_size))
+        for i, word in enumerate(words):
+            if self.sum_hidden_states_and_sketches:
+                assert self.sketch_size == 2*self.hidden_size
+                sketch = hidden_states[i]
+            else:
+                sketch = dy.vecInput(self.sketch_size)
+                sketch.set(np.zeros(self.sketch_size))
             sketches.append(sketch)
 
         # Make several sketch steps.
@@ -148,32 +151,35 @@ class NeuralEasyFirstTagger(object):
         cumulative_attention = dy.vecInput(len(words))
         cumulative_attention.set(np.zeros(len(words)))
         #cumulative_attention.set(np.ones(len(words)) / len(words))
+        if self.sum_hidden_states_and_sketches:
+            state_size = self.sketch_size
+        else:
+            state_size = 2*self.hidden_size + self.sketch_size
         for j in xrange(num_sketches):
             z = []
             states = []
             states_with_context = []
             for i in xrange(len(words)):
-                state = dy.concatenate([hidden_states[i], sketches[i]])
+                if self.sum_hidden_states_and_sketches:
+                    state = sketches[i]
+                else:
+                    state = dy.concatenate([hidden_states[i], sketches[i]])
                 states.append(state)
             #pdb.set_trace()
             for i in xrange(len(words)):
                 state_with_context = state
                 for l in xrange(1, self.context_size+1):
                     if i-l < 0:
-                        state = dy.vecInput(2*self.hidden_size +
-                                            self.sketch_size)
-                        state.set(np.zeros(2*self.hidden_size +
-                                           self.sketch_size))
+                        state = dy.vecInput(state_size)
+                        state.set(np.zeros(state_size)) # Note: should these be zeros?
                     else:
                         state = states[i-l]
                     state_with_context = dy.concatenate([state_with_context,
                                                          state])
                 for l in xrange(1, self.context_size+1):
                     if i+l >= len(states):
-                        state = dy.vecInput(2*self.hidden_size +
-                                            self.sketch_size)
-                        state.set(np.zeros(2*self.hidden_size +
-                                           self.sketch_size))
+                        state = dy.vecInput(state_size)
+                        state.set(np.zeros(state_size)) # Note: should these be zeros?
                     else:
                         state = states[i+l]
                     state_with_context = dy.concatenate([state_with_context,
@@ -333,6 +339,7 @@ def main():
     parser.add_argument('-dev_file', type=str, default='')
     parser.add_argument('-test_file', type=str, default='')
     parser.add_argument('-concatenate_last_layer', type=int, default=1)
+    parser.add_argument('-sum_hidden_states_and_sketches', type=int, default=0)
     parser.add_argument('-share_attention_sketch_parameters', type=int,
                         default=0)
     parser.add_argument('-use_sketch_losses', type=int, default=0)
@@ -343,6 +350,7 @@ def main():
     parser.add_argument('-num_sketches', type=int, default=-1)
     parser.add_argument('-maximum_sentence_length', type=int, default=100)
     parser.add_argument('-num_epochs', type=int, default=50)
+    parser.add_argument('-num_pretraining_epochs', type=int, default=0)
     parser.add_argument('-l2_regularization', type=float, default=0.)
     parser.add_argument('-model_type', type=str, default='single_state')
     parser.add_argument('-attention_type', type=str, default='softmax')
@@ -357,6 +365,7 @@ def main():
     dev_file = args['dev_file']
     test_file = args['test_file']
     concatenate_last_layer = args['concatenate_last_layer']
+    sum_hidden_states_and_sketches = args['sum_hidden_states_and_sketches']
     share_attention_sketch_parameters = \
         args['share_attention_sketch_parameters']
     use_sketch_losses = args['use_sketch_losses']
@@ -367,14 +376,13 @@ def main():
     num_sketches = args['num_sketches']
     maximum_sentence_length = args['maximum_sentence_length']
     num_epochs = args['num_epochs']
+    num_pretraining_epochs = args['num_pretraining_epochs']
     l2_regularization = args['l2_regularization']
     model_type = args['model_type']
     attention_type = args['attention_type']
     temperature = args['temperature']
     discount_factor = args['discount_factor']
     sketch_file = args['sketch_file']
-
-    num_pretraining_epochs = 2
 
     np.random.seed(42)
 
@@ -400,6 +408,7 @@ def main():
                                    embedding_size, hidden_size, sketch_size,
                                    context_size,
                                    concatenate_last_layer,
+                                   sum_hidden_states_and_sketches,
                                    share_attention_sketch_parameters,
                                    use_sketch_losses)
     tagger.create_model()
