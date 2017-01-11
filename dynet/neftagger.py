@@ -195,6 +195,16 @@ class NeuralEasyFirstTagger(object):
                 constraints = -cumulative_attention + 1.
                 attention_weights = dy.constrained_softmax(scores / temperature,
                                                            constraints)
+            elif self.attention_type == 'left_to_right':
+                attention_weights = dy.vecInput(len(words))
+                a = np.zeros(len(words))
+                a[j] = 1.
+                attention_weights.set(a)
+            elif self.attention_type == 'right_to_left':
+                attention_weights = dy.vecInput(len(words))
+                a = np.zeros(len(words))
+                a[len(words)-1-j] = 1.
+                attention_weights.set(a)
             else:
                 raise NotImplementedError
             if self.track_sketches:
@@ -364,6 +374,8 @@ def main():
     discount_factor = args['discount_factor']
     sketch_file = args['sketch_file']
 
+    num_pretraining_epochs = 2
+
     np.random.seed(42)
 
 #    suffix = 'model-%s_attention-%s_temp-%f_disc-%f_C-%f_sketches-%d_' \
@@ -407,10 +419,17 @@ def main():
         #random.shuffle(train_instances)
         for i, instance in enumerate(train_instances, 1):
             gold_tags = [t for _, t in instance]
+            attention_type = tagger.attention_type
+            if epoch < num_pretraining_epochs:
+                if i%2:
+                    tagger.attention_type = 'left_to_right'
+                else:
+                    tagger.attention_type = 'right_to_left'
             sum_errs, predicted_tags = \
                 tagger.build_graph(instance,
                                    num_sketches=num_sketches,
                                    noise_level=0.) #0.1)
+            tagger.attention_type = attention_type
             val = sum_errs.scalar_value()
             if np.isnan(val):
                 print >> sys.stderr, \
