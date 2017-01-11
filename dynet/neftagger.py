@@ -417,6 +417,7 @@ def main():
                     'Numeric problems in sentence %d (%d words long; ' \
                     'previous sentence was %d words long)' % \
                     (i, len(instance), len(train_instances[i-2]))
+                assert False
             loss += val
             sum_errs += tagger.squared_norm_of_parameters() * \
                         l2_regularization
