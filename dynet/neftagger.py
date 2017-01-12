@@ -29,6 +29,7 @@ class NeuralEasyFirstTagger(object):
         self.share_attention_sketch_parameters = \
             share_attention_sketch_parameters
         self.use_sketch_losses = use_sketch_losses
+        self.use_max_pooling = True
         self.model = None
         self.parameters = {}
         self.builders = []
@@ -184,9 +185,13 @@ class NeuralEasyFirstTagger(object):
                         state = states[i+l]
                     state_with_context = dy.concatenate([state_with_context,
                                                          state])
-                #if epoch > -2:
-                #    print dy.tanh(W_cz * state_with_context + w_z).npvalue()
-                z_i = v * dy.tanh(W_cz * state_with_context + w_z)
+                if self.use_max_pooling:
+                    r_i = O * dy.tanh(W_cz * state_with_context + w_z)
+                    scores = dy.transpose(dy.concatenate_cols([r_i]))
+                    z_i = dy.kmax_pooling(scores, 1)[0] # Best score.
+                    #pdb.set_trace()
+                else:
+                    z_i = v * dy.tanh(W_cz * state_with_context + w_z)
                 z.append(z_i)
                 states_with_context.append(state_with_context)
             temperature = self.temperature #10. # 1.
