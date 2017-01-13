@@ -11,9 +11,12 @@ import pdb
 class NeuralEasyFirstTagger(object):
     def __init__(self, word_vocabulary, tag_vocabulary, model_type,
                  attention_type, temperature, discount_factor, embedding_size,
-                 hidden_size, sketch_size, context_size, concatenate_last_layer,
+                 hidden_size, preattention_size, sketch_size, context_size,
+                 concatenate_last_layer,
                  sum_hidden_states_and_sketches,
-                 share_attention_sketch_parameters, use_sketch_losses):
+                 share_attention_sketch_parameters,
+                 use_sketch_losses,
+                 use_max_pooling):
         self.word_vocabulary = word_vocabulary
         self.tag_vocabulary = tag_vocabulary
         self.model_type = model_type
@@ -22,6 +25,7 @@ class NeuralEasyFirstTagger(object):
         self.discount_factor = discount_factor
         self.embedding_size = embedding_size
         self.hidden_size = hidden_size
+        self.preattention_size = preattention_size
         self.sketch_size = sketch_size
         self.context_size = context_size
         self.concatenate_last_layer = concatenate_last_layer
@@ -29,7 +33,7 @@ class NeuralEasyFirstTagger(object):
         self.share_attention_sketch_parameters = \
             share_attention_sketch_parameters
         self.use_sketch_losses = use_sketch_losses
-        self.use_max_pooling = True
+        self.use_max_pooling = use_max_pooling
         self.model = None
         self.parameters = {}
         self.builders = []
@@ -59,13 +63,14 @@ class NeuralEasyFirstTagger(object):
             state_size = 2*self.hidden_size + self.sketch_size
 
         parameters['W_cz'] = self.init_parameters(
-            model, (self.hidden_size, window_size*state_size))
+            model, (self.preattention_size, window_size*state_size))
         parameters['w_z'] = model.parameters_from_numpy(
-            np.zeros((self.hidden_size, 1)))
-        parameters['v'] = self.init_parameters(model, (1, self.hidden_size))
+            np.zeros((self.preattention_size, 1)))
+        parameters['v'] = self.init_parameters(
+            model, (1, self.preattention_size))
 
         if self.share_attention_sketch_parameters:
-            assert self.sketch_size == self.hidden_size
+            assert self.sketch_size == self.preattention_size
             parameters['W_cs'] = parameters['W_cz']
             parameters['w_s'] = parameters['w_z']
         else:
@@ -186,10 +191,15 @@ class NeuralEasyFirstTagger(object):
                     state_with_context = dy.concatenate([state_with_context,
                                                          state])
                 if self.use_max_pooling:
-                    r_i = O * dy.tanh(W_cz * state_with_context + w_z)
+                    assert self.preattention_size == self.sketch_size
+                    preattention = dy.tanh(W_cz * state_with_context + w_z)
+                    if self.concatenate_last_layer:
+                        r_i = O * dy.concatenate([hidden_states[i],
+                                                  preattention])
+                    else:
+                        r_i = O * preattention
                     scores = dy.transpose(dy.concatenate_cols([r_i]))
                     z_i = dy.kmax_pooling(scores, 1)[0] # Best score.
-                    #pdb.set_trace()
                 else:
                     z_i = v * dy.tanh(W_cz * state_with_context + w_z)
                 z.append(z_i)
@@ -348,8 +358,10 @@ def main():
     parser.add_argument('-share_attention_sketch_parameters', type=int,
                         default=0)
     parser.add_argument('-use_sketch_losses', type=int, default=0)
+    parser.add_argument('-use_max_pooling', type=int, default=0)
     parser.add_argument('-embedding_size', type=int, default=64) # 128
     parser.add_argument('-hidden_size', type=int, default=20) # 50
+    parser.add_argument('-preattention_size', type=int, default=20) # 50
     parser.add_argument('-sketch_size', type=int, default=20) # 50
     parser.add_argument('-context_size', type=int, default=1) # 0
     parser.add_argument('-num_sketches', type=int, default=-1)
@@ -374,8 +386,10 @@ def main():
     share_attention_sketch_parameters = \
         args['share_attention_sketch_parameters']
     use_sketch_losses = args['use_sketch_losses']
+    use_max_pooling = args['use_max_pooling']
     embedding_size = args['embedding_size']
     hidden_size = args['hidden_size']
+    preattention_size = args['preattention_size']
     sketch_size = args['sketch_size']
     context_size = args['context_size']
     num_sketches = args['num_sketches']
@@ -410,12 +424,14 @@ def main():
     # Create model.
     tagger = NeuralEasyFirstTagger(word_vocabulary, tag_vocabulary, model_type,
                                    attention_type, temperature, discount_factor,
-                                   embedding_size, hidden_size, sketch_size,
+                                   embedding_size, hidden_size,
+                                   preattention_size, sketch_size,
                                    context_size,
                                    concatenate_last_layer,
                                    sum_hidden_states_and_sketches,
                                    share_attention_sketch_parameters,
-                                   use_sketch_losses)
+                                   use_sketch_losses,
+                                   use_max_pooling)
     tagger.create_model()
 
     # Train.
