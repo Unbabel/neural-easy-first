@@ -39,6 +39,7 @@ class NeuralEasyFirstTagger(object):
         self.builders = []
         self.track_sketches = False
         self.sketch_file = None
+        self.use_bilstm = True # False
 
     def init_parameters(self, model, dims):
         assert len(dims) == 2
@@ -120,18 +121,22 @@ class NeuralEasyFirstTagger(object):
             errs = []
 
         dy.renew_cg()
-        f_init, b_init = [b.initial_state() for b in self.builders]
 
         E = self.parameters['E']
         wembs = [E[w] for w in words]
         wembs = [dy.noise(we, noise_level) for we in wembs]
 
-        fw = [x.output() for x in f_init.add_inputs(wembs)]
-        bw = [x.output() for x in b_init.add_inputs(reversed(wembs))]
+        if self.use_bilstm:
+            f_init, b_init = [b.initial_state() for b in self.builders]
+            fw = [x.output() for x in f_init.add_inputs(wembs)]
+            bw = [x.output() for x in b_init.add_inputs(reversed(wembs))]
 
-        hidden_states = []
-        for f, b in zip(fw, reversed(bw)):
-            hidden_states.append(dy.concatenate([f, b]))
+            hidden_states = []
+            for f, b in zip(fw, reversed(bw)):
+                hidden_states.append(dy.concatenate([f, b]))
+        else:
+            assert 2*self.hidden_size == self.embedding_size
+            hidden_states = wembs
 
         W_cz = dy.parameter(self.parameters['W_cz'])
         w_z = dy.parameter(self.parameters['w_z'])
@@ -444,6 +449,7 @@ def main():
     #sgd = dy.SimpleSGDTrainer(tagger.model, e0=0.1)
     best_epoch = -1
     best_dev_accuracy = 0.
+    best_test_accuracy = 0.
     for epoch in xrange(num_epochs):
         tagged = correct = loss = reg = 0
         #random.shuffle(train_instances)
@@ -499,27 +505,46 @@ def main():
         tagger.sketch_file.close()
         tagger.track_sketches = False
 
-        # Check if this is the best model so far.
+        # Check accuracy in test set.
+        correct = 0
+        total = 0
+        for instance in test_instances:
+            gold_tags = [t for _, t in instance]
+            predicted_tags = tagger.build_graph(instance,
+                                                num_sketches=num_sketches,
+                                                noise_level=0.,
+                                                training=False,
+                                                epoch=epoch)
+            correct += sum([int(g == p)
+                            for g, p in zip(gold_tags, predicted_tags)])
+            total += len(gold_tags)
+        test_accuracy = float(correct) / total
+
+        # Check if this is the best model so far (on dev).
         if epoch == 0 or dev_accuracy > best_dev_accuracy:
             best_epoch = epoch
             best_dev_accuracy = dev_accuracy
+            best_test_accuracy = test_accuracy
             from shutil import copyfile
             copyfile(sketch_file + '.tmp', sketch_file)
 
         # Plot epoch statistics.
         trainer.status()
         print >> sys.stderr, \
-            'Epoch: %d, Loss: %f, Reg: %f, Train acc: %f, Dev Acc: %f, ' \
-            'Best Dev acc: %f' \
+            'Epoch: %d, Loss: %f, Reg: %f, Train acc: %f, Dev acc: %f, ' \
+            'Best Dev acc: %f, Test acc: %f, Best Test acc: %f' \
             % (epoch+1,
                loss/tagged,
                reg/tagged,
                train_accuracy,
                dev_accuracy,
-               best_dev_accuracy)
+               best_dev_accuracy,
+               test_accuracy,
+               best_test_accuracy)
 
     toc = time.time()
     print >> sys.stderr, 'Final Dev Accuracy: %f.' % best_dev_accuracy
+    print >> sys.stderr, 'Final Test Accuracy: %f.' % best_test_accuracy
     print >> sys.stderr, 'Training took %f miliseconds.' % (toc - tic)
 
 
