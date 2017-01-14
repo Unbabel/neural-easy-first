@@ -1,12 +1,12 @@
 import numpy as np
 import pdb
 
-num_words = 20000
+num_words = 10000
 num_labels = 5
-num_train_sentences = 16000
+num_train_sentences = 100000
 num_dev_sentences = 2000
 num_test_sentences = 2000
-sentence_length = 10
+sentence_length = 15
 
 assert num_words % num_labels == 0
 
@@ -25,9 +25,9 @@ def generate_biased_multinomial(size, selected, ratio):
 np.random.seed(42)
 
 # Define model.
-num_segments = 3
+num_segments = 1
 # Generate easy label distribution.
-easy_label_distribution = generate_biased_multinomial(num_labels, [0], ratio=5.)
+easy_label_distribution = generate_biased_multinomial(num_labels, [0], ratio=10.)
 
 ratio_transitions = 20.
 transition_probabilities = np.zeros((num_labels, num_labels))
@@ -41,7 +41,7 @@ for i in xrange(num_labels):
                                     [j],
                                     ratio_transitions)
 
-ratio_emissions_hard = 2.
+ratio_emissions_hard = 10.
 ratio_emissions_easy = 50.
 emission_probabilities = np.zeros((num_words, num_labels))
 for i in xrange(num_labels):
