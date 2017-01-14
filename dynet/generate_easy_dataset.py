@@ -29,11 +29,11 @@ num_segments = 1
 # Generate easy label distribution.
 easy_label_distribution = generate_biased_multinomial(num_labels, [0], ratio=10.)
 
-ratio_transitions = 20.
+ratio_transitions = 50.
 transition_probabilities = np.zeros((num_labels, num_labels))
 for i in xrange(num_labels):
     if i == num_labels-1:
-        j = 0
+        j = 1 #0
     else:
         j = i+1
     transition_probabilities[:, i] = \
@@ -41,7 +41,7 @@ for i in xrange(num_labels):
                                     [j],
                                     ratio_transitions)
 
-ratio_emissions_hard = 10.
+ratio_emissions_hard = 5.
 ratio_emissions_easy = 50.
 emission_probabilities = np.zeros((num_words, num_labels))
 for i in xrange(num_labels):
@@ -70,7 +70,7 @@ for split, num_sentences in zip(['train', 'dev', 'test'],
         for j in split_points:
             segments.append((position, j))
             position = j
-        segments.append((j, sentence_length))
+        segments.append((position, sentence_length))
         words = [-1] * sentence_length
         labels = [-1] * sentence_length
         for segment in segments:
