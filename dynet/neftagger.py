@@ -112,7 +112,7 @@ class NeuralEasyFirstTagger(object):
         return squared_norm
 
     def build_graph(self, instance, num_sketches=-1, noise_level=0.1,
-                    training=True, epoch=-1):
+                    training=True, epoch=-1, ordering=None):
         unk = self.word_vocabulary.w2i['_UNK_']
         words = [self.word_vocabulary.w2i.get(w, unk) for w, _ in instance]
         tags = [self.tag_vocabulary.w2i[t] for _, t in instance]
@@ -231,6 +231,11 @@ class NeuralEasyFirstTagger(object):
                 a = np.zeros(len(words))
                 a[len(words)-1-j] = 1.
                 attention_weights.set(a)
+            elif self.attention_type == 'prescribed_order':
+                attention_weights = dy.vecInput(len(words))
+                a = np.zeros(len(words))
+                a[ordering[j]] = 1.
+                attention_weights.set(a)
             else:
                 raise NotImplementedError
             if self.track_sketches:
@@ -312,18 +317,36 @@ class NeuralEasyFirstTagger(object):
             return predicted_tags
 
 
-def read_dataset(fname, maximum_sentence_length=-1):
+def read_dataset(fname, maximum_sentence_length=-1, read_ordering=False):
     sent = []
+    ordering = None
+    sentences = []
+    orderings = []
     for line in file(fname):
-        line = line.strip().split()
+        if ordering == None and read_ordering:
+            line = line.lstrip('#')
+            line = line.strip().split(' ')
+            ordering = [int(index) for index in line]
+            continue
+        else:
+            line = line.strip().split()
         if not line:
             if sent and (maximum_sentence_length < 0 or
                          len(sent) < maximum_sentence_length):
-                yield sent
+                if read_ordering:
+                    sentences.append(sent)
+                    orderings.append(ordering)
+                else:
+                    sentences.append(sent)
             sent = []
+            ordering = None
         else:
-            w, t = line
+            w, t = line[-2:]
             sent.append((w, t))
+    if read_ordering:
+        return sentences, orderings
+    else:
+        return sentences
 
 def create_vocabularies(corpora, word_cutoff=0):
     word_counter = Counter()
@@ -354,6 +377,7 @@ def main():
 
     # Need to be here as an argument to allow specifying a seed.
     parser.add_argument('--dynet-seed', type=str, default=0)
+    parser.add_argument('--dynet-mem', type=str, default=512)
 
     parser.add_argument('-train_file', type=str, default='')
     parser.add_argument('-dev_file', type=str, default='')
@@ -417,13 +441,25 @@ def main():
 #              embedding_size, hidden_size, context_size)
 
     # Read corpus (train, dev, test).
+    read_ordering=False
     print >> sys.stderr
     print >> sys.stderr, 'Loading train/dev/test datasets...'
-    train_instances = list(read_dataset(
-        train_file,
-        maximum_sentence_length=maximum_sentence_length))
-    dev_instances = list(read_dataset(dev_file))
-    test_instances = list(read_dataset(test_file))
+    if read_ordering:
+        train_instances, train_orderings = read_dataset(
+            train_file,
+            maximum_sentence_length=maximum_sentence_length,
+            read_ordering=True)
+        dev_instances, dev_orderings = read_dataset(dev_file,
+                                                    read_ordering=True)
+        test_instances, test_orderings = read_dataset(test_file,
+                                                      read_ordering=True)
+    else:
+        train_instances = read_dataset(
+            train_file,
+            maximum_sentence_length=maximum_sentence_length)
+        dev_instances = read_dataset(dev_file)
+        test_instances = read_dataset(test_file)
+
     word_vocabulary, tag_vocabulary = create_vocabularies([train_instances])
 
     # Create model.
@@ -454,17 +490,23 @@ def main():
         tagged = correct = loss = reg = 0
         #random.shuffle(train_instances)
         for i, instance in enumerate(train_instances, 1):
+            if read_ordering:
+                ordering = train_orderings[i-1]
+            else:
+                ordering = None
             gold_tags = [t for _, t in instance]
             attention_type = tagger.attention_type
             if epoch < num_pretraining_epochs:
-                if i%2:
-                    tagger.attention_type = 'left_to_right'
-                else:
-                    tagger.attention_type = 'right_to_left'
+                tagger.attention_type = 'prescribed_order'
+                #if i%2:
+                #    tagger.attention_type = 'left_to_right'
+                #else:
+                #    tagger.attention_type = 'right_to_left'
             sum_errs, predicted_tags = \
                 tagger.build_graph(instance,
                                    num_sketches=num_sketches,
-                                   noise_level=0.) #0.1)
+                                   noise_level=0.,
+                                   ordering=ordering) #0.1)
             tagger.attention_type = attention_type
             val = sum_errs.scalar_value()
             if np.isnan(val):
@@ -491,13 +533,18 @@ def main():
         tagger.sketch_file = open(sketch_file + '.tmp', 'w')
         correct = 0
         total = 0
-        for instance in dev_instances:
+        for i, instance in enumerate(dev_instances):
+            if read_ordering:
+                ordering = dev_orderings[i]
+            else:
+                ordering = None
             gold_tags = [t for _, t in instance]
             predicted_tags = tagger.build_graph(instance,
                                                 num_sketches=num_sketches,
                                                 noise_level=0.,
                                                 training=False,
-                                                epoch=epoch)
+                                                epoch=epoch,
+                                                ordering=ordering)
             correct += sum([int(g == p)
                             for g, p in zip(gold_tags, predicted_tags)])
             total += len(gold_tags)
@@ -508,13 +555,18 @@ def main():
         # Check accuracy in test set.
         correct = 0
         total = 0
-        for instance in test_instances:
+        for i, instance in enumerate(test_instances):
+            if read_ordering:
+                ordering = test_orderings[i]
+            else:
+                ordering = None
             gold_tags = [t for _, t in instance]
             predicted_tags = tagger.build_graph(instance,
                                                 num_sketches=num_sketches,
                                                 noise_level=0.,
                                                 training=False,
-                                                epoch=epoch)
+                                                epoch=epoch,
+                                                ordering=ordering)
             correct += sum([int(g == p)
                             for g, p in zip(gold_tags, predicted_tags)])
             total += len(gold_tags)
