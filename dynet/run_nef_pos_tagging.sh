@@ -16,8 +16,9 @@ embedding_size=${12} #64
 hidden_size=${13} #25 #30
 preattention_size=${14} #50
 sketch_size=${15} #50
-context_size=2
-language=${16}
+context_size=${16}
+noise_level=${17}
+language=${18}
 
 suffix=model-${model_type}_attention-${attention_type}_temp-${temperature}_\
 disc-${discount_factor}_C-${l2_regularization}_sketches-${num_sketches}_\

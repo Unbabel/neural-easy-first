@@ -10,6 +10,8 @@ use_max_pooling=0
 sum_hidden_states_and_sketches=0
 share_attention_sketch_parameters=0
 sketch_size=50
+context_size=2
+noise_level=0.
 
 concatenate_last_layer=1
 attention_type=softmax
@@ -32,5 +34,7 @@ do
         ${hidden_size} \
         ${preattention_size} \
         ${sketch_size} \
+        ${context_size} \
+        ${noise_level} \
         ${language}
 done

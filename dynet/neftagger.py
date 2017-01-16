@@ -382,6 +382,7 @@ def main():
     parser.add_argument('-train_file', type=str, default='')
     parser.add_argument('-dev_file', type=str, default='')
     parser.add_argument('-test_file', type=str, default='')
+    parser.add_argument('-noise_level', type=float, default=0.0)
     parser.add_argument('-concatenate_last_layer', type=int, default=1)
     parser.add_argument('-sum_hidden_states_and_sketches', type=int, default=0)
     parser.add_argument('-share_attention_sketch_parameters', type=int,
@@ -410,6 +411,7 @@ def main():
     train_file = args['train_file']
     dev_file = args['dev_file']
     test_file = args['test_file']
+    noise_level = args['noise_level']
     concatenate_last_layer = args['concatenate_last_layer']
     sum_hidden_states_and_sketches = args['sum_hidden_states_and_sketches']
     share_attention_sketch_parameters = \
@@ -505,8 +507,8 @@ def main():
             sum_errs, predicted_tags = \
                 tagger.build_graph(instance,
                                    num_sketches=num_sketches,
-                                   noise_level=0.,
-                                   ordering=ordering) #0.1)
+                                   noise_level=noise_level,
+                                   ordering=ordering)
             tagger.attention_type = attention_type
             val = sum_errs.scalar_value()
             if np.isnan(val):
