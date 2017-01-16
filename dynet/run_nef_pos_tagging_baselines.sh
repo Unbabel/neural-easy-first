@@ -12,6 +12,8 @@ share_attention_sketch_parameters=0
 sketch_size=50
 context_size=2
 noise_level=0.
+affix_length=4
+affix_embedding_size=50
 
 concatenate_last_layer=1
 attention_type=softmax
@@ -36,5 +38,7 @@ do
         ${sketch_size} \
         ${context_size} \
         ${noise_level} \
+        ${affix_length} \
+        ${affix_embedding_size} \
         ${language}
 done

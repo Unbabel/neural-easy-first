@@ -9,8 +9,11 @@ import util
 import pdb
 
 class NeuralEasyFirstTagger(object):
-    def __init__(self, word_vocabulary, tag_vocabulary, model_type,
+    def __init__(self, word_vocabulary, affix_length,
+                 prefix_vocabularies, suffix_vocabularies,
+                 tag_vocabulary, model_type,
                  attention_type, temperature, discount_factor, embedding_size,
+                 affix_embedding_size,
                  hidden_size, preattention_size, sketch_size, context_size,
                  concatenate_last_layer,
                  sum_hidden_states_and_sketches,
@@ -18,12 +21,16 @@ class NeuralEasyFirstTagger(object):
                  use_sketch_losses,
                  use_max_pooling):
         self.word_vocabulary = word_vocabulary
+        self.affix_length = affix_length
+        self.prefix_vocabularies = prefix_vocabularies
+        self.suffix_vocabularies = suffix_vocabularies
         self.tag_vocabulary = tag_vocabulary
         self.model_type = model_type
         self.attention_type = attention_type
         self.temperature = temperature
         self.discount_factor = discount_factor
         self.embedding_size = embedding_size
+        self.affix_embedding_size = affix_embedding_size
         self.hidden_size = hidden_size
         self.preattention_size = preattention_size
         self.sketch_size = sketch_size
@@ -56,6 +63,14 @@ class NeuralEasyFirstTagger(object):
         window_size = 1+2*self.context_size
         parameters['E'] = model.add_lookup_parameters((num_words,
                                                        self.embedding_size))
+        for l in xrange(self.affix_length):
+            num_prefixes = self.prefix_vocabularies[l].size()
+            parameters['E_prefix_%d' % (l+1)] = model.add_lookup_parameters(
+                (num_prefixes, self.affix_embedding_size))
+            num_suffixes = self.suffix_vocabularies[l].size()
+            parameters['E_suffix_%d' % (l+1)] = model.add_lookup_parameters(
+                (num_suffixes, self.affix_embedding_size))
+
         if self.sum_hidden_states_and_sketches:
             assert not self.concatenate_last_layer
             assert self.sketch_size == 2*self.hidden_size
@@ -88,9 +103,10 @@ class NeuralEasyFirstTagger(object):
 
         self.model = model
         self.parameters = parameters
-        self.builders = [dy.LSTMBuilder(1, self.embedding_size,
+        input_size = self.embedding_size + 2*self.affix_embedding_size
+        self.builders = [dy.LSTMBuilder(1, input_size,
                                         self.hidden_size, self.model),
-                         dy.LSTMBuilder(1, self.embedding_size,
+                         dy.LSTMBuilder(1, input_size,
                                         self.hidden_size, self.model)]
 
     def squared_norm_of_parameters(self, print_norms=False):
@@ -125,6 +141,30 @@ class NeuralEasyFirstTagger(object):
         E = self.parameters['E']
         wembs = [E[w] for w in words]
         wembs = [dy.noise(we, noise_level) for we in wembs]
+
+        if self.affix_length:
+            pembs = []
+            for l in xrange(self.affix_length):
+                E_prefix = self.parameters['E_prefix_%d' % (l+1)]
+                punk = self.prefix_vocabularies[l].w2i['_UNK_']
+                prefixes = [self.prefix_vocabularies[l].w2i.get(w[:(l+1)], punk) \
+                            for w, _ in instance]
+                pembs.append([E_prefix[p] for p in prefixes])
+                pembs[l] = [dy.noise(pe, noise_level) for pe in pembs[l]]
+            sembs = []
+            for l in xrange(self.affix_length):
+                E_suffix = self.parameters['E_suffix_%d' % (l+1)]
+                sunk = self.suffix_vocabularies[l].w2i['_UNK_']
+                suffixes = [self.suffix_vocabularies[l].w2i.get(w[-(l+1):], sunk) \
+                            for w, _ in instance]
+                sembs.append([E_suffix[s] for s in suffixes])
+                sembs[l] = [dy.noise(se, noise_level) for se in sembs[l]]
+            for i in xrange(len(wembs)):
+                pemb = [pembs[l][i] for l in xrange(self.affix_length)]
+                semb = [sembs[l][i] for l in xrange(self.affix_length)]
+                wembs[i] = dy.concatenate([wembs[i],
+                                           dy.esum(pemb),
+                                           dy.esum(semb)])
 
         if self.use_bilstm:
             f_init, b_init = [b.initial_state() for b in self.builders]
@@ -348,25 +388,48 @@ def read_dataset(fname, maximum_sentence_length=-1, read_ordering=False):
     else:
         return sentences
 
-def create_vocabularies(corpora, word_cutoff=0):
+def create_vocabularies(corpora, word_cutoff=0, affix_length=0):
     word_counter = Counter()
     tag_counter = Counter()
+    prefix_counter = [Counter() for _ in xrange(affix_length)]
+    suffix_counter = [Counter() for _ in xrange(affix_length)]
     word_counter['_UNK_'] = word_cutoff+1
+    for l in xrange(affix_length):
+        prefix_counter[l]['_UNK_'] = word_cutoff+1
+        suffix_counter[l]['_UNK_'] = word_cutoff+1
     for corpus in corpora:
         for s in corpus:
             for w, t in s:
                 word_counter[w] += 1
                 tag_counter[t] += 1
+                for l in xrange(affix_length):
+                    prefix_counter[l][w[:(l+1)]] += 1
+                    suffix_counter[l][w[-(l+1):]] += 1
+
     words = [w for w in word_counter if word_counter[w] > word_cutoff]
     tags = [t for t in tag_counter]
 
     word_vocabulary = util.Vocab.from_corpus([words])
     tag_vocabulary = util.Vocab.from_corpus([tags])
 
+    prefix_vocabularies = []
+    suffix_vocabularies = []
+    for l in xrange(affix_length):
+        prefixes = [p for p in prefix_counter[l] \
+                    if prefix_counter[l][p] > word_cutoff]
+        prefix_vocabularies.append(util.Vocab.from_corpus([prefixes]))
+        suffixes = [s for s in suffix_counter[l] \
+                    if suffix_counter[l][s] > word_cutoff]
+        suffix_vocabularies.append(util.Vocab.from_corpus([suffixes]))
+
     print >> sys.stderr, 'Words: %d' % word_vocabulary.size()
     print >> sys.stderr, 'Tags: %d' % tag_vocabulary.size()
 
-    return word_vocabulary, tag_vocabulary
+    if affix_length > 0:
+        return word_vocabulary, prefix_vocabularies, suffix_vocabularies, \
+            tag_vocabulary
+    else:
+        return word_vocabulary, tag_vocabulary
 
 def main():
     '''Main function.'''
@@ -382,6 +445,7 @@ def main():
     parser.add_argument('-train_file', type=str, default='')
     parser.add_argument('-dev_file', type=str, default='')
     parser.add_argument('-test_file', type=str, default='')
+    parser.add_argument('-affix_length', type=int, default=0)
     parser.add_argument('-noise_level', type=float, default=0.0)
     parser.add_argument('-concatenate_last_layer', type=int, default=1)
     parser.add_argument('-sum_hidden_states_and_sketches', type=int, default=0)
@@ -389,6 +453,7 @@ def main():
                         default=0)
     parser.add_argument('-use_sketch_losses', type=int, default=0)
     parser.add_argument('-use_max_pooling', type=int, default=0)
+    parser.add_argument('-affix_embedding_size', type=int, default=0)
     parser.add_argument('-embedding_size', type=int, default=64) # 128
     parser.add_argument('-hidden_size', type=int, default=20) # 50
     parser.add_argument('-preattention_size', type=int, default=20) # 50
@@ -411,6 +476,7 @@ def main():
     train_file = args['train_file']
     dev_file = args['dev_file']
     test_file = args['test_file']
+    affix_length = args['affix_length']
     noise_level = args['noise_level']
     concatenate_last_layer = args['concatenate_last_layer']
     sum_hidden_states_and_sketches = args['sum_hidden_states_and_sketches']
@@ -419,6 +485,7 @@ def main():
     use_sketch_losses = args['use_sketch_losses']
     use_max_pooling = args['use_max_pooling']
     embedding_size = args['embedding_size']
+    affix_embedding_size = args['affix_embedding_size']
     hidden_size = args['hidden_size']
     preattention_size = args['preattention_size']
     sketch_size = args['sketch_size']
@@ -462,12 +529,25 @@ def main():
         dev_instances = read_dataset(dev_file)
         test_instances = read_dataset(test_file)
 
-    word_vocabulary, tag_vocabulary = create_vocabularies([train_instances])
+
+    if affix_length > 0:
+        word_vocabulary, prefix_vocabularies, suffix_vocabularies, \
+            tag_vocabulary = create_vocabularies([train_instances],
+                                                 word_cutoff=0,
+                                                 affix_length=affix_length)
+    else:
+        word_vocabulary, tag_vocabulary = create_vocabularies([train_instances],
+                                                              word_cutoff=0)
+        prefix_vocabularies = []
+        suffix_vocabularies = []
 
     # Create model.
-    tagger = NeuralEasyFirstTagger(word_vocabulary, tag_vocabulary, model_type,
+    tagger = NeuralEasyFirstTagger(word_vocabulary, affix_length,
+                                   prefix_vocabularies, suffix_vocabularies,
+                                   tag_vocabulary, model_type,
                                    attention_type, temperature, discount_factor,
-                                   embedding_size, hidden_size,
+                                   embedding_size, affix_embedding_size,
+                                   hidden_size,
                                    preattention_size, sketch_size,
                                    context_size,
                                    concatenate_last_layer,

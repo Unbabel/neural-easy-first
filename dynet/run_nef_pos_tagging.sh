@@ -18,7 +18,9 @@ preattention_size=${14} #50
 sketch_size=${15} #50
 context_size=${16}
 noise_level=${17}
-language=${18}
+affix_length=${18}
+affix_embedding_size=${19}
+language=${20}
 
 suffix=model-${model_type}_attention-${attention_type}_temp-${temperature}_\
 disc-${discount_factor}_C-${l2_regularization}_sketches-${num_sketches}_\
@@ -36,11 +38,13 @@ mkdir -p pos_tagging/sketches/${language}
 
 python neftagger.py \
     --dynet-seed 42 \
+    --dynet-mem 1024 \
     -num_epochs ${num_epochs} \
     -num_pretraining_epochs ${num_pretraining_epochs} \
     -train_file pos_tagging/data/${language}-normalized_train.conll.tagging \
     -dev_file pos_tagging/data/${language}-normalized_dev.conll.tagging \
     -test_file pos_tagging/data/${language}-normalized_test.conll.tagging \
+    -affix_length ${affix_length} \
     -model_type ${model_type} \
     -attention_type ${attention_type} \
     -concatenate_last_layer ${concatenate_last_layer} \
@@ -53,6 +57,7 @@ python neftagger.py \
     -num_sketches ${num_sketches} \
     -maximum_sentence_length ${maximum_sentence_length} \
     -l2_regularization ${l2_regularization} \
+    -affix_embedding_size ${affix_embedding_size} \
     -embedding_size ${embedding_size} \
     -hidden_size ${hidden_size} \
     -preattention_size ${preattention_size} \
