@@ -55,14 +55,26 @@ class NeuralEasyFirstTagger(object):
         #W = u * (2. * np.random.rand(dims[0], dims[1]) - 1.)
         #return model.parameters_from_numpy(W)
 
-    def create_model(self):
+    def create_model(self, embeddings=None):
         model = dy.Model()
         parameters = {}
-        num_words = self.word_vocabulary.size()
+        if embeddings != None:
+            num_words = len(set(embeddings.keys()).
+                            union(set(self.word_vocabulary.w2i.keys())))
+        else:
+            num_words = self.word_vocabulary.size()
         num_tags = self.tag_vocabulary.size()
         window_size = 1+2*self.context_size
         parameters['E'] = model.add_lookup_parameters((num_words,
                                                        self.embedding_size))
+        if embeddings != None:
+            for word in embeddings:
+                if word not in self.word_vocabulary.w2i:
+                    self.word_vocabulary.w2i[word] = \
+                        len(self.word_vocabulary.w2i.keys())
+                parameters['E'].init_row(self.word_vocabulary.w2i[word],
+                                         embeddings[word])
+
         for l in xrange(self.affix_length):
             num_prefixes = self.prefix_vocabularies[l].size()
             parameters['E_prefix_%d' % (l+1)] = model.add_lookup_parameters(
@@ -431,6 +443,17 @@ def create_vocabularies(corpora, word_cutoff=0, affix_length=0):
     else:
         return word_vocabulary, tag_vocabulary
 
+def load_embeddings(embeddings_file):
+    embeddings = {}
+    f = open(embeddings_file)
+    for line in f:
+        fields = line.split(' ')
+        word = fields[0]
+        v = [float(val) for val in fields[1:]]
+        embeddings[word] = v
+    f.close()
+    return embeddings
+
 def main():
     '''Main function.'''
     # Parse arguments.
@@ -445,6 +468,7 @@ def main():
     parser.add_argument('-train_file', type=str, default='')
     parser.add_argument('-dev_file', type=str, default='')
     parser.add_argument('-test_file', type=str, default='')
+    parser.add_argument('-embeddings_file', type=str, default='')
     parser.add_argument('-affix_length', type=int, default=0)
     parser.add_argument('-noise_level', type=float, default=0.0)
     parser.add_argument('-concatenate_last_layer', type=int, default=1)
@@ -476,6 +500,7 @@ def main():
     train_file = args['train_file']
     dev_file = args['dev_file']
     test_file = args['test_file']
+    embeddings_file = args['embeddings_file']
     affix_length = args['affix_length']
     noise_level = args['noise_level']
     concatenate_last_layer = args['concatenate_last_layer']
@@ -533,7 +558,7 @@ def main():
     if affix_length > 0:
         word_vocabulary, prefix_vocabularies, suffix_vocabularies, \
             tag_vocabulary = create_vocabularies([train_instances],
-                                                 word_cutoff=0,
+                                                 word_cutoff=1, #0,
                                                  affix_length=affix_length)
     else:
         word_vocabulary, tag_vocabulary = create_vocabularies([train_instances],
@@ -555,7 +580,11 @@ def main():
                                    share_attention_sketch_parameters,
                                    use_sketch_losses,
                                    use_max_pooling)
-    tagger.create_model()
+    if embeddings_file != '':
+        embeddings = load_embeddings(embeddings_file)
+    else:
+        embeddings = None
+    tagger.create_model(embeddings=embeddings)
 
     # Train.
     print >> sys.stderr

@@ -44,6 +44,7 @@ python neftagger.py \
     -train_file pos_tagging/data/${language}-normalized_train.conll.tagging \
     -dev_file pos_tagging/data/${language}-normalized_dev.conll.tagging \
     -test_file pos_tagging/data/${language}-normalized_test.conll.tagging \
+    -embeddings_file pos_tagging/data/${language}.embeddings \
     -affix_length ${affix_length} \
     -model_type ${model_type} \
     -attention_type ${attention_type} \
