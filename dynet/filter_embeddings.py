@@ -19,6 +19,8 @@ num_words = 0
 f = open(embeddings_pickle_file)
 words, vectors = pickle.load(f)
 for w, v in zip(words, vectors):
+    #import pdb; pdb.set_trace()
+    w = w.encode('utf8')
     if w in word_list:
         num_words += 1
         print '%s %s' % (w, ' '.join([str(val) for val in v]))

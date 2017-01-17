@@ -8,6 +8,10 @@ use_sketch_losses=0
 embedding_size=64
 hidden_size=50
 preattention_size=50
+context_size=2
+noise_level=0.
+affix_length=4
+affix_embedding_size=50
 
 concatenate_last_layer=0
 use_max_pooling=0
@@ -32,6 +36,10 @@ do
         ${hidden_size} \
         ${preattention_size} \
         ${sketch_size} \
+        ${context_size} \
+        ${noise_level} \
+        ${affix_length} \
+        ${affix_embedding_size} \
         ${language}
 done
 
@@ -58,6 +66,10 @@ do
         ${hidden_size} \
         ${preattention_size} \
         ${sketch_size} \
+        ${context_size} \
+        ${noise_level} \
+        ${affix_length} \
+        ${affix_embedding_size} \
         ${language}
 done
 
@@ -84,6 +96,10 @@ do
         ${hidden_size} \
         ${preattention_size} \
         ${sketch_size} \
+        ${context_size} \
+        ${noise_level} \
+        ${affix_length} \
+        ${affix_embedding_size} \
         ${language}
 done
 
@@ -110,5 +126,9 @@ do
         ${hidden_size} \
         ${preattention_size} \
         ${sketch_size} \
+        ${context_size} \
+        ${noise_level} \
+        ${affix_length} \
+        ${affix_embedding_size} \
         ${language}
 done

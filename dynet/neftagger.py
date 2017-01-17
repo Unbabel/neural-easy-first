@@ -558,11 +558,11 @@ def main():
     if affix_length > 0:
         word_vocabulary, prefix_vocabularies, suffix_vocabularies, \
             tag_vocabulary = create_vocabularies([train_instances],
-                                                 word_cutoff=1, #0,
+                                                 word_cutoff=1,
                                                  affix_length=affix_length)
     else:
         word_vocabulary, tag_vocabulary = create_vocabularies([train_instances],
-                                                              word_cutoff=0)
+                                                              word_cutoff=1)
         prefix_vocabularies = []
         suffix_vocabularies = []
 
