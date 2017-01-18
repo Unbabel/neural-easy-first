@@ -230,7 +230,7 @@ class NeuralEasyFirstTagger(object):
                 states.append(state)
             #pdb.set_trace()
             for i in xrange(len(words)):
-                state_with_context = state
+                state_with_context = states[i]
                 for l in xrange(1, self.context_size+1):
                     if i-l < 0:
                         state = dy.vecInput(state_size)
