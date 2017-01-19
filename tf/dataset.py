@@ -101,7 +101,7 @@ class DatasetReader(object):
         return embeddings
 
     def load_data(self, filepath, embeddings=None, max_length=-1,
-                  label_dict=None, train=False):
+                  limit=-1, label_dict=None, train=False):
         '''Reads a dataset from a file. Creates embeddings if they don't exist
         already. If max_length >= 0, discards sentences longer than max_length.
         Returns a list of sentences (each being a list of word IDs looked up
@@ -148,6 +148,8 @@ class DatasetReader(object):
                             sum(self.num_embedding_features())
                         sentences.append(sentence)
                         labels.append(sentence_labels)
+                        if len(sentences) >= limit > -1:
+                            break
                     sentence_fields = []
                 else: # One word per line.
                     fields = line.split("\t")
