@@ -311,6 +311,11 @@ class NeuralEasyFirstTagger(object):
                         err = dy.pickneglogsoftmax(r_t, t)
                         errs.append(err * attention_weights[i] / float(j+1))
                         #errs.append(err * attention_weights[i] / float(num_sketches))
+                #if self.sum_hidden_states_and_sketches:
+                #    sketches = [sketch * (1-weight) + s_n * weight
+                #                for sketch, weight in \
+                #                zip(sketches, attention_weights)]
+                #else:
                 sketches = [sketch + s_n * weight
                             for sketch, weight in \
                             zip(sketches, attention_weights)]
