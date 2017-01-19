@@ -73,6 +73,8 @@ do
         ${language}
 done
 
+if false
+then
 concatenate_last_layer=0
 use_max_pooling=1
 sum_hidden_states_and_sketches=0
@@ -132,3 +134,4 @@ do
         ${affix_embedding_size} \
         ${language}
 done
+fi

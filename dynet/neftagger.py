@@ -264,7 +264,11 @@ class NeuralEasyFirstTagger(object):
             temperature = self.temperature #10. # 1.
             discount_factor = self.discount_factor #5. #10. #50. # 0.
             #attention_weights = dy.softmax(dy.concatenate(z)/temperature)
-            scores = dy.concatenate(z) - cumulative_attention * discount_factor
+            if discount_factor == 0:
+                scores = dy.concatenate(z)
+            else:
+                scores = dy.concatenate(z) - \
+                         cumulative_attention * discount_factor
             if self.attention_type == 'softmax':
                 attention_weights = dy.softmax(scores / temperature)
             elif self.attention_type == 'sparsemax':
