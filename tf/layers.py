@@ -403,7 +403,7 @@ class SketchLayer(object):
         W_cs_mask = \
             tf.to_float(tf.less_equal(tf.random_uniform(tf.shape(self.W_cs)),
                                       self.keep_prob)) * \
-            tf.inv(self.keep_prob)
+            1-(self.keep_prob)
 
         # Input sequence (should be batch_size x sequence_length * input_size).
         H = input_sequence

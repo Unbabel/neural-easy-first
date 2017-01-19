@@ -264,7 +264,11 @@ class NeuralEasyFirstTagger(object):
             temperature = self.temperature #10. # 1.
             discount_factor = self.discount_factor #5. #10. #50. # 0.
             #attention_weights = dy.softmax(dy.concatenate(z)/temperature)
-            scores = dy.concatenate(z) - cumulative_attention * discount_factor
+            if discount_factor == 0:
+                scores = dy.concatenate(z)
+            else:
+                scores = dy.concatenate(z) - \
+                         cumulative_attention * discount_factor
             if self.attention_type == 'softmax':
                 attention_weights = dy.softmax(scores / temperature)
             elif self.attention_type == 'sparsemax':
@@ -304,8 +308,11 @@ class NeuralEasyFirstTagger(object):
                                 zip(states_with_context, attention_weights)])
                 s_n = dy.tanh(W_cs * cbar + w_s)
                 if training and self.use_sketch_losses:
-                    assert not self.concatenate_last_layer
                     state = s_n
+                    if self.concatenate_last_layer:
+                        state = dy.concatenate([hidden_states[i], s_n])
+                    else:
+                        state = s_n
                     r_t = O * state
                     for i, t in enumerate(tags):
                         err = dy.pickneglogsoftmax(r_t, t)
@@ -338,6 +345,9 @@ class NeuralEasyFirstTagger(object):
                     state = sketches[i]
                 r_t = O * state
                 err = dy.pickneglogsoftmax(r_t, t)
+                #if self.use_sketch_losses and not self.concatenate_last_layer:
+                #    errs.append(err * 0.001)
+                #else:
                 errs.append(err)
                 chosen = np.argmax(r_t.npvalue())
                 predicted_tags.append(self.tag_vocabulary.i2w[chosen])
@@ -603,6 +613,7 @@ def main():
     best_dev_accuracy = 0.
     best_test_accuracy = 0.
     for epoch in xrange(num_epochs):
+        num_numeric_issues = 0
         tagged = correct = loss = reg = 0
         #random.shuffle(train_instances)
         for i, instance in enumerate(train_instances, 1):
@@ -630,7 +641,10 @@ def main():
                     'Numeric problems in sentence %d (%d words long; ' \
                     'previous sentence was %d words long)' % \
                     (i, len(instance), len(train_instances[i-2]))
-                assert False
+                num_numeric_issues += 1
+                if num_numeric_issues > 10:
+                    assert False
+                continue
             loss += val
             sum_errs += tagger.squared_norm_of_parameters() * \
                         l2_regularization

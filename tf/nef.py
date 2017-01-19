@@ -97,6 +97,8 @@ tf.app.flags.DEFINE_boolean("track_sketches", False,
                             "Keep track of the sketches during learning.")
 tf.app.flags.DEFINE_string("sketch_dir", "pos_tagging/sketches",
                            "Directory where sketch dumps are stored")
+tf.app.flags.DEFINE_integer("data_limit", "-1", "limit of training "
+                           "sentences")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -188,11 +190,13 @@ def train():
                 embeddings.append(reader.load_embeddings(embedding_path))
 
         max_sentence_length = FLAGS.max_sentence_length
+        data_limit = FLAGS.data_limit
         train_sentences, train_labels, train_label_dict, train_embeddings = \
             reader.load_data(filepath_train,
                              embeddings=embeddings,
                              max_length=max_sentence_length,
                              label_dict=label_dictionary,
+                             limit=data_limit,
                              train=True)
 
         # Use training vocab/labels for dev.
