@@ -47,6 +47,7 @@ class NeuralEasyFirstTagger(object):
         self.track_sketches = False
         self.sketch_file = None
         self.use_bilstm = True # False
+        self.use_last_sketch = False #True
 
     def init_parameters(self, model, dims):
         assert len(dims) == 2
@@ -90,6 +91,9 @@ class NeuralEasyFirstTagger(object):
         else:
             state_size = 2*self.hidden_size + self.sketch_size
 
+        if self.use_last_sketch:
+            parameters['W_sz'] = self.init_parameters(
+                model, (self.preattention_size, self.sketch_size))
         parameters['W_cz'] = self.init_parameters(
             model, (self.preattention_size, window_size*state_size))
         parameters['w_z'] = model.parameters_from_numpy(
@@ -190,6 +194,8 @@ class NeuralEasyFirstTagger(object):
             assert 2*self.hidden_size == self.embedding_size
             hidden_states = wembs
 
+        if self.use_last_sketch:
+            W_sz = dy.parameter(self.parameters['W_sz'])
         W_cz = dy.parameter(self.parameters['W_cz'])
         w_z = dy.parameter(self.parameters['w_z'])
         v = dy.parameter(self.parameters['v'])
@@ -199,6 +205,8 @@ class NeuralEasyFirstTagger(object):
 
         # Initialize all word sketches as zero vectors.
         sketches = []
+        last_sketch_vector = dy.vecInput(self.sketch_size)
+        last_sketch_vector.set(np.zeros(self.sketch_size))
         for i, word in enumerate(words):
             if self.sum_hidden_states_and_sketches:
                 assert self.sketch_size == 2*self.hidden_size
@@ -258,7 +266,11 @@ class NeuralEasyFirstTagger(object):
                     scores = dy.transpose(dy.concatenate_cols([r_i]))
                     z_i = dy.kmax_pooling(scores, 1)[0] # Best score.
                 else:
-                    z_i = v * dy.tanh(W_cz * state_with_context + w_z)
+                    if self.use_last_sketch:
+                        z_i = v * dy.tanh(W_cz * state_with_context + \
+                                          W_sz * last_sketch_vector + w_z)
+                    else:
+                        z_i = v * dy.tanh(W_cz * state_with_context + w_z)
                 z.append(z_i)
                 states_with_context.append(state_with_context)
             temperature = self.temperature #10. # 1.
@@ -307,6 +319,7 @@ class NeuralEasyFirstTagger(object):
                                 for vector, attention_weight in
                                 zip(states_with_context, attention_weights)])
                 s_n = dy.tanh(W_cs * cbar + w_s)
+                last_sketch_vector = s_n
                 if training and self.use_sketch_losses:
                     state = s_n
                     if self.concatenate_last_layer:
