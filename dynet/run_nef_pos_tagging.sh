@@ -39,7 +39,7 @@ mkdir -p pos_tagging/sketches/${language}
 
 python neftagger.py \
     --dynet-seed 42 \
-    --dynet-mem 2048 \
+    --dynet-mem 1024 \
     -num_epochs ${num_epochs} \
     -num_pretraining_epochs ${num_pretraining_epochs} \
     -train_file pos_tagging/data/${language}-normalized_train.conll.tagging \
