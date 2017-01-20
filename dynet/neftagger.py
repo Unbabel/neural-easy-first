@@ -344,17 +344,19 @@ class NeuralEasyFirstTagger(object):
                         errs.append(err * attention_weights[i] / float(j+1))
                         #errs.append(err * attention_weights[i] / float(num_sketches))
                 #if self.sum_hidden_states_and_sketches:
-                #    sketches = [sketch * (1-weight) + s_n * weight
-                #                for sketch, weight in \
-                #                zip(sketches, attention_weights)]
-                #else:
-                sketches = [sketch + s_n * weight
+                sketches = [sketch * (1-weight) + s_n * weight
                             for sketch, weight in \
                             zip(sketches, attention_weights)]
+                #else:
+                #sketches = [sketch + s_n * weight
+                #            for sketch, weight in \
+                #            zip(sketches, attention_weights)]
             elif self.model_type == 'all_states':
                 for i in xrange(len(words)):
                     s_n = dy.tanh(W_cs * states_with_context[i] + w_s)
-                    sketches[i] += s_n * attention_weights[i]
+                    #sketches[i] += s_n * attention_weights[i]
+                    sketches[i] = sketches[i] * (1-attention_weights[i]) + \
+                                  s_n * attention_weights[i]
             else:
                 raise NotImplementedError
 
@@ -635,7 +637,7 @@ def main():
     #trainer = dy.AdamTrainer(tagger.model, alpha=0.0001)
     trainer = dy.AdagradTrainer(tagger.model, e0=0.1)
     #trainer.set_clip_threshold(5.0)
-    #sgd = dy.SimpleSGDTrainer(tagger.model, e0=0.1)
+    #trainer = dy.SimpleSGDTrainer(tagger.model, e0=0.1)
     best_epoch = -1
     best_dev_accuracy = 0.
     best_test_accuracy = 0.
