@@ -20,14 +20,15 @@ context_size=${16}
 noise_level=${17}
 affix_length=${18}
 affix_embedding_size=${19}
-language=${20}
+use_bilstm=${20}
+language=${21}
 
 suffix=model-${model_type}_attention-${attention_type}_temp-${temperature}_\
 disc-${discount_factor}_C-${l2_regularization}_sketches-${num_sketches}_\
 cat-${concatenate_last_layer}_sum-${sum_hidden_states_and_sketches}_\
 share-${share_attention_sketch_parameters}_\
 skloss-${use_sketch_losses}_pool-${use_max_pooling}_\
-pretrain-${num_pretraining_epochs}_\
+bilstm-${use_bilstm}_pretrain-${num_pretraining_epochs}_\
 emb-${embedding_size}_hid-${hidden_size}_pre-${preattention_size}_\
 sk-${sketch_size}_ctx-${context_size}
 
@@ -53,6 +54,7 @@ python neftagger.py \
     -share_attention_sketch_parameters ${share_attention_sketch_parameters} \
     -use_sketch_losses ${use_sketch_losses} \
     -use_max_pooling ${use_max_pooling} \
+    -use_bilstm ${use_bilstm} \
     -temperature ${temperature} \
     -discount_factor ${discount_factor} \
     -num_sketches ${num_sketches} \

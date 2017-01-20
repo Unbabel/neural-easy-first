@@ -14,6 +14,7 @@ context_size=2
 noise_level=0.
 affix_length=4
 affix_embedding_size=50
+use_bilstm=1
 
 concatenate_last_layer=1
 attention_type=softmax
@@ -40,5 +41,6 @@ do
         ${noise_level} \
         ${affix_length} \
         ${affix_embedding_size} \
+        ${use_bilstm} \
         ${language}
 done

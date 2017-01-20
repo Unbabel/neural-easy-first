@@ -19,7 +19,8 @@ class NeuralEasyFirstTagger(object):
                  sum_hidden_states_and_sketches,
                  share_attention_sketch_parameters,
                  use_sketch_losses,
-                 use_max_pooling):
+                 use_max_pooling,
+                 use_bilstm):
         self.word_vocabulary = word_vocabulary
         self.affix_length = affix_length
         self.prefix_vocabularies = prefix_vocabularies
@@ -41,12 +42,12 @@ class NeuralEasyFirstTagger(object):
             share_attention_sketch_parameters
         self.use_sketch_losses = use_sketch_losses
         self.use_max_pooling = use_max_pooling
+        self.use_bilstm = use_bilstm
         self.model = None
         self.parameters = {}
         self.builders = []
         self.track_sketches = False
         self.sketch_file = None
-        self.use_bilstm = True # False
 
     def init_parameters(self, model, dims):
         assert len(dims) == 2
@@ -114,12 +115,19 @@ class NeuralEasyFirstTagger(object):
                                                     self.sketch_size))
 
         self.model = model
-        self.parameters = parameters
         input_size = self.embedding_size + 2*self.affix_embedding_size
-        self.builders = [dy.LSTMBuilder(1, input_size,
-                                        self.hidden_size, self.model),
-                         dy.LSTMBuilder(1, input_size,
-                                        self.hidden_size, self.model)]
+        if self.use_bilstm:
+            self.builders = [dy.LSTMBuilder(1, input_size,
+                                            self.hidden_size, self.model),
+                             dy.LSTMBuilder(1, input_size,
+                                            self.hidden_size, self.model)]
+        else:
+            self.builders = None
+            parameters['W_xh'] = self.init_parameters(
+                self.model, (2*self.hidden_size, input_size))
+            parameters['w_h'] = model.parameters_from_numpy(
+                np.zeros((2*self.hidden_size, 1)))
+        self.parameters = parameters
 
     def squared_norm_of_parameters(self, print_norms=False):
         squared_norm = dy.scalarInput(0.)
@@ -187,8 +195,12 @@ class NeuralEasyFirstTagger(object):
             for f, b in zip(fw, reversed(bw)):
                 hidden_states.append(dy.concatenate([f, b]))
         else:
-            assert 2*self.hidden_size == self.embedding_size
-            hidden_states = wembs
+            #assert 2*self.hidden_size == self.embedding_size + \
+            #    2*self.affix_embedding_size
+            #hidden_states = wembs
+            W_xh = dy.parameter(self.parameters['W_xh'])
+            w_h = dy.parameter(self.parameters['w_h'])
+            hidden_states = [dy.tanh(W_xh * x + w_h) for x in wembs]
 
         W_cz = dy.parameter(self.parameters['W_cz'])
         w_z = dy.parameter(self.parameters['w_z'])
@@ -483,6 +495,7 @@ def main():
                         default=0)
     parser.add_argument('-use_sketch_losses', type=int, default=0)
     parser.add_argument('-use_max_pooling', type=int, default=0)
+    parser.add_argument('-use_bilstm', type=int, default=1)
     parser.add_argument('-affix_embedding_size', type=int, default=0)
     parser.add_argument('-embedding_size', type=int, default=64) # 128
     parser.add_argument('-hidden_size', type=int, default=20) # 50
@@ -515,6 +528,7 @@ def main():
         args['share_attention_sketch_parameters']
     use_sketch_losses = args['use_sketch_losses']
     use_max_pooling = args['use_max_pooling']
+    use_bilstm = args['use_bilstm']
     embedding_size = args['embedding_size']
     affix_embedding_size = args['affix_embedding_size']
     hidden_size = args['hidden_size']
@@ -585,7 +599,7 @@ def main():
                                    sum_hidden_states_and_sketches,
                                    share_attention_sketch_parameters,
                                    use_sketch_losses,
-                                   use_max_pooling)
+                                   use_max_pooling, use_bilstm)
     if embeddings_file != '':
         embeddings = load_embeddings(embeddings_file)
     else:
