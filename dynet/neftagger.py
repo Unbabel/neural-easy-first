@@ -435,7 +435,8 @@ def read_dataset(fname, maximum_sentence_length=-1, read_ordering=False):
             sent = []
             ordering = None
         else:
-            w, t = line[-2:]
+            w, t = line[0], line[-1]
+            #w, t = line[-2:]
             sent.append((w, t))
     if read_ordering:
         return sentences, orderings
@@ -535,7 +536,10 @@ def main():
     parser.add_argument('-attention_type', type=str, default='softmax')
     parser.add_argument('-temperature', type=float, default=1.)
     parser.add_argument('-discount_factor', type=float, default=0.)
-    parser.add_argument('-sketch_file', type=str, required=True)
+    parser.add_argument('-sketch_file_dev', type=str, required=True)
+    parser.add_argument('-sketch_file_test', type=str, required=True)
+    parser.add_argument('-metric', type=str, default='accuracy')
+    parser.add_argument('-null_label', type=str, default='O')
 
     args = vars(parser.parse_args())
     print >> sys.stderr, args
@@ -568,7 +572,10 @@ def main():
     attention_type = args['attention_type']
     temperature = args['temperature']
     discount_factor = args['discount_factor']
-    sketch_file = args['sketch_file']
+    sketch_file_dev = args['sketch_file_dev']
+    sketch_file_test = args['sketch_file_test']
+    metric = args['metric']
+    null_label = args['null_label']
 
     np.random.seed(42)
 
@@ -644,6 +651,9 @@ def main():
     for epoch in xrange(num_epochs):
         num_numeric_issues = 0
         tagged = correct = loss = reg = 0
+        matches = 0
+        predicted = 0
+        gold = 0
         #random.shuffle(train_instances)
         for i, instance in enumerate(train_instances, 1):
             if read_ordering:
@@ -681,17 +691,32 @@ def main():
             tagged += len(instance)
             correct += sum([int(g == p)
                             for g, p in zip(gold_tags, predicted_tags)])
+            if metric == 'f1':
+                matches += sum([int(g == p)
+                                for g, p in zip(gold_tags, predicted_tags) \
+                                if g != null_label])
+                predicted += len([p for p in predicted_tags if p != null_label])
+                gold += len([g for g in gold_tags if g != null_label])
             sum_errs.backward()
             #if len(gold_tags) <= 5: pdb.set_trace()
             trainer.update()
 
-        train_accuracy = float(correct) / tagged
+        if metric == 'f1':
+            precision = float(matches) / predicted
+            recall = float(matches) / gold
+            f1 = 2.*precision*recall / (precision + recall)
+            train_accuracy = f1
+        else:
+            train_accuracy = float(correct) / tagged
 
         # Check accuracy in dev set.
         tagger.track_sketches = True
-        tagger.sketch_file = open(sketch_file + '.tmp', 'w')
+        tagger.sketch_file = open(sketch_file_dev + '.tmp', 'w')
         correct = 0
         total = 0
+        matches = 0
+        predicted = 0
+        gold = 0
         for i, instance in enumerate(dev_instances):
             if read_ordering:
                 ordering = dev_orderings[i]
@@ -707,13 +732,28 @@ def main():
             correct += sum([int(g == p)
                             for g, p in zip(gold_tags, predicted_tags)])
             total += len(gold_tags)
-        dev_accuracy = float(correct) / total
+            if metric == 'f1':
+                matches += sum([int(g == p)
+                                for g, p in zip(gold_tags, predicted_tags) \
+                                if g != null_label])
+                predicted += len([p for p in predicted_tags if p != null_label])
+                gold += len([g for g in gold_tags if g != null_label])
+        if metric == 'f1':
+            precision = float(matches) / predicted
+            recall = float(matches) / gold
+            f1 = 2.*precision*recall / (precision + recall)
+            dev_accuracy = f1
+        else:
+            dev_accuracy = float(correct) / total
         tagger.sketch_file.close()
-        tagger.track_sketches = False
 
         # Check accuracy in test set.
+        tagger.sketch_file = open(sketch_file_test + '.tmp', 'w')
         correct = 0
         total = 0
+        matches = 0
+        predicted = 0
+        gold = 0
         for i, instance in enumerate(test_instances):
             if read_ordering:
                 ordering = test_orderings[i]
@@ -729,7 +769,21 @@ def main():
             correct += sum([int(g == p)
                             for g, p in zip(gold_tags, predicted_tags)])
             total += len(gold_tags)
-        test_accuracy = float(correct) / total
+            if metric == 'f1':
+                matches += sum([int(g == p)
+                                for g, p in zip(gold_tags, predicted_tags) \
+                                if g != null_label])
+                predicted += len([p for p in predicted_tags if p != null_label])
+                gold += len([g for g in gold_tags if g != null_label])
+        if metric == 'f1':
+            precision = float(matches) / predicted
+            recall = float(matches) / gold
+            f1 = 2.*precision*recall / (precision + recall)
+            test_accuracy = f1
+        else:
+            test_accuracy = float(correct) / total
+        tagger.sketch_file.close()
+        tagger.track_sketches = False
 
         # Check if this is the best model so far (on dev).
         if epoch == 0 or dev_accuracy > best_dev_accuracy:
@@ -737,7 +791,8 @@ def main():
             best_dev_accuracy = dev_accuracy
             best_test_accuracy = test_accuracy
             from shutil import copyfile
-            copyfile(sketch_file + '.tmp', sketch_file)
+            copyfile(sketch_file_dev + '.tmp', sketch_file_dev)
+            copyfile(sketch_file_test + '.tmp', sketch_file_test)
 
         # Plot epoch statistics.
         trainer.status()
