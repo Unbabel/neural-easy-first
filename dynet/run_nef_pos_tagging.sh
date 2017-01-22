@@ -66,5 +66,6 @@ python neftagger.py \
     -preattention_size ${preattention_size} \
     -sketch_size ${sketch_size} \
     -context_size ${context_size} \
-    -sketch_file pos_tagging/sketches/${language}/sketch_${suffix}.txt \
+    -sketch_file_dev pos_tagging/sketches/${language}/sketch_dev_${suffix}.txt \
+    -sketch_file_test pos_tagging/sketches/${language}/sketch_test_${suffix}.txt \
     >& pos_tagging/logs/${language}/log_${suffix}.txt
