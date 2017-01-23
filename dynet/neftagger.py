@@ -9,8 +9,9 @@ import util
 import pdb
 
 class NeuralEasyFirstTagger(object):
-    def __init__(self, word_vocabulary, affix_length,
+    def __init__(self, task, word_vocabulary, affix_length,
                  prefix_vocabularies, suffix_vocabularies,
+                 source_word_vocabulary,
                  tag_vocabulary, model_type,
                  attention_type, temperature, discount_factor, embedding_size,
                  affix_embedding_size,
@@ -21,10 +22,12 @@ class NeuralEasyFirstTagger(object):
                  use_sketch_losses,
                  use_max_pooling,
                  use_bilstm):
+        self.task = task
         self.word_vocabulary = word_vocabulary
         self.affix_length = affix_length
         self.prefix_vocabularies = prefix_vocabularies
         self.suffix_vocabularies = suffix_vocabularies
+        self.source_word_vocabulary = source_word_vocabulary
         self.tag_vocabulary = tag_vocabulary
         self.model_type = model_type
         self.attention_type = attention_type
@@ -57,7 +60,7 @@ class NeuralEasyFirstTagger(object):
         #W = u * (2. * np.random.rand(dims[0], dims[1]) - 1.)
         #return model.parameters_from_numpy(W)
 
-    def create_model(self, embeddings=None):
+    def create_model(self, embeddings=None, source_embeddings=None):
         model = dy.Model()
         parameters = {}
         if embeddings != None:
@@ -65,8 +68,6 @@ class NeuralEasyFirstTagger(object):
                             union(set(self.word_vocabulary.w2i.keys())))
         else:
             num_words = self.word_vocabulary.size()
-        num_tags = self.tag_vocabulary.size()
-        window_size = 1+2*self.context_size
         parameters['E'] = model.add_lookup_parameters((num_words,
                                                        self.embedding_size))
         if embeddings != None:
@@ -84,6 +85,31 @@ class NeuralEasyFirstTagger(object):
             num_suffixes = self.suffix_vocabularies[l].size()
             parameters['E_suffix_%d' % (l+1)] = model.add_lookup_parameters(
                 (num_suffixes, self.affix_embedding_size))
+
+        # Load source embeddings (for QE).
+        if self.task == 'quality_estimation':
+            if source_embeddings != None:
+                num_source_words = len(set(
+                    source_embeddings.keys()).union(set(
+                        self.source_word_vocabulary.w2i.keys())))
+            else:
+                num_source_words = self.source_word_vocabulary.size()
+            parameters['E_source'] = model.add_lookup_parameters((
+                num_source_words,
+                self.embedding_size))
+            if source_embeddings != None:
+                for word in source_embeddings:
+                    if word not in self.source_word_vocabulary.w2i:
+                        self.source_word_vocabulary.w2i[word] = \
+                            len(self.source_word_vocabulary.w2i.keys())
+                parameters['E_source'].init_row(self.source_word_vocabulary.w2i[word],
+                                         source_embeddings[word])
+            # TODO: maybe add source affixes too?
+            # TODO: add target POS tags.
+            # TODO: add source POS tags.
+
+        num_tags = self.tag_vocabulary.size()
+        window_size = 1+2*self.context_size
 
         if self.sum_hidden_states_and_sketches:
             assert not self.concatenate_last_layer
@@ -119,7 +145,11 @@ class NeuralEasyFirstTagger(object):
                                                     self.sketch_size))
 
         self.model = model
-        input_size = self.embedding_size + 2*self.affix_embedding_size
+        if self.task == 'quality_estimation':
+            input_size = self.embedding_size + 2*self.affix_embedding_size
+        else:
+            input_size = 3*(self.embedding_size + 2*self.affix_embedding_size) \
+                         + 3*self.source_embedding_size
         if self.use_bilstm:
             self.builders = [dy.LSTMBuilder(1, input_size,
                                             self.hidden_size, self.model),
@@ -153,18 +183,49 @@ class NeuralEasyFirstTagger(object):
 
     def build_graph(self, instance, num_sketches=-1, noise_level=0.1,
                     training=True, epoch=-1, ordering=None):
-        unk = self.word_vocabulary.w2i['_UNK_']
-        words = [self.word_vocabulary.w2i.get(w, unk) for w, _ in instance]
-        tags = [self.tag_vocabulary.w2i[t] for _, t in instance]
-
-        if training:
-            errs = []
-
         dy.renew_cg()
 
-        E = self.parameters['E']
-        wembs = [E[w] for w in words]
-        wembs = [dy.noise(we, noise_level) for we in wembs]
+        if self.task == 'quality_estimation':
+            E = self.parameters['E']
+            E_source = self.parameters['E_source']
+            unk = self.word_vocabulary.w2i['_UNK_']
+            unk_source = self.source_word_vocabulary.w2i['_UNK_']
+            words = []
+            source_words = []
+            tags = []
+            wembs = []
+            for i in xrange(len(instance)):
+                w = self.word_vocabulary.w2i.get(instance[i][0], unk)
+                words.append(w)
+                t = self.tag_vocabulary.w2i[instance[i][-1]]
+                tags.append(t)
+
+                pw = self.word_vocabulary.w2i.get(instance[i][1], unk)
+                nw = self.word_vocabulary.w2i.get(instance[i][2], unk)
+                asw = [self.source_word_vocabulary.w2i.get(sw, unk_source) \
+                       for sw in instance[i][3].split('|')]
+                psw = self.source_word_vocabulary.w2i.get(instance[i][4],
+                                                          unk_source)
+                nsw = self.source_word_vocabulary.w2i.get(instance[i][5],
+                                                          unk_source)
+
+                we = dy.concatenate([E[w],
+                                     E[pw],
+                                     E[nw],
+                                     dy.esum([E_source[sw]
+                                              for sw in asw]) / float(len(asw)),
+                                     E_source[psw],
+                                     E_source[nsw]])
+                wembs.append(we)
+            wembs = [dy.noise(we, noise_level) for we in wembs]
+        else:
+            unk = self.word_vocabulary.w2i['_UNK_']
+            words = [self.word_vocabulary.w2i.get(w, unk) for w, _ in instance]
+            tags = [self.tag_vocabulary.w2i[t] for _, t in instance]
+
+            E = self.parameters['E']
+            wembs = [E[w] for w in words]
+            wembs = [dy.noise(we, noise_level) for we in wembs]
 
         if self.affix_length:
             pembs = []
@@ -189,6 +250,9 @@ class NeuralEasyFirstTagger(object):
                 wembs[i] = dy.concatenate([wembs[i],
                                            dy.esum(pemb),
                                            dy.esum(semb)])
+
+        if training:
+            errs = []
 
         if self.use_bilstm:
             f_init, b_init = [b.initial_state() for b in self.builders]
@@ -443,6 +507,22 @@ def read_dataset(fname, maximum_sentence_length=-1, read_ordering=False):
     else:
         return sentences
 
+def read_quality_dataset(fname, maximum_sentence_length=-1):
+    sent = []
+    sentences = []
+    for line in file(fname):
+        line = line.strip().split()
+        if not line:
+            if sent and (maximum_sentence_length < 0 or
+                         len(sent) < maximum_sentence_length):
+                sentences.append(sent)
+            sent = []
+        else:
+            w, pw, nw, asw, psw, nsw, t = line[3], line[4], line[5], line[6], \
+                                          line[7], line[8], line[-1]
+            sent.append((w, pw, nw, asw, psw, nsw, t))
+    return sentences
+
 def create_vocabularies(corpora, word_cutoff=0, affix_length=0):
     word_counter = Counter()
     tag_counter = Counter()
@@ -480,11 +560,62 @@ def create_vocabularies(corpora, word_cutoff=0, affix_length=0):
     print >> sys.stderr, 'Words: %d' % word_vocabulary.size()
     print >> sys.stderr, 'Tags: %d' % tag_vocabulary.size()
 
-    if affix_length > 0:
-        return word_vocabulary, prefix_vocabularies, suffix_vocabularies, \
-            tag_vocabulary
-    else:
-        return word_vocabulary, tag_vocabulary
+    return word_vocabulary, prefix_vocabularies, suffix_vocabularies, \
+        tag_vocabulary
+
+def create_quality_vocabularies(corpora, word_cutoff=0, affix_length=0):
+    word_counter = Counter()
+    source_word_counter = Counter()
+    tag_counter = Counter()
+    prefix_counter = [Counter() for _ in xrange(affix_length)]
+    suffix_counter = [Counter() for _ in xrange(affix_length)]
+    word_counter['_UNK_'] = word_cutoff+1
+    source_word_counter['_UNK_'] = word_cutoff+1
+    for l in xrange(affix_length):
+        prefix_counter[l]['_UNK_'] = word_cutoff+1
+        suffix_counter[l]['_UNK_'] = word_cutoff+1
+    for corpus in corpora:
+        for s in corpus:
+            words = set()
+            source_words = set()
+            for w, pw, nw, asw, psw, nsw, t in s:
+                tag_counter[t] += 1
+                words.update(set([w, pw, nw]))
+                for sw in asw.split('|'):
+                    source_words.update(set([sw, psw, nsw]))
+            for w in words:
+                word_counter[w] += 1
+                for l in xrange(affix_length):
+                    prefix_counter[l][w[:(l+1)]] += 1
+                    suffix_counter[l][w[-(l+1):]] += 1
+            for sw in source_words:
+                source_word_counter[sw] += 1
+
+    words = [w for w in word_counter if word_counter[w] > word_cutoff]
+    source_words = [w for w in source_word_counter \
+                    if source_word_counter[w] > word_cutoff]
+    tags = [t for t in tag_counter]
+
+    word_vocabulary = util.Vocab.from_corpus([words])
+    source_word_vocabulary = util.Vocab.from_corpus([source_words])
+    tag_vocabulary = util.Vocab.from_corpus([tags])
+
+    prefix_vocabularies = []
+    suffix_vocabularies = []
+    for l in xrange(affix_length):
+        prefixes = [p for p in prefix_counter[l] \
+                    if prefix_counter[l][p] > word_cutoff]
+        prefix_vocabularies.append(util.Vocab.from_corpus([prefixes]))
+        suffixes = [s for s in suffix_counter[l] \
+                    if suffix_counter[l][s] > word_cutoff]
+        suffix_vocabularies.append(util.Vocab.from_corpus([suffixes]))
+
+    print >> sys.stderr, 'Target words: %d' % word_vocabulary.size()
+    print >> sys.stderr, 'Source words: %d' % source_word_vocabulary.size()
+    print >> sys.stderr, 'Tags: %d' % tag_vocabulary.size()
+
+    return word_vocabulary, prefix_vocabularies, suffix_vocabularies, \
+        source_word_vocabulary, tag_vocabulary
 
 def load_embeddings(embeddings_file):
     embeddings = {}
@@ -508,10 +639,14 @@ def main():
     parser.add_argument('--dynet-seed', type=str, default=0)
     parser.add_argument('--dynet-mem', type=str, default=512)
 
+    # Can also be 'quality_estimation' and 'entity_tagging'.
+    parser.add_argument('-task', type=str, default='pos_tagging')
     parser.add_argument('-train_file', type=str, default='')
     parser.add_argument('-dev_file', type=str, default='')
     parser.add_argument('-test_file', type=str, default='')
     parser.add_argument('-embeddings_file', type=str, default='')
+    # Only makes sense for QE.
+    parser.add_argument('-source_embeddings_file', type=str, default='')
     parser.add_argument('-affix_length', type=int, default=0)
     parser.add_argument('-noise_level', type=float, default=0.0)
     parser.add_argument('-concatenate_last_layer', type=int, default=1)
@@ -544,10 +679,12 @@ def main():
     args = vars(parser.parse_args())
     print >> sys.stderr, args
 
+    task = args['task']
     train_file = args['train_file']
     dev_file = args['dev_file']
     test_file = args['test_file']
     embeddings_file = args['embeddings_file']
+    source_embeddings_file = args['source_embeddings_file']
     affix_length = args['affix_length']
     noise_level = args['noise_level']
     concatenate_last_layer = args['concatenate_last_layer']
@@ -579,47 +716,50 @@ def main():
 
     np.random.seed(42)
 
-#    suffix = 'model-%s_attention-%s_temp-%f_disc-%f_C-%f_sketches-%d_' \
-#             'cat-%d_emb-%d_hid-%d_ctx-%d' % \
-#             (model_type, attention_type, temperature, discount_factor,
-#              l2_regularization, num_sketches, concatenate_last_layer,
-#              embedding_size, hidden_size, context_size)
-
     # Read corpus (train, dev, test).
     read_ordering=False
     print >> sys.stderr
     print >> sys.stderr, 'Loading train/dev/test datasets...'
-    if read_ordering:
-        train_instances, train_orderings = read_dataset(
-            train_file,
-            maximum_sentence_length=maximum_sentence_length,
-            read_ordering=True)
-        dev_instances, dev_orderings = read_dataset(dev_file,
-                                                    read_ordering=True)
-        test_instances, test_orderings = read_dataset(test_file,
-                                                      read_ordering=True)
-    else:
-        train_instances = read_dataset(
+    if task == 'quality_estimation':
+        train_instances = read_quality_dataset(
             train_file,
             maximum_sentence_length=maximum_sentence_length)
-        dev_instances = read_dataset(dev_file)
-        test_instances = read_dataset(test_file)
+        dev_instances = read_quality_dataset(dev_file)
+        test_instances = read_quality_dataset(test_file)
+    else:
+        if read_ordering:
+            train_instances, train_orderings = read_dataset(
+                train_file,
+                maximum_sentence_length=maximum_sentence_length,
+                read_ordering=True)
+            dev_instances, dev_orderings = read_dataset(dev_file,
+                                                        read_ordering=True)
+            test_instances, test_orderings = read_dataset(test_file,
+                                                          read_ordering=True)
+        else:
+            train_instances = read_dataset(
+                train_file,
+                maximum_sentence_length=maximum_sentence_length)
+            dev_instances = read_dataset(dev_file)
+            test_instances = read_dataset(test_file)
 
-
-    if affix_length > 0:
+    if task == 'quality_estimation':
+        word_vocabulary, prefix_vocabularies, suffix_vocabularies, \
+            source_word_vocabulary, tag_vocabulary = \
+                create_quality_vocabularies([train_instances],
+                                            word_cutoff=1,
+                                            affix_length=affix_length)
+    else:
         word_vocabulary, prefix_vocabularies, suffix_vocabularies, \
             tag_vocabulary = create_vocabularies([train_instances],
                                                  word_cutoff=1,
                                                  affix_length=affix_length)
-    else:
-        word_vocabulary, tag_vocabulary = create_vocabularies([train_instances],
-                                                              word_cutoff=1)
-        prefix_vocabularies = []
-        suffix_vocabularies = []
+        source_word_vocabulary = None
 
     # Create model.
-    tagger = NeuralEasyFirstTagger(word_vocabulary, affix_length,
+    tagger = NeuralEasyFirstTagger(task, word_vocabulary, affix_length,
                                    prefix_vocabularies, suffix_vocabularies,
+                                   source_word_vocabulary,
                                    tag_vocabulary, model_type,
                                    attention_type, temperature, discount_factor,
                                    embedding_size, affix_embedding_size,
@@ -635,7 +775,15 @@ def main():
         embeddings = load_embeddings(embeddings_file)
     else:
         embeddings = None
-    tagger.create_model(embeddings=embeddings)
+    if task == 'quality_estimation':
+        if embeddings_file != '':
+            source_embeddings = load_embeddings(source_embeddings_file)
+        else:
+            source_embeddings = None
+        tagger.create_model(embeddings=embeddings,
+                            source_embeddings=source_embeddings)
+    else:
+        tagger.create_model(embeddings=embeddings)
 
     # Train.
     print >> sys.stderr
@@ -660,7 +808,7 @@ def main():
                 ordering = train_orderings[i-1]
             else:
                 ordering = None
-            gold_tags = [t for _, t in instance]
+            gold_tags = [sent[-1] for sent in instance]
             attention_type = tagger.attention_type
             if epoch < num_pretraining_epochs:
                 tagger.attention_type = 'prescribed_order'
