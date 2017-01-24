@@ -53,6 +53,11 @@ class NeuralEasyFirstTagger(object):
         self.sketch_file = None
         self.use_last_sketch = False #True
 
+        if self.task == 'quality_estimation':
+            self.tag_weights = {'OK': 1., 'BAD': 3.}
+        else:
+            self.tag_weights = None
+
     def init_parameters(self, model, dims):
         assert len(dims) == 2
         return model.add_parameters(dims)
@@ -146,10 +151,11 @@ class NeuralEasyFirstTagger(object):
 
         self.model = model
         if self.task == 'quality_estimation':
-            input_size = self.embedding_size + 2*self.affix_embedding_size
+            input_size = 3*self.embedding_size + 2*self.affix_embedding_size \
+                         + 3*self.embedding_size
         else:
-            input_size = 3*(self.embedding_size + 2*self.affix_embedding_size) \
-                         + 3*self.source_embedding_size
+            input_size = self.embedding_size + 2*self.affix_embedding_size
+
         if self.use_bilstm:
             self.builders = [dy.LSTMBuilder(1, input_size,
                                             self.hidden_size, self.model),
@@ -218,6 +224,7 @@ class NeuralEasyFirstTagger(object):
                                      E_source[nsw]])
                 wembs.append(we)
             wembs = [dy.noise(we, noise_level) for we in wembs]
+            sentence = [(tok[0], tok[-1]) for tok in instance]
         else:
             unk = self.word_vocabulary.w2i['_UNK_']
             words = [self.word_vocabulary.w2i.get(w, unk) for w, _ in instance]
@@ -226,6 +233,7 @@ class NeuralEasyFirstTagger(object):
             E = self.parameters['E']
             wembs = [E[w] for w in words]
             wembs = [dy.noise(we, noise_level) for we in wembs]
+            sentence = instance
 
         if self.affix_length:
             pembs = []
@@ -233,7 +241,7 @@ class NeuralEasyFirstTagger(object):
                 E_prefix = self.parameters['E_prefix_%d' % (l+1)]
                 punk = self.prefix_vocabularies[l].w2i['_UNK_']
                 prefixes = [self.prefix_vocabularies[l].w2i.get(w[:(l+1)], punk) \
-                            for w, _ in instance]
+                            for w, _ in sentence]
                 pembs.append([E_prefix[p] for p in prefixes])
                 pembs[l] = [dy.noise(pe, noise_level) for pe in pembs[l]]
             sembs = []
@@ -241,7 +249,7 @@ class NeuralEasyFirstTagger(object):
                 E_suffix = self.parameters['E_suffix_%d' % (l+1)]
                 sunk = self.suffix_vocabularies[l].w2i['_UNK_']
                 suffixes = [self.suffix_vocabularies[l].w2i.get(w[-(l+1):], sunk) \
-                            for w, _ in instance]
+                            for w, _ in sentence]
                 sembs.append([E_suffix[s] for s in suffixes])
                 sembs[l] = [dy.noise(se, noise_level) for se in sembs[l]]
             for i in xrange(len(wembs)):
@@ -439,7 +447,11 @@ class NeuralEasyFirstTagger(object):
                 #if self.use_sketch_losses and not self.concatenate_last_layer:
                 #    errs.append(err * 0.001)
                 #else:
-                errs.append(err)
+                if self.tag_weights != None:
+                    errs.append(err * self.
+                                tag_weights[self.tag_vocabulary.i2w[t]])
+                else:
+                    errs.append(err)
                 chosen = np.argmax(r_t.npvalue())
                 predicted_tags.append(self.tag_vocabulary.i2w[chosen])
 
@@ -465,9 +477,9 @@ class NeuralEasyFirstTagger(object):
                 predicted_tags.append(self.tag_vocabulary.i2w[chosen])
 
             if self.track_sketches:
-                self.sketch_file.write(' '.join([w for w, _ in instance]) +
+                self.sketch_file.write(' '.join([tok[0] for tok in instance]) +
                                        '\n')
-                self.sketch_file.write(' '.join([t for _, t in instance]) +
+                self.sketch_file.write(' '.join([tok[-1] for tok in instance]) +
                                        '\n')
                 self.sketch_file.write(' '.join(predicted_tags) + '\n')
                 self.sketch_file.write('\n')
@@ -799,16 +811,16 @@ def main():
     for epoch in xrange(num_epochs):
         num_numeric_issues = 0
         tagged = correct = loss = reg = 0
-        matches = 0
-        predicted = 0
-        gold = 0
+        matches = {tag: 0 for tag in tag_vocabulary.w2i.keys()}
+        predicted = {tag: 0 for tag in tag_vocabulary.w2i.keys()}
+        gold = {tag: 0 for tag in tag_vocabulary.w2i.keys()}
         #random.shuffle(train_instances)
         for i, instance in enumerate(train_instances, 1):
             if read_ordering:
                 ordering = train_orderings[i-1]
             else:
                 ordering = None
-            gold_tags = [sent[-1] for sent in instance]
+            gold_tags = [tok[-1] for tok in instance]
             attention_type = tagger.attention_type
             if epoch < num_pretraining_epochs:
                 tagger.attention_type = 'prescribed_order'
@@ -839,21 +851,43 @@ def main():
             tagged += len(instance)
             correct += sum([int(g == p)
                             for g, p in zip(gold_tags, predicted_tags)])
-            if metric == 'f1':
-                matches += sum([int(g == p)
-                                for g, p in zip(gold_tags, predicted_tags) \
-                                if g != null_label])
-                predicted += len([p for p in predicted_tags if p != null_label])
-                gold += len([g for g in gold_tags if g != null_label])
+            if metric in ['f1', 'f1_mult']:
+                for tag in tag_vocabulary.w2i.keys():
+                    matches[tag] += sum([int(g == p)
+                                         for g, p in zip(gold_tags,
+                                                         predicted_tags) \
+                                         if g == tag])
+                    predicted[tag] += len([p for p in predicted_tags \
+                                           if p == tag])
+                    gold[tag] += len([g for g in gold_tags if g == tag])
             sum_errs.backward()
             #if len(gold_tags) <= 5: pdb.set_trace()
             trainer.update()
 
         if metric == 'f1':
-            precision = float(matches) / predicted
-            recall = float(matches) / gold
+            sum_matches = sum([matches[tag] \
+                               for tag in tag_vocabulary.w2i.keys() \
+                               if tag != null_label])
+            sum_predicted = sum([predicted[tag] \
+                                 for tag in tag_vocabulary.w2i.keys() \
+                                 if tag != null_label])
+            sum_gold = sum([gold[tag] \
+                            for tag in tag_vocabulary.w2i.keys() \
+                            if tag != null_label])
+            precision = float(sum_matches) / sum_predicted
+            recall = float(sum_matches) / sum_gold
             f1 = 2.*precision*recall / (precision + recall)
             train_accuracy = f1
+        elif metric == 'f1_mult':
+            f1 = {}
+            for tag in tag_vocabulary.w2i.keys():
+                #if predicted[tag] == 0:
+                #    pdb.set_trace()
+                precision = float(matches[tag]) / predicted[tag]
+                recall = float(matches[tag]) / gold[tag]
+                f1[tag] = 2.*precision*recall / (precision + recall)
+            f1_mult = np.prod(np.array(f1.values()))
+            train_accuracy = f1_mult
         else:
             train_accuracy = float(correct) / tagged
 
@@ -862,15 +896,15 @@ def main():
         tagger.sketch_file = open(sketch_file_dev + '.tmp', 'w')
         correct = 0
         total = 0
-        matches = 0
-        predicted = 0
-        gold = 0
+        matches = {tag: 0 for tag in tag_vocabulary.w2i.keys()}
+        predicted = {tag: 0 for tag in tag_vocabulary.w2i.keys()}
+        gold = {tag: 0 for tag in tag_vocabulary.w2i.keys()}
         for i, instance in enumerate(dev_instances):
             if read_ordering:
                 ordering = dev_orderings[i]
             else:
                 ordering = None
-            gold_tags = [t for _, t in instance]
+            gold_tags = [tok[-1] for tok in instance]
             predicted_tags = tagger.build_graph(instance,
                                                 num_sketches=num_sketches,
                                                 noise_level=0.,
@@ -880,34 +914,54 @@ def main():
             correct += sum([int(g == p)
                             for g, p in zip(gold_tags, predicted_tags)])
             total += len(gold_tags)
-            if metric == 'f1':
-                matches += sum([int(g == p)
-                                for g, p in zip(gold_tags, predicted_tags) \
-                                if g != null_label])
-                predicted += len([p for p in predicted_tags if p != null_label])
-                gold += len([g for g in gold_tags if g != null_label])
+            if metric in ['f1', 'f1_mult']:
+                for tag in tag_vocabulary.w2i.keys():
+                    matches[tag] += sum([int(g == p)
+                                         for g, p in zip(gold_tags,
+                                                         predicted_tags) \
+                                         if g == tag])
+                    predicted[tag] += len([p for p in predicted_tags \
+                                           if p == tag])
+                    gold[tag] += len([g for g in gold_tags if g == tag])
         if metric == 'f1':
-            precision = float(matches) / predicted
-            recall = float(matches) / gold
+            sum_matches = sum([matches[tag] \
+                               for tag in tag_vocabulary.w2i.keys() \
+                               if tag != null_label])
+            sum_predicted = sum([predicted[tag] \
+                                 for tag in tag_vocabulary.w2i.keys() \
+                                 if tag != null_label])
+            sum_gold = sum([gold[tag] \
+                            for tag in tag_vocabulary.w2i.keys() \
+                            if tag != null_label])
+            precision = float(sum_matches) / sum_predicted
+            recall = float(sum_matches) / sum_gold
             f1 = 2.*precision*recall / (precision + recall)
             dev_accuracy = f1
+        elif metric == 'f1_mult':
+            f1 = {}
+            for tag in tag_vocabulary.w2i.keys():
+                precision = float(matches[tag]) / predicted[tag]
+                recall = float(matches[tag]) / gold[tag]
+                f1[tag] = 2.*precision*recall / (precision + recall)
+            f1_mult = np.prod(np.array(f1.values()))
+            dev_accuracy = f1_mult
         else:
-            dev_accuracy = float(correct) / total
+            dev_accuracy = float(correct) / tagged
         tagger.sketch_file.close()
 
         # Check accuracy in test set.
         tagger.sketch_file = open(sketch_file_test + '.tmp', 'w')
         correct = 0
         total = 0
-        matches = 0
-        predicted = 0
-        gold = 0
+        matches = {tag: 0 for tag in tag_vocabulary.w2i.keys()}
+        predicted = {tag: 0 for tag in tag_vocabulary.w2i.keys()}
+        gold = {tag: 0 for tag in tag_vocabulary.w2i.keys()}
         for i, instance in enumerate(test_instances):
             if read_ordering:
                 ordering = test_orderings[i]
             else:
                 ordering = None
-            gold_tags = [t for _, t in instance]
+            gold_tags = [tok[-1] for tok in instance]
             predicted_tags = tagger.build_graph(instance,
                                                 num_sketches=num_sketches,
                                                 noise_level=0.,
@@ -917,19 +971,39 @@ def main():
             correct += sum([int(g == p)
                             for g, p in zip(gold_tags, predicted_tags)])
             total += len(gold_tags)
-            if metric == 'f1':
-                matches += sum([int(g == p)
-                                for g, p in zip(gold_tags, predicted_tags) \
-                                if g != null_label])
-                predicted += len([p for p in predicted_tags if p != null_label])
-                gold += len([g for g in gold_tags if g != null_label])
+            if metric in ['f1', 'f1_mult']:
+                for tag in tag_vocabulary.w2i.keys():
+                    matches[tag] += sum([int(g == p)
+                                         for g, p in zip(gold_tags,
+                                                         predicted_tags) \
+                                         if g == tag])
+                    predicted[tag] += len([p for p in predicted_tags \
+                                           if p == tag])
+                    gold[tag] += len([g for g in gold_tags if g == tag])
         if metric == 'f1':
-            precision = float(matches) / predicted
-            recall = float(matches) / gold
+            sum_matches = sum([matches[tag] \
+                               for tag in tag_vocabulary.w2i.keys() \
+                               if tag != null_label])
+            sum_predicted = sum([predicted[tag] \
+                                 for tag in tag_vocabulary.w2i.keys() \
+                                 if tag != null_label])
+            sum_gold = sum([gold[tag] \
+                            for tag in tag_vocabulary.w2i.keys() \
+                            if tag != null_label])
+            precision = float(sum_matches) / sum_predicted
+            recall = float(sum_matches) / sum_gold
             f1 = 2.*precision*recall / (precision + recall)
             test_accuracy = f1
+        elif metric == 'f1_mult':
+            f1 = {}
+            for tag in tag_vocabulary.w2i.keys():
+                precision = float(matches[tag]) / predicted[tag]
+                recall = float(matches[tag]) / gold[tag]
+                f1[tag] = 2.*precision*recall / (precision + recall)
+            f1_mult = np.prod(np.array(f1.values()))
+            test_accuracy = f1_mult
         else:
-            test_accuracy = float(correct) / total
+            test_accuracy = float(correct) / tagged
         tagger.sketch_file.close()
         tagger.track_sketches = False
 

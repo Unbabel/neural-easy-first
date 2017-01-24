@@ -68,6 +68,8 @@ python neftagger.py \
     -preattention_size ${preattention_size} \
     -sketch_size ${sketch_size} \
     -context_size ${context_size} \
+    -metric f1_mult \
+    -null_label OK \
     -sketch_file_dev quality_estimation/sketches/${language}/sketch_dev_${suffix}.txt \
-    -sketch_file_test quality_estimation/sketches/${language}/sketch_test_${suffix}.txt #\
-#    >& quality_estimation/logs/${language}/log_${suffix}.txt
+    -sketch_file_test quality_estimation/sketches/${language}/sketch_test_${suffix}.txt \
+    >& quality_estimation/logs/${language}/log_${suffix}.txt

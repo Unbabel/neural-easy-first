@@ -12,14 +12,14 @@ share_attention_sketch_parameters=0
 sketch_size=50
 context_size=2
 noise_level=0.
-affix_length=4
-affix_embedding_size=50
+affix_length=0 #4
+affix_embedding_size=0 #50
 use_bilstm=1
 
 concatenate_last_layer=1
 attention_type=softmax
 num_sketches=0
-for l2_regularization in 0
+for l2_regularization in .001 0
 do
     ./run_nef_quality_estimation.sh \
         ${model_type} \
