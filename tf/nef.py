@@ -36,6 +36,7 @@ tf.app.flags.DEFINE_float("max_gradient_norm", -1,
 tf.app.flags.DEFINE_integer("buckets", 10, "Number of buckets.")
 tf.app.flags.DEFINE_float("l2_scale", 0, "L2 regularization constant")
 tf.app.flags.DEFINE_float("l1_scale", 0, "L1 regularization constant")
+tf.app.flags.DEFINE_float("sketch_cost", 0, "L2 regularization on sketch")
 tf.app.flags.DEFINE_float("keep_prob", 1.0,
                           "Keep probability for dropout during training "
                           "(1: no dropout).")
@@ -75,6 +76,8 @@ tf.app.flags.DEFINE_string("embedding_sizes", "64",
                            "Dimensionality of embeddings (separated by comma).")
 tf.app.flags.DEFINE_integer("hidden_size", 20,
                             "Dimensionality of hidden layers.")
+tf.app.flags.DEFINE_integer("hidden_size_2", 20,
+                            "Dimensionality of layer for attention scoring.")
 tf.app.flags.DEFINE_string("encoder", "bilstm",
                            "Encoder type: bilstm, lstm, or feedforward")
 tf.app.flags.DEFINE_integer("context_size", 2, "context size")
@@ -123,6 +126,7 @@ def create_model(session, buckets, num_embedding_features, num_labels,
                            num_labels=num_labels,
                            embedding_sizes=embedding_sizes,
                            hidden_size=FLAGS.hidden_size,
+                           hidden_size_2=FLAGS.hidden_size_2,
                            context_size=FLAGS.context_size,
                            vocabulary_sizes=vocabulary_sizes,
                            num_sketches=FLAGS.num_sketches,
@@ -137,6 +141,7 @@ def create_model(session, buckets, num_embedding_features, num_labels,
                            label_weights=label_weights,
                            l2_scale=FLAGS.l2_scale,
                            l1_scale=FLAGS.l1_scale,
+                           sketch_scale=FLAGS.sketch_cost,
                            discount_factor=FLAGS.attention_discount_factor,
                            temperature=FLAGS.attention_temperature,
                            embeddings=embeddings,

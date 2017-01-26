@@ -259,13 +259,14 @@ class SketchLayer(object):
     '''A class for a sketch layer, which performs a sequence of sketch
     operations, as defined in the neural easy-first model.'''
     def __init__(self, num_sketches, sequence_length, input_size, context_size,
-                 hidden_size, batch_size, batch_mask, keep_prob,
+                 hidden_size, hidden_size_2, batch_size, batch_mask, keep_prob,
                  discount_factor=0.0, temperature=1.0, activation=tf.nn.tanh):
         self.num_sketches = num_sketches
         self.sequence_length = sequence_length
         self.input_size = input_size
         self.context_size = context_size
         self.hidden_size = hidden_size
+        self.hidden_size_2 = hidden_size_2
         self.batch_size = batch_size
         self.batch_mask = batch_mask
         self.keep_prob = keep_prob
@@ -298,15 +299,15 @@ class SketchLayer(object):
         # Create vector, matrix and bias variables for computing
         # z_i = v'*tanh(W_cz*c_i + w_z).
         self.W_cz = tf.get_variable(name="W_cz",
-                                    shape=[state_size, self.hidden_size],
+                                    shape=[state_size, self.hidden_size_2],
                                     initializer=\
                                     tf.contrib.layers.xavier_initializer(
                                         uniform=True, dtype=tf.float32))
         self.w_z = tf.get_variable(name="w_z",
-                                   shape=[self.hidden_size],
+                                   shape=[self.hidden_size_2],
                                    initializer=tf.random_uniform_initializer(
                                        dtype=tf.float32))
-        self.v = tf.get_variable(name="v", shape=[self.hidden_size, 1],
+        self.v = tf.get_variable(name="v", shape=[self.hidden_size_2, 1],
                                  initializer=tf.random_uniform_initializer(
                                      dtype=tf.float32))
 

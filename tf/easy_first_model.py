@@ -10,11 +10,12 @@ LOGGER = logging.getLogger("NEF")
 class EasyFirstModel(object):
     '''A class for a neural easy-first model.'''
     def __init__(self, num_embedding_features,
-                 num_labels, embedding_sizes, hidden_size, context_size,
-                 vocabulary_sizes, num_sketches, encoder,
+                 num_labels, embedding_sizes, hidden_size, hidden_size_2,
+                 context_size, vocabulary_sizes, num_sketches, encoder,
                  concatenate_last_layer, batch_size, optimizer, learning_rate,
                  max_gradient_norm, keep_prob=1.0, keep_prob_sketch=1.0,
                  label_weights=None, l2_scale=0.0, l1_scale=0.0,
+                 sketch_scale=0.0,
                  discount_factor=0.0, temperature=1.0,
                  embeddings=None, update_embeddings=True, activation="tanh",
                  buckets=None, track_sketches=False, model_dir="models/",
@@ -23,6 +24,7 @@ class EasyFirstModel(object):
         self.num_labels = num_labels
         self.embedding_sizes = embedding_sizes
         self.hidden_size = hidden_size
+        self.hidden_size_2 = hidden_size_2
         self.context_size = context_size
         self.vocabulary_sizes = vocabulary_sizes
         self.num_sketches = num_sketches
@@ -42,6 +44,7 @@ class EasyFirstModel(object):
                 tf.train.GradientDescentOptimizer)(self.learning_rate)
         self.l2_scale = l2_scale
         self.l1_scale = l1_scale
+        self.sketch_scale = sketch_scale
         self.discount_factor = discount_factor
         self.temperature = temperature
         self.label_weights = label_weights \
@@ -55,7 +58,8 @@ class EasyFirstModel(object):
 
         model = 'easy_first'
         self.path = "%s/%s_K%d_D%s_J%d_r%d_batch%d_opt%s_lr%0.4f" \
-                    "_gradnorm%0.2f_concat%r_l2r%0.4f_l1r%0.4f_dropout%0.2f" \
+                    "_gradnorm%0.2f_concat%r_l2r%0.4f_l1r%0.4f_sketchl2r%0.4f" \
+                    "_dropout%0.2f" \
                     "_sketchdrop%0.2f_updateemb%s_voc%s.model" % \
                     (self.model_dir, model, self.num_labels,
                      '-'.join([str(d) for d in self.embedding_sizes]),
@@ -63,7 +67,8 @@ class EasyFirstModel(object):
                      self.context_size, self.batch_size, optimizer,
                      self.learning_rate, self.max_gradient_norm,
                      self.concatenate_last_layer,
-                     self.l2_scale, self.l1_scale, self.keep_prob,
+                     self.l2_scale, self.l1_scale, self.sketch_scale,
+                     self.keep_prob,
                      self.keep_prob_sketch, self.update_embeddings,
                      '-'.join([str(v) for v in self.vocabulary_sizes]))
         LOGGER.info("Model path: %s", self.path)
@@ -82,6 +87,10 @@ class EasyFirstModel(object):
 
         if self.l1_scale > 0:
             LOGGER.info("L1 regularizer with weight %f", self.l1_scale)
+
+        if self.sketch_scale > 0:
+            LOGGER.info("L2 regularizer on sketch with weight %f",
+                         self.sketch_scale)
 
         if not is_train:
             self.keep_prob = 1.
@@ -355,6 +364,7 @@ class EasyFirstModel(object):
                                        input_size=state_size,
                                        context_size=self.context_size,
                                        hidden_size=self.hidden_size,
+                                       hidden_size_2=self.hidden_size_2,
                                        batch_size=batch_size,
                                        batch_mask=mask,
                                        keep_prob=self.keep_prob_sketch,
@@ -393,5 +403,11 @@ class EasyFirstModel(object):
                     tf.contrib.layers.l1_regularizer(self.l1_scale),
                     weights_list=weights_list)
                 losses_reg += l1_loss
+            if self.sketch_scale > 0:
+                weights_list = [S]
+                sketch_loss = tf.contrib.layers.apply_regularization(
+                    tf.contrib.layers.l2_regularizer(self.sketch_scale),
+                    weights_list=weights_list)
+                losses_reg += sketch_loss
 
         return losses, losses_reg, pred_labels, sketches_tf
