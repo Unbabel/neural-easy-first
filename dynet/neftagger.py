@@ -21,7 +21,9 @@ class NeuralEasyFirstTagger(object):
                  share_attention_sketch_parameters,
                  use_sketch_losses,
                  use_max_pooling,
-                 use_bilstm):
+                 use_bilstm,
+                 dropout_probability,
+                 bad_weight):
         self.task = task
         self.word_vocabulary = word_vocabulary
         self.affix_length = affix_length
@@ -52,9 +54,10 @@ class NeuralEasyFirstTagger(object):
         self.track_sketches = False
         self.sketch_file = None
         self.use_last_sketch = False #True
+        self.dropout_probability = dropout_probability
 
         if self.task == 'quality_estimation':
-            self.tag_weights = {'OK': 1., 'BAD': 3.}
+            self.tag_weights = {'OK': 1., 'BAD': bad_weight}
         else:
             self.tag_weights = None
 
@@ -258,6 +261,11 @@ class NeuralEasyFirstTagger(object):
                 wembs[i] = dy.concatenate([wembs[i],
                                            dy.esum(pemb),
                                            dy.esum(semb)])
+
+        if training:
+            if self.dropout_probability != 0.:
+                for i in xrange(len(wembs)):
+                    wembs[i] = dy.dropout(wembs[i], self.dropout_probability)
 
         if training:
             errs = []
@@ -687,6 +695,9 @@ def main():
     parser.add_argument('-sketch_file_test', type=str, required=True)
     parser.add_argument('-metric', type=str, default='accuracy')
     parser.add_argument('-null_label', type=str, default='O')
+    parser.add_argument('-dropout_probability', type=float, default=0.)
+    # Only makes sense for QE.
+    parser.add_argument('-bad_weight', type=float, default=1.)
 
     args = vars(parser.parse_args())
     print >> sys.stderr, args
@@ -725,6 +736,8 @@ def main():
     sketch_file_test = args['sketch_file_test']
     metric = args['metric']
     null_label = args['null_label']
+    dropout_probability = args['dropout_probability']
+    bad_weight = args['bad_weight']
 
     np.random.seed(42)
 
@@ -782,7 +795,8 @@ def main():
                                    sum_hidden_states_and_sketches,
                                    share_attention_sketch_parameters,
                                    use_sketch_losses,
-                                   use_max_pooling, use_bilstm)
+                                   use_max_pooling, use_bilstm,
+                                   dropout_probability, bad_weight)
     if embeddings_file != '':
         embeddings = load_embeddings(embeddings_file)
     else:
@@ -937,12 +951,16 @@ def main():
             recall = float(sum_matches) / sum_gold
             f1 = 2.*precision*recall / (precision + recall)
             dev_accuracy = f1
+            print 'Matches: %d, Predicted: %d, Gold: %d' % \
+                (sum_matches, sum_predicted, sum_gold)
         elif metric == 'f1_mult':
             f1 = {}
             for tag in tag_vocabulary.w2i.keys():
                 precision = float(matches[tag]) / predicted[tag]
                 recall = float(matches[tag]) / gold[tag]
                 f1[tag] = 2.*precision*recall / (precision + recall)
+                print '%s -- Matches: %d, Predicted: %d, Gold: %d' % \
+                    (tag, matches[tag], predicted[tag], gold[tag])
             f1_mult = np.prod(np.array(f1.values()))
             dev_accuracy = f1_mult
         else:
@@ -994,12 +1012,16 @@ def main():
             recall = float(sum_matches) / sum_gold
             f1 = 2.*precision*recall / (precision + recall)
             test_accuracy = f1
+            print 'Matches: %d, Predicted: %d, Gold: %d' % \
+                (sum_matches, sum_predicted, sum_gold)
         elif metric == 'f1_mult':
             f1 = {}
             for tag in tag_vocabulary.w2i.keys():
                 precision = float(matches[tag]) / predicted[tag]
                 recall = float(matches[tag]) / gold[tag]
                 f1[tag] = 2.*precision*recall / (precision + recall)
+                print '%s -- Matches: %d, Predicted: %d, Gold: %d' % \
+                    (tag, matches[tag], predicted[tag], gold[tag])
             f1_mult = np.prod(np.array(f1.values()))
             test_accuracy = f1_mult
         else:

@@ -21,7 +21,16 @@ noise_level=${17}
 affix_length=${18}
 affix_embedding_size=${19}
 use_bilstm=${20}
-language=${21}
+dropout_probability=${21}
+bad_weight=${22}
+language=${23}
+
+if [ "$language" == "en-de_wmt16" ]
+then
+    metric=f1_mult
+else
+    metric=f1
+fi
 
 suffix=model-${model_type}_attention-${attention_type}_temp-${temperature}_\
 disc-${discount_factor}_C-${l2_regularization}_sketches-${num_sketches}_\
@@ -30,7 +39,8 @@ share-${share_attention_sketch_parameters}_\
 skloss-${use_sketch_losses}_pool-${use_max_pooling}_\
 bilstm-${use_bilstm}_pretrain-${num_pretraining_epochs}_\
 emb-${embedding_size}_hid-${hidden_size}_pre-${preattention_size}_\
-sk-${sketch_size}_ctx-${context_size}
+sk-${sketch_size}_ctx-${context_size}_\
+drop-${dropout_probability}_bad-${bad_weight}
 
 echo $suffix
 
@@ -68,8 +78,10 @@ python neftagger.py \
     -preattention_size ${preattention_size} \
     -sketch_size ${sketch_size} \
     -context_size ${context_size} \
-    -metric f1_mult \
+    -metric ${metric} \
     -null_label OK \
+    -dropout_probability ${dropout_probability} \
+    -bad_weight ${bad_weight} \
     -sketch_file_dev quality_estimation/sketches/${language}/sketch_dev_${suffix}.txt \
     -sketch_file_test quality_estimation/sketches/${language}/sketch_test_${suffix}.txt \
     >& quality_estimation/logs/${language}/log_${suffix}.txt
