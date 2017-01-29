@@ -286,6 +286,12 @@ class NeuralEasyFirstTagger(object):
             w_h = dy.parameter(self.parameters['w_h'])
             hidden_states = [dy.tanh(W_xh * x + w_h) for x in wembs]
 
+        if training:
+            if self.dropout_probability != 0.:
+                for i in xrange(len(hidden_states)):
+                    hidden_states[i] = dy.dropout(hidden_states[i],
+                                                  self.dropout_probability)
+
         if self.use_last_sketch:
             W_sz = dy.parameter(self.parameters['W_sz'])
         W_cz = dy.parameter(self.parameters['W_cz'])
@@ -450,6 +456,8 @@ class NeuralEasyFirstTagger(object):
                     state = dy.concatenate([hidden_states[i], sketches[i]])
                 else:
                     state = sketches[i]
+                if self.dropout_probability != 0.:
+                    state = dy.dropout(state, self.dropout_probability)
                 r_t = O * state
                 err = dy.pickneglogsoftmax(r_t, t)
                 #if self.use_sketch_losses and not self.concatenate_last_layer:
@@ -964,7 +972,7 @@ def main():
             f1_mult = np.prod(np.array(f1.values()))
             dev_accuracy = f1_mult
         else:
-            dev_accuracy = float(correct) / tagged
+            dev_accuracy = float(correct) / total
         tagger.sketch_file.close()
 
         # Check accuracy in test set.
@@ -1025,7 +1033,7 @@ def main():
             f1_mult = np.prod(np.array(f1.values()))
             test_accuracy = f1_mult
         else:
-            test_accuracy = float(correct) / tagged
+            test_accuracy = float(correct) / total
         tagger.sketch_file.close()
         tagger.track_sketches = False
 
