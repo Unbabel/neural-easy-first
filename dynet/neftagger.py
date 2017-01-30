@@ -353,6 +353,15 @@ class NeuralEasyFirstTagger(object):
                         state = states[i+l]
                     state_with_context = dy.concatenate([state_with_context,
                                                          state])
+                #states_with_context.append(state_with_context)
+                #if training:
+                #    if self.dropout_probability != 0.:
+                #        state_with_context = dy.dropout(
+                #            state_with_context,
+                #            self.dropout_probability)
+                #        states_with_context[i] = dy.dropout(
+                #            states_with_context[i],
+                #            self.dropout_probability)
                 if self.use_max_pooling:
                     assert self.preattention_size == self.sketch_size
                     preattention = dy.tanh(W_cz * state_with_context + w_z)
@@ -369,8 +378,8 @@ class NeuralEasyFirstTagger(object):
                                           W_sz * last_sketch_vector + w_z)
                     else:
                         z_i = v * dy.tanh(W_cz * state_with_context + w_z)
-                z.append(z_i)
                 states_with_context.append(state_with_context)
+                z.append(z_i)
             temperature = self.temperature #10. # 1.
             discount_factor = self.discount_factor #5. #10. #50. # 0.
             #attention_weights = dy.softmax(dy.concatenate(z)/temperature)

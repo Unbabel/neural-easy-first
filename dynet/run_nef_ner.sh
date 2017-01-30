@@ -21,7 +21,8 @@ noise_level=${17}
 affix_length=${18}
 affix_embedding_size=${19}
 use_bilstm=${20}
-language=${21}
+dropout_probability=${21}
+language=${22}
 
 suffix=model-${model_type}_attention-${attention_type}_temp-${temperature}_\
 disc-${discount_factor}_C-${l2_regularization}_sketches-${num_sketches}_\
@@ -30,7 +31,7 @@ share-${share_attention_sketch_parameters}_\
 skloss-${use_sketch_losses}_pool-${use_max_pooling}_\
 bilstm-${use_bilstm}_pretrain-${num_pretraining_epochs}_\
 emb-${embedding_size}_hid-${hidden_size}_pre-${preattention_size}_\
-sk-${sketch_size}_ctx-${context_size}
+sk-${sketch_size}_ctx-${context_size}_drop-${dropout_probability}
 
 echo $suffix
 
@@ -68,6 +69,7 @@ python neftagger.py \
     -context_size ${context_size} \
     -sketch_file_dev ner/sketches/${language}/sketch_dev_${suffix}.txt \
     -sketch_file_test ner/sketches/${language}/sketch_test_${suffix}.txt \
+    -dropout_probability ${dropout_probability} \
     -metric f1 \
     -null_label O \
     >& ner/logs/${language}/log_${suffix}.txt
