@@ -40,12 +40,12 @@ mkdir -p ner/sketches/${language}
 
 python neftagger.py \
     --dynet-seed 42 \
-    --dynet-mem 1024 \
+    --dynet-mem 2048 \
     -num_epochs ${num_epochs} \
     -num_pretraining_epochs ${num_pretraining_epochs} \
-    -train_file ner/data/${language}_train_orig.txt \
-    -dev_file ner/data/${language}_dev_orig.txt \
-    -test_file ner/data/${language}_test_orig.txt \
+    -train_file ner/data/${language}_train.txt \
+    -dev_file ner/data/${language}_dev.txt \
+    -test_file ner/data/${language}_test.txt \
     -embeddings_file ner/data/${language}.embeddings \
     -affix_length ${affix_length} \
     -model_type ${model_type} \

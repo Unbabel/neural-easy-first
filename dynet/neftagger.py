@@ -317,6 +317,8 @@ class NeuralEasyFirstTagger(object):
         # Make several sketch steps.
         if num_sketches < 0:
             num_sketches = len(words)
+        elif num_sketches > len(words):
+            num_sketches = len(words)
         cumulative_attention = dy.vecInput(len(words))
         cumulative_attention.set(np.zeros(len(words)))
         #cumulative_attention.set(np.ones(len(words)) / len(words))
