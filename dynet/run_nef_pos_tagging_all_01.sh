@@ -13,7 +13,7 @@ noise_level=0.
 affix_length=4
 affix_embedding_size=50
 use_bilstm=1
-dropout_probability=0.1
+dropout_probability=$4
 
 concatenate_last_layer=1
 use_max_pooling=0

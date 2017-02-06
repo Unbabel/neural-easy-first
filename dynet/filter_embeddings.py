@@ -4,7 +4,7 @@ import cPickle as pickle
 embeddings_pickle_file = sys.argv[1]
 dataset_file = sys.argv[2]
 
-sep = ' ' # '\t'
+sep = '\t' #' ' # '\t'
 f = open(dataset_file)
 word_list = set()
 for line in f:

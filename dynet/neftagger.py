@@ -413,6 +413,26 @@ class NeuralEasyFirstTagger(object):
                 a = np.zeros(len(words))
                 a[ordering[j]] = 1.
                 attention_weights.set(a)
+            elif self.attention_type == 'vanilla_easy_first':
+                attention_weights = dy.vecInput(len(words))
+                a = np.zeros(len(words))
+                scores = []
+                for i in xrange(len(words)):
+                    assert self.preattention_size == self.sketch_size
+                    if cumulative_attention.npvalue()[i] == 1.:
+                        scores.append(-np.inf)
+                        continue
+                    preattention = dy.tanh(W_cz * states_with_context[i] + w_z)
+                    if self.concatenate_last_layer:
+                        r_i = O * dy.concatenate([hidden_states[i],
+                                                  preattention])
+                    else:
+                        r_i = O * preattention
+                    probs = dy.softmax(r_i).npvalue()
+                    scores.append(max(probs))
+                k = np.argmax(scores)
+                a[k] = 1.
+                attention_weights.set(a)
             else:
                 raise NotImplementedError
             if self.track_sketches:
@@ -451,6 +471,17 @@ class NeuralEasyFirstTagger(object):
             elif self.model_type == 'all_states':
                 for i in xrange(len(words)):
                     s_n = dy.tanh(W_cs * states_with_context[i] + w_s)
+
+                    if training and self.use_sketch_losses:
+                        state = s_n
+                        if self.concatenate_last_layer:
+                            state = dy.concatenate([hidden_states[i], s_n])
+                        else:
+                            state = s_n
+                        r_t = O * state
+                        err = dy.pickneglogsoftmax(r_t, tags[i])
+                        errs.append(err * attention_weights[i] / float(j+1))
+
                     sketches[i] += s_n * attention_weights[i]
                     #sketches[i] = sketches[i] * (1-attention_weights[i]) + \
                     #              s_n * attention_weights[i]
