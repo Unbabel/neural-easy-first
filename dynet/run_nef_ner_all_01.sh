@@ -5,8 +5,8 @@ temperature=1.
 discount_factor=0.
 num_sketches=$3 #-1
 use_sketch_losses=0
-embedding_size=64
-hidden_size=50
+embedding_size=300 #64
+hidden_size=100 #50
 preattention_size=50
 context_size=2
 noise_level=0.
@@ -14,6 +14,10 @@ affix_length=4
 affix_embedding_size=50
 use_bilstm=1
 dropout_probability=$4
+
+use_crf=1
+lower_case=0 #1
+use_case_features=0 #1
 
 concatenate_last_layer=1
 use_max_pooling=0
@@ -44,6 +48,9 @@ do
         ${affix_embedding_size} \
         ${use_bilstm} \
         ${dropout_probability} \
-        ${language}
+        ${language} \
+        ${use_crf} \
+        ${lower_case} \
+        ${use_case_features}
 done
 

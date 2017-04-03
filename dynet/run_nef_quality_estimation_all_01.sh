@@ -20,6 +20,7 @@ share_attention_sketch_parameters=0
 sketch_size=50
 dropout_probability=$4
 bad_weight=$5
+use_crf=1
 
 for l2_regularization in 0
 do
@@ -46,7 +47,8 @@ do
         ${use_bilstm} \
         ${dropout_probability} \
         ${bad_weight} \
-        ${language}
+        ${language} \
+        ${use_crf}
 done
 
 

@@ -23,6 +23,9 @@ affix_embedding_size=${19}
 use_bilstm=${20}
 dropout_probability=${21}
 language=${22}
+use_crf=${23}
+lower_case=${24}
+use_case_features=${25}
 
 suffix=model-${model_type}_attention-${attention_type}_temp-${temperature}_\
 disc-${discount_factor}_C-${l2_regularization}_sketches-${num_sketches}_\
@@ -31,7 +34,8 @@ share-${share_attention_sketch_parameters}_\
 skloss-${use_sketch_losses}_pool-${use_max_pooling}_\
 bilstm-${use_bilstm}_pretrain-${num_pretraining_epochs}_\
 emb-${embedding_size}_hid-${hidden_size}_pre-${preattention_size}_\
-sk-${sketch_size}_ctx-${context_size}_drop-${dropout_probability}
+sk-${sketch_size}_ctx-${context_size}_drop-${dropout_probability}_\
+crf-${use_crf}_lower-${lower_case}_casefeats-${use_case_features}
 
 echo $suffix
 
@@ -46,7 +50,7 @@ python neftagger.py \
     -train_file ner/data/${language}_train.txt \
     -dev_file ner/data/${language}_dev.txt \
     -test_file ner/data/${language}_test.txt \
-    -embeddings_file ner/data/${language}.embeddings \
+    -embeddings_file ner/data/${language}.glove_embeddings \
     -affix_length ${affix_length} \
     -model_type ${model_type} \
     -attention_type ${attention_type} \
@@ -70,8 +74,12 @@ python neftagger.py \
     -sketch_file_dev ner/sketches/${language}/sketch_dev_${suffix}.txt \
     -sketch_file_test ner/sketches/${language}/sketch_test_${suffix}.txt \
     -dropout_probability ${dropout_probability} \
+    -task entity_tagging \
     -metric f1 \
     -null_label O \
+    -use_crf ${use_crf} \
+    -lower_case ${lower_case} \
+    -use_case_features ${use_case_features} \
     >& ner/logs/${language}/log_${suffix}.txt
 
 python extract_predictions.py \

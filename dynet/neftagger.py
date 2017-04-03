@@ -8,6 +8,27 @@ import time
 import util
 import pdb
 
+def logzero():
+    '''Return log of zero.'''
+    return -np.inf
+
+def cap_feature(s):
+    '''
+    Capitalization feature:
+    0 = low caps
+    1 = all caps
+    2 = first letter caps
+    3 = one capital (not first letter)
+    '''
+    if s.lower() == s:
+        return 0
+    elif s.upper() == s:
+        return 1
+    elif s[0].upper() == s[0]:
+        return 2
+    else:
+        return 3
+
 class NeuralEasyFirstTagger(object):
     def __init__(self, task, word_vocabulary, affix_length,
                  prefix_vocabularies, suffix_vocabularies,
@@ -23,7 +44,10 @@ class NeuralEasyFirstTagger(object):
                  use_max_pooling,
                  use_bilstm,
                  dropout_probability,
-                 bad_weight):
+                 bad_weight,
+                 use_crf,
+                 lower_case,
+                 use_case_features):
         self.task = task
         self.word_vocabulary = word_vocabulary
         self.affix_length = affix_length
@@ -55,6 +79,9 @@ class NeuralEasyFirstTagger(object):
         self.sketch_file = None
         self.use_last_sketch = False #True
         self.dropout_probability = dropout_probability
+        self.use_crf = use_crf
+        self.lower_case = lower_case
+        self.use_case_features = use_case_features
 
         if self.task == 'quality_estimation':
             self.tag_weights = {'OK': 1., 'BAD': bad_weight}
@@ -80,6 +107,8 @@ class NeuralEasyFirstTagger(object):
                                                        self.embedding_size))
         if embeddings != None:
             for word in embeddings:
+                if self.lower_case:
+                    assert word.lower() == word
                 if word not in self.word_vocabulary.w2i:
                     self.word_vocabulary.w2i[word] = \
                         len(self.word_vocabulary.w2i.keys())
@@ -152,12 +181,22 @@ class NeuralEasyFirstTagger(object):
             parameters['O'] = model.add_parameters((num_tags,
                                                     self.sketch_size))
 
+        if self.use_crf:
+            parameters['T'] = model.parameters_from_numpy(
+                np.zeros((num_tags, num_tags)))
+            parameters['Ti'] = model.parameters_from_numpy(
+                np.zeros(num_tags))
+            parameters['Tf'] = model.parameters_from_numpy(
+                np.zeros(num_tags))
+
         self.model = model
         if self.task == 'quality_estimation':
             input_size = 3*self.embedding_size + 2*self.affix_embedding_size \
                          + 3*self.embedding_size
         else:
             input_size = self.embedding_size + 2*self.affix_embedding_size
+            if self.use_case_features:
+                input_size += 4
 
         if self.use_bilstm:
             self.builders = [dy.LSTMBuilder(1, input_size,
@@ -230,7 +269,12 @@ class NeuralEasyFirstTagger(object):
             sentence = [(tok[0], tok[-1]) for tok in instance]
         else:
             unk = self.word_vocabulary.w2i['_UNK_']
-            words = [self.word_vocabulary.w2i.get(w, unk) for w, _ in instance]
+            if self.lower_case:
+                words = [self.word_vocabulary.w2i.get(w.lower(), unk) \
+                         for w, _ in instance]
+            else:
+                words = [self.word_vocabulary.w2i.get(w, unk) \
+                         for w, _ in instance]
             tags = [self.tag_vocabulary.w2i[t] for _, t in instance]
 
             E = self.parameters['E']
@@ -261,6 +305,16 @@ class NeuralEasyFirstTagger(object):
                 wembs[i] = dy.concatenate([wembs[i],
                                            dy.esum(pemb),
                                            dy.esum(semb)])
+
+        if self.use_case_features:
+            for i in xrange(len(wembs)):
+                w = sentence[i][0]
+                val = cap_feature(w)
+                aux = np.zeros(4)
+                aux[val] = 1.
+                v = dy.vecInput(4)
+                v.set(aux)
+                wembs[i] = dy.concatenate([wembs[i], v])
 
         if training:
             if self.dropout_probability != 0.:
@@ -300,6 +354,10 @@ class NeuralEasyFirstTagger(object):
         W_cs = dy.parameter(self.parameters['W_cs'])
         w_s = dy.parameter(self.parameters['w_s'])
         O = dy.parameter(self.parameters['O'])
+        if self.use_crf:
+            T = dy.parameter(self.parameters['T'])
+            Ti = dy.parameter(self.parameters['Ti'])
+            Tf = dy.parameter(self.parameters['Tf'])
 
         # Initialize all word sketches as zero vectors.
         sketches = []
@@ -492,26 +550,93 @@ class NeuralEasyFirstTagger(object):
 
         # Now use the last sketch to make a prediction.
         if training:
-            predicted_tags = []
-            for i, t in enumerate(tags):
-                if self.concatenate_last_layer:
-                    state = dy.concatenate([hidden_states[i], sketches[i]])
-                else:
-                    state = sketches[i]
-                if self.dropout_probability != 0.:
-                    state = dy.dropout(state, self.dropout_probability)
-                r_t = O * state
-                err = dy.pickneglogsoftmax(r_t, t)
-                #if self.use_sketch_losses and not self.concatenate_last_layer:
-                #    errs.append(err * 0.001)
-                #else:
-                if self.tag_weights != None:
-                    errs.append(err * self.
-                                tag_weights[self.tag_vocabulary.i2w[t]])
-                else:
-                    errs.append(err)
-                chosen = np.argmax(r_t.npvalue())
-                predicted_tags.append(self.tag_vocabulary.i2w[chosen])
+            if self.use_crf:
+                #assert self.tag_weights == None
+                num_tags = self.tag_vocabulary.size()
+                emission_scores = []
+                transition_scores = []
+                initial_scores = Ti #dy.vecInput(num_tags)
+                #initial_scores.set(np.zeros(num_tags))
+                final_scores = Tf #dy.vecInput(num_tags)
+                #final_scores.set(np.zeros(num_tags))
+                score_gold = dy.scalarInput(0.)
+                score_gold += initial_scores[tags[0]]
+                for i, t in enumerate(tags):
+                    if self.concatenate_last_layer:
+                        state = dy.concatenate([hidden_states[i], sketches[i]])
+                    else:
+                        state = sketches[i]
+                    if self.dropout_probability != 0.:
+                        state = dy.dropout(state, self.dropout_probability)
+                    r_t = O * state
+                    emission_scores.append(r_t)
+                    score_gold += r_t[t]
+
+                    if self.tag_weights != None:
+                        loss = np.zeros(num_tags) + np.log(self.tag_weights[
+                            self.tag_vocabulary.i2w[t]])
+                        loss[t] = 0.
+                        aux = dy.vecInput(num_tags)
+                        aux.set(loss)
+                        emission_scores[-1] += aux
+
+                    #chosen = np.argmax(r_t.npvalue())
+                    #predicted_tags.append(self.tag_vocabulary.i2w[chosen])
+                    if i > 0:
+                        transition_scores.append([])
+                        for j in xrange(num_tags):
+                            #transition_score = dy.vecInput(num_tags)
+                            #transition_score.set(np.zeros(num_tags))
+                            #pdb.set_trace()
+                            #transition_score = T[j, :] # j is the previous tag.
+                            aux = np.zeros(num_tags)
+                            aux[j] = 1.
+                            ej = dy.vecInput(num_tags)
+                            ej.set(aux)
+                            transition_score = dy.transpose(T) * ej
+                            transition_scores[i-1].append(transition_score)
+                        score_gold += transition_scores[i-1][tags[i-1]][tags[i]]
+                score_gold += final_scores[tags[-1]]
+                alpha = self.run_forward(initial_scores,
+                                         transition_scores,
+                                         final_scores,
+                                         emission_scores)
+                cost = -(score_gold - alpha)
+
+                np_initial_scores, np_transition_scores, np_final_scores, np_emission_scores = \
+                    self.convert_scores_to_numpy(initial_scores,
+                                                 transition_scores,
+                                                 final_scores,
+                                                 emission_scores)
+                chosen_tags, _ = self.run_viterbi(np_initial_scores,
+                                                  np_transition_scores,
+                                                  np_final_scores,
+                                                  np_emission_scores)
+                predicted_tags = [self.tag_vocabulary.i2w[chosen] \
+                                  for chosen in chosen_tags]
+
+            else:
+                predicted_tags = []
+                for i, t in enumerate(tags):
+                    if self.concatenate_last_layer:
+                        state = dy.concatenate([hidden_states[i], sketches[i]])
+                    else:
+                        state = sketches[i]
+                    if self.dropout_probability != 0.:
+                        state = dy.dropout(state, self.dropout_probability)
+                    r_t = O * state
+                    err = dy.pickneglogsoftmax(r_t, t)
+                    #if self.use_sketch_losses and not self.concatenate_last_layer:
+                    #    errs.append(err * 0.001)
+                    #else:
+                    if self.tag_weights != None:
+                        errs.append(err * self.
+                                    tag_weights[self.tag_vocabulary.i2w[t]])
+                    else:
+                        errs.append(err)
+                    chosen = np.argmax(r_t.npvalue())
+                    predicted_tags.append(self.tag_vocabulary.i2w[chosen])
+                    cost = dy.esum(errs)
 
             if self.track_sketches:
                 self.sketch_file.write(' '.join([w for w, _ in instance]) +
@@ -521,18 +646,88 @@ class NeuralEasyFirstTagger(object):
                 self.sketch_file.write(' '.join(predicted_tags) + '\n')
                 self.sketch_file.write('\n')
 
-            return dy.esum(errs), predicted_tags
+            return cost, predicted_tags
         else:
-            predicted_tags = []
-            for i in xrange(len(words)):
-                if self.concatenate_last_layer:
-                    state = dy.concatenate([hidden_states[i], sketches[i]])
-                else:
-                    state = sketches[i]
-                r_t = O * state
-                #out = dy.softmax(r_t)
-                chosen = np.argmax(r_t.npvalue())
-                predicted_tags.append(self.tag_vocabulary.i2w[chosen])
+            if self.use_crf:
+                #num_tags = self.tag_vocabulary.size()
+                #emission_scores = np.zeros((len(words), num_tags))
+                #transition_scores = np.zeros((len(words)-1, num_tags,
+                #                              num_tags))
+                #for i in xrange(1, len(words)):
+                #    transition_scores[i-1, :, :] = T.npvalue().transpose()                              
+                #initial_scores = Ti.npvalue() # np.zeros(num_tags)
+                #final_scores = Tf.npvalue() # np.zeros(num_tags)
+                #for t, tid in self.tag_vocabulary.w2i.iteritems():
+                #    if t[:2] == 'I-':
+                #        initial_scores[tid] = -1000.
+                #    if len(words) > 1:
+                #        for pt, ptid in self.tag_vocabulary.w2i.iteritems():
+                #            if t[:2] == 'I-' and pt[2:] != t[2:]:
+                #                transition_scores[:, tid, ptid] = -1000.
+                #for i in xrange(len(words)):
+                #    if self.concatenate_last_layer:
+                #        state = dy.concatenate([hidden_states[i], sketches[i]])
+                #    else:
+                #        state = sketches[i]
+                #    r_t = O * state
+                #    emission_scores[i, :] = r_t.npvalue()
+                #chosen_tags, _ = self.run_viterbi(initial_scores,
+                #                                  transition_scores,
+                #                                  final_scores,
+                #                                  emission_scores)
+                #predicted_tags = [self.tag_vocabulary.i2w[chosen] \
+                #                  for chosen in chosen_tags]
+
+                num_tags = self.tag_vocabulary.size()
+                emission_scores = []
+                transition_scores = []
+                initial_scores = Ti #dy.vecInput(num_tags)
+                #initial_scores.set(np.zeros(num_tags))
+                final_scores = Tf #dy.vecInput(num_tags)
+                #final_scores.set(np.zeros(num_tags))
+                for i in xrange(len(words)):
+                    if self.concatenate_last_layer:
+                        state = dy.concatenate([hidden_states[i], sketches[i]])
+                    else:
+                        state = sketches[i]
+                    r_t = O * state
+                    emission_scores.append(r_t)
+                    if i > 0:
+                        transition_scores.append([])
+                        for j in xrange(num_tags):
+                            #transition_score = dy.vecInput(num_tags)
+                            #transition_score.set(np.zeros(num_tags))
+                            #transition_score = T[j, :] # j is the previous tag.
+                            aux = np.zeros(num_tags)
+                            aux[j] = 1.
+                            ej = dy.vecInput(num_tags)
+                            ej.set(aux)
+                            transition_score = dy.transpose(T) * ej
+                            transition_scores[i-1].append(transition_score)
+
+                np_initial_scores, np_transition_scores, np_final_scores, np_emission_scores = \
+                    self.convert_scores_to_numpy(initial_scores,
+                                                 transition_scores,
+                                                 final_scores,
+                                                 emission_scores)
+                chosen_tags, _ = self.run_viterbi(np_initial_scores,
+                                                  np_transition_scores,
+                                                  np_final_scores,
+                                                  np_emission_scores)
+                predicted_tags = [self.tag_vocabulary.i2w[chosen] \
+                                  for chosen in chosen_tags]
+
+            else:
+                predicted_tags = []
+                for i in xrange(len(words)):
+                    if self.concatenate_last_layer:
+                        state = dy.concatenate([hidden_states[i], sketches[i]])
+                    else:
+                        state = sketches[i]
+                    r_t = O * state
+                    #out = dy.softmax(r_t)
+                    chosen = np.argmax(r_t.npvalue())
+                    predicted_tags.append(self.tag_vocabulary.i2w[chosen])
 
             if self.track_sketches:
                 self.sketch_file.write(' '.join([tok[0] for tok in instance]) +
@@ -543,6 +738,104 @@ class NeuralEasyFirstTagger(object):
                 self.sketch_file.write('\n')
 
             return predicted_tags
+
+    def convert_scores_to_numpy(self, dy_initial_scores, dy_transition_scores, dy_final_scores,
+                                dy_emission_scores):
+        length = len(dy_emission_scores)
+        initial_scores = dy_initial_scores.npvalue()
+        num_tags = len(initial_scores)
+        final_scores = dy_final_scores.npvalue()
+        emission_scores = np.zeros((length, num_tags))
+        transition_scores = np.zeros((length-1, num_tags, num_tags))
+        for i in xrange(length):
+            emission_scores[i, :] = dy_emission_scores[i].npvalue()
+        for i in xrange(1, length):
+            for ptid in xrange(num_tags):
+                transition_scores[i-1, :, ptid] = dy_transition_scores[i-1][ptid].npvalue()
+        return initial_scores, transition_scores, final_scores, emission_scores
+
+    def run_viterbi(self, initial_scores, transition_scores, final_scores,
+                    emission_scores):
+        '''Computes the viterbi trellis for a given sequence.
+        Receives:
+        - Initial scores: (num_states) array
+        - Transition scores: (length-1, num_states, num_states) array
+        - Final scores: (num_states) array
+        - Emission scores: (length, num_states) array.'''
+
+        length = np.size(emission_scores, 0) # Length of the sequence.
+        num_states = np.size(initial_scores) # Number of states.
+
+        # Variables storing the Viterbi scores.
+        viterbi_scores = np.zeros([length, num_states]) + logzero()
+
+        # Variables storing the paths to backtrack.
+        viterbi_paths = -np.ones([length, num_states], dtype=int)
+
+        # Most likely sequence.
+        best_path = -np.ones(length, dtype=int)
+
+        # Initialization.
+        viterbi_scores[0, :] = emission_scores[0, :] + initial_scores
+
+        # Viterbi loop.
+        for pos in xrange(1, length):
+            for current_state in xrange(num_states):
+                viterbi_scores[pos, current_state] = \
+                    np.max(viterbi_scores[pos-1, :] + \
+                           transition_scores[pos-1, current_state, :])
+                viterbi_scores[pos, current_state] += \
+                    emission_scores[pos, current_state]
+                viterbi_paths[pos, current_state] = \
+                    np.argmax(viterbi_scores[pos-1, :] + \
+                              transition_scores[pos-1, current_state, :])
+        # Termination.
+        best_score = np.max(viterbi_scores[length-1, :] + final_scores)
+        best_path[length-1] = \
+            np.argmax(viterbi_scores[length-1, :] + final_scores)
+
+        # Backtrack.
+        for pos in xrange(length-2, -1, -1):
+            best_path[pos] = viterbi_paths[pos+1, best_path[pos+1]]
+
+        return best_path, best_score
+
+    def run_forward(self, initial_scores, transition_scores, final_scores,
+                    emission_scores):
+        '''
+        Receives:
+            - Initial scores: (num_states) array
+            - Transition scores: (length-1, num_states, num_states) array
+            - Final scores: (num_states) array
+            - Emission scores: (length, num_states) array.
+        alpha[i, j] represents:
+            - the log-probability that the real path at node i ends in j
+        Returns alpha.
+        '''
+        length = len(emission_scores) # Length of the sequence.
+        num_states = np.size(initial_scores.npvalue()) # Number of states.
+
+        # Variables storing the alpha scores.
+        alpha_scores = [[] for i in xrange(length)]
+
+        # Initialization.
+        for current_state in xrange(num_states):
+            alpha_scores[0].append(emission_scores[0][current_state] + \
+                                   initial_scores[current_state])
+
+        # Viterbi loop.
+        for pos in xrange(1, length):
+            for current_state in xrange(num_states):
+                #pdb.set_trace()
+                alpha_scores[pos].append(
+                    dy.logsumexp([alpha_scores[pos-1][k] + \
+                                  emission_scores[pos][current_state] + \
+                                  transition_scores[pos-1][k][current_state] \
+                                  for k in xrange(num_states)]))
+        # Termination.
+        alpha = dy.logsumexp([alpha_scores[length-1][k] + final_scores[k] \
+                              for k in xrange(num_states)])
+        return alpha
 
 
 def read_dataset(fname, maximum_sentence_length=-1, read_ordering=False):
@@ -593,7 +886,8 @@ def read_quality_dataset(fname, maximum_sentence_length=-1):
             sent.append((w, pw, nw, asw, psw, nsw, t))
     return sentences
 
-def create_vocabularies(corpora, word_cutoff=0, affix_length=0):
+def create_vocabularies(corpora, word_cutoff=0, affix_length=0,
+                        lower_case=False):
     word_counter = Counter()
     tag_counter = Counter()
     prefix_counter = [Counter() for _ in xrange(affix_length)]
@@ -605,7 +899,10 @@ def create_vocabularies(corpora, word_cutoff=0, affix_length=0):
     for corpus in corpora:
         for s in corpus:
             for w, t in s:
-                word_counter[w] += 1
+                if lower_case:
+                    word_counter[w.lower()] += 1
+                else:
+                    word_counter[w] += 1
                 tag_counter[t] += 1
                 for l in xrange(affix_length):
                     prefix_counter[l][w[:(l+1)]] += 1
@@ -748,6 +1045,9 @@ def main():
     parser.add_argument('-dropout_probability', type=float, default=0.)
     # Only makes sense for QE.
     parser.add_argument('-bad_weight', type=float, default=1.)
+    parser.add_argument('-use_crf', type=int, default=0)
+    parser.add_argument('-lower_case', type=int, default=0)
+    parser.add_argument('-use_case_features', type=int, default=0)
 
     args = vars(parser.parse_args())
     print >> sys.stderr, args
@@ -788,6 +1088,9 @@ def main():
     null_label = args['null_label']
     dropout_probability = args['dropout_probability']
     bad_weight = args['bad_weight']
+    use_crf = args['use_crf']
+    lower_case = args['lower_case']
+    use_case_features = args['use_case_features']
 
     np.random.seed(42)
 
@@ -828,7 +1131,8 @@ def main():
         word_vocabulary, prefix_vocabularies, suffix_vocabularies, \
             tag_vocabulary = create_vocabularies([train_instances],
                                                  word_cutoff=1,
-                                                 affix_length=affix_length)
+                                                 affix_length=affix_length,
+                                                 lower_case=lower_case)
         source_word_vocabulary = None
 
     # Create model.
@@ -846,7 +1150,10 @@ def main():
                                    share_attention_sketch_parameters,
                                    use_sketch_losses,
                                    use_max_pooling, use_bilstm,
-                                   dropout_probability, bad_weight)
+                                   dropout_probability, bad_weight,
+                                   use_crf,
+                                   lower_case,
+                                   use_case_features)
     if embeddings_file != '':
         embeddings = load_embeddings(embeddings_file)
     else:

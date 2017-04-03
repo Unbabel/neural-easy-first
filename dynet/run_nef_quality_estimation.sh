@@ -24,6 +24,7 @@ use_bilstm=${20}
 dropout_probability=${21}
 bad_weight=${22}
 language=${23}
+use_crf=${24}
 
 if [ "$language" == "en-de_wmt16" ]
 then
@@ -40,7 +41,7 @@ skloss-${use_sketch_losses}_pool-${use_max_pooling}_\
 bilstm-${use_bilstm}_pretrain-${num_pretraining_epochs}_\
 emb-${embedding_size}_hid-${hidden_size}_pre-${preattention_size}_\
 sk-${sketch_size}_ctx-${context_size}_\
-drop-${dropout_probability}_bad-${bad_weight}
+drop-${dropout_probability}_bad-${bad_weight}_crf-${use_crf}
 
 echo $suffix
 
@@ -82,6 +83,7 @@ python neftagger.py \
     -null_label OK \
     -dropout_probability ${dropout_probability} \
     -bad_weight ${bad_weight} \
+    -use_crf ${use_crf} \
     -sketch_file_dev quality_estimation/sketches/${language}/sketch_dev_${suffix}.txt \
     -sketch_file_test quality_estimation/sketches/${language}/sketch_test_${suffix}.txt \
     >& quality_estimation/logs/${language}/log_${suffix}.txt
