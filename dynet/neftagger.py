@@ -29,6 +29,18 @@ def cap_feature(s):
     else:
         return 3
 
+def insert_rare_words(words, word_counter, cutoff=1, p=0.5, unk='_UNK_'):
+    '''
+    Replace singletons by the unknown word with a probability p.
+    '''
+    new_words = []
+    for word in words:
+        if word_counter[word] <= cutoff and np.random.uniform() < p:
+            new_words.append(unk)
+        else:
+            new_words.append(word)
+    return new_words
+
 class NeuralEasyFirstTagger(object):
     def __init__(self, task, word_vocabulary, affix_length,
                  prefix_vocabularies, suffix_vocabularies,
@@ -47,7 +59,9 @@ class NeuralEasyFirstTagger(object):
                  bad_weight,
                  use_crf,
                  lower_case,
-                 use_case_features):
+                 use_case_features,
+                 stochastic_drop,
+                 word_counter):
         self.task = task
         self.word_vocabulary = word_vocabulary
         self.affix_length = affix_length
@@ -82,6 +96,9 @@ class NeuralEasyFirstTagger(object):
         self.use_crf = use_crf
         self.lower_case = lower_case
         self.use_case_features = use_case_features
+        self.stochastic_drop = stochastic_drop
+        self.word_counter = word_counter
+        self.dropout_inputs_only = False
 
         if self.task == 'quality_estimation':
             self.tag_weights = {'OK': 1., 'BAD': bad_weight}
@@ -268,6 +285,12 @@ class NeuralEasyFirstTagger(object):
             wembs = [dy.noise(we, noise_level) for we in wembs]
             sentence = [(tok[0], tok[-1]) for tok in instance]
         else:
+            if training and self.stochastic_drop > 0.:
+                words = insert_rare_words([w for w, _ in instance],
+                                          self.word_counter,
+                                          cutoff=1,
+                                          p=self.stochastic_drop,
+                                          unk='_UNK_')
             unk = self.word_vocabulary.w2i['_UNK_']
             if self.lower_case:
                 words = [self.word_vocabulary.w2i.get(w.lower(), unk) \
@@ -341,7 +364,7 @@ class NeuralEasyFirstTagger(object):
             hidden_states = [dy.tanh(W_xh * x + w_h) for x in wembs]
 
         if training:
-            if self.dropout_probability != 0.:
+            if not dropout_inputs_only and self.dropout_probability != 0.:
                 for i in xrange(len(hidden_states)):
                     hidden_states[i] = dy.dropout(hidden_states[i],
                                                   self.dropout_probability)
@@ -566,7 +589,7 @@ class NeuralEasyFirstTagger(object):
                         state = dy.concatenate([hidden_states[i], sketches[i]])
                     else:
                         state = sketches[i]
-                    if self.dropout_probability != 0.:
+                    if not dropout_inputs_only and self.dropout_probability != 0.:
                         state = dy.dropout(state, self.dropout_probability)
                     r_t = O * state
                     emission_scores.append(r_t)
@@ -622,7 +645,7 @@ class NeuralEasyFirstTagger(object):
                         state = dy.concatenate([hidden_states[i], sketches[i]])
                     else:
                         state = sketches[i]
-                    if self.dropout_probability != 0.:
+                    if not dropout_inputs_only and self.dropout_probability != 0.:
                         state = dy.dropout(state, self.dropout_probability)
                     r_t = O * state
                     err = dy.pickneglogsoftmax(r_t, t)
@@ -928,7 +951,7 @@ def create_vocabularies(corpora, word_cutoff=0, affix_length=0,
     print >> sys.stderr, 'Tags: %d' % tag_vocabulary.size()
 
     return word_vocabulary, prefix_vocabularies, suffix_vocabularies, \
-        tag_vocabulary
+        tag_vocabulary, word_counter
 
 def create_quality_vocabularies(corpora, word_cutoff=0, affix_length=0):
     word_counter = Counter()
@@ -1048,6 +1071,7 @@ def main():
     parser.add_argument('-use_crf', type=int, default=0)
     parser.add_argument('-lower_case', type=int, default=0)
     parser.add_argument('-use_case_features', type=int, default=0)
+    parser.add_argument('-stochastic_drop', type=float, default=0.)
 
     args = vars(parser.parse_args())
     print >> sys.stderr, args
@@ -1091,6 +1115,7 @@ def main():
     use_crf = args['use_crf']
     lower_case = args['lower_case']
     use_case_features = args['use_case_features']
+    stochastic_drop = args['stochastic_drop']
 
     np.random.seed(42)
 
@@ -1127,12 +1152,18 @@ def main():
                 create_quality_vocabularies([train_instances],
                                             word_cutoff=1,
                                             affix_length=affix_length)
+        word_counter = None
     else:
+        if stochastic_drop > 0.:
+            word_cutoff = 0
+        else:
+            word_cutoff = 1
         word_vocabulary, prefix_vocabularies, suffix_vocabularies, \
-            tag_vocabulary = create_vocabularies([train_instances],
-                                                 word_cutoff=1,
-                                                 affix_length=affix_length,
-                                                 lower_case=lower_case)
+            tag_vocabulary, word_counter = \
+                create_vocabularies([train_instances],
+                                    word_cutoff=word_cutoff,
+                                    affix_length=affix_length,
+                                    lower_case=lower_case)
         source_word_vocabulary = None
 
     # Create model.
@@ -1153,7 +1184,9 @@ def main():
                                    dropout_probability, bad_weight,
                                    use_crf,
                                    lower_case,
-                                   use_case_features)
+                                   use_case_features,
+                                   stochastic_drop,
+                                   word_counter)
     if embeddings_file != '':
         embeddings = load_embeddings(embeddings_file)
     else:
