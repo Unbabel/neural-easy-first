@@ -26,6 +26,7 @@ language=${22}
 use_crf=${23}
 lower_case=${24}
 use_case_features=${25}
+stochastic_drop=0. #0.5
 
 suffix=model-${model_type}_attention-${attention_type}_temp-${temperature}_\
 disc-${discount_factor}_C-${l2_regularization}_sketches-${num_sketches}_\
@@ -80,6 +81,7 @@ python neftagger.py \
     -use_crf ${use_crf} \
     -lower_case ${lower_case} \
     -use_case_features ${use_case_features} \
+    -stochastic_drop ${stochastic_drop} \
     >& ner/logs/${language}/log_${suffix}.txt
 
 python extract_predictions.py \
