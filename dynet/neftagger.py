@@ -364,7 +364,7 @@ class NeuralEasyFirstTagger(object):
             hidden_states = [dy.tanh(W_xh * x + w_h) for x in wembs]
 
         if training:
-            if not dropout_inputs_only and self.dropout_probability != 0.:
+            if not self.dropout_inputs_only and self.dropout_probability != 0.:
                 for i in xrange(len(hidden_states)):
                     hidden_states[i] = dy.dropout(hidden_states[i],
                                                   self.dropout_probability)
@@ -589,7 +589,7 @@ class NeuralEasyFirstTagger(object):
                         state = dy.concatenate([hidden_states[i], sketches[i]])
                     else:
                         state = sketches[i]
-                    if not dropout_inputs_only and self.dropout_probability != 0.:
+                    if not self.dropout_inputs_only and self.dropout_probability != 0.:
                         state = dy.dropout(state, self.dropout_probability)
                     r_t = O * state
                     emission_scores.append(r_t)
@@ -645,7 +645,7 @@ class NeuralEasyFirstTagger(object):
                         state = dy.concatenate([hidden_states[i], sketches[i]])
                     else:
                         state = sketches[i]
-                    if not dropout_inputs_only and self.dropout_probability != 0.:
+                    if not self.dropout_inputs_only and self.dropout_probability != 0.:
                         state = dy.dropout(state, self.dropout_probability)
                     r_t = O * state
                     err = dy.pickneglogsoftmax(r_t, t)
