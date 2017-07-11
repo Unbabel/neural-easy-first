@@ -273,6 +273,8 @@ class NeuralEasyFirstTagger(object):
                 words = [self.word_vocabulary.w2i.get(w.lower(), unk) \
                          for w, _ in instance]
             else:
+                #for w, _ in instance:
+                #    print w, w in self.word_vocabulary.w2i
                 words = [self.word_vocabulary.w2i.get(w, unk) \
                          for w, _ in instance]
             tags = [self.tag_vocabulary.w2i[t] for _, t in instance]
@@ -910,6 +912,7 @@ def create_vocabularies(corpora, word_cutoff=0, affix_length=0,
 
     words = [w for w in word_counter if word_counter[w] > word_cutoff]
     tags = [t for t in tag_counter]
+    #print >> sys.stderr, str(len(word_counter)) + ' --> ' + str(len(words))
 
     word_vocabulary = util.Vocab.from_corpus([words])
     tag_vocabulary = util.Vocab.from_corpus([tags])
@@ -988,6 +991,7 @@ def load_embeddings(embeddings_file):
     embeddings = {}
     f = open(embeddings_file)
     for line in f:
+        line = line.rstrip('\n').rstrip(' ')
         fields = line.split(' ')
         word = fields[0]
         v = [float(val) for val in fields[1:]]

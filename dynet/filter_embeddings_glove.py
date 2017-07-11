@@ -2,10 +2,13 @@ import sys
 
 embeddings_file = sys.argv[1]
 dataset_file = sys.argv[2]
-lower = True
+lower = False #True
+header = False #True
 
 sep = ' ' # '\t'
 f = open(dataset_file)
+if header:
+    f.readline()
 word_list = set()
 for line in f:
     line = line.rstrip('\n')

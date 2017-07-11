@@ -94,6 +94,8 @@ if __name__ == "__main__":
     z = np.random.randn(n)
     uc = 0.5*np.random.rand(n)
     pdb.set_trace()
+    #z = np.array([1.,1.,1.,1.,1.,1.])
+    #uc = np.array([.15,.167,1.,1.,1.,1.])
     print sum(uc)
     print z
     print uc
