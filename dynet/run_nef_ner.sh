@@ -26,6 +26,7 @@ language=${22}
 use_crf=${23}
 lower_case=${24}
 use_case_features=${25}
+embeddings_file=${26}
 stochastic_drop=0. #0.5
 
 suffix=model-${model_type}_attention-${attention_type}_temp-${temperature}_\
@@ -51,7 +52,7 @@ python neftagger.py \
     -train_file ner/data/${language}_train.txt \
     -dev_file ner/data/${language}_dev.txt \
     -test_file ner/data/${language}_test.txt \
-    -embeddings_file ner/data/${language}.glove_embeddings \
+    -embeddings_file ${embeddings_file} \
     -affix_length ${affix_length} \
     -model_type ${model_type} \
     -attention_type ${attention_type} \

@@ -5,8 +5,6 @@ temperature=1.
 discount_factor=0.
 num_sketches=$3 #-1
 use_sketch_losses=0
-embedding_size=300 #64
-hidden_size=100 #50
 preattention_size=50
 context_size=2
 noise_level=0.
@@ -15,7 +13,33 @@ affix_embedding_size=50
 use_bilstm=1
 dropout_probability=$4
 
-use_crf=1
+if [ "${language}" == "english" ]
+then
+    embedding_size=300
+    hidden_size=100
+    embeddings_file=ner/data/${language}.glove_embeddings
+elif [ "${language}" == "spanish_utf8" ]
+then
+    embedding_size=64
+    hidden_size=50
+    embeddings_file=ner/data/${language}.lample_embeddings
+elif [ "${language}" == "german_utf8" ]
+then
+    embedding_size=64
+    hidden_size=50
+    embeddings_file=ner/data/${language}.lample_embeddings
+elif [ "${language}" == "dutch" ]
+then
+    embedding_size=64
+    hidden_size=50
+    embeddings_file=ner/data/${language}.embeddings
+else
+    embedding_size=64
+    hidden_size=50
+    embeddings_file=ner/data/${language}.embeddings
+fi
+
+use_crf=0 #1
 lower_case=0 #1
 use_case_features=0 #1
 
@@ -51,6 +75,7 @@ do
         ${language} \
         ${use_crf} \
         ${lower_case} \
-        ${use_case_features}
+        ${use_case_features} \
+        ${embeddings_file}
 done
 

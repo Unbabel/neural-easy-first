@@ -491,6 +491,10 @@ class NeuralEasyFirstTagger(object):
                 a = np.zeros(len(words))
                 a[len(words)-1-j] = 1.
                 attention_weights.set(a)
+            elif self.attention_type == 'uniform':
+                attention_weights = dy.vecInput(len(words))
+                a = np.ones(len(words)) / float(len(words))
+                attention_weights.set(a)
             elif self.attention_type == 'prescribed_order':
                 attention_weights = dy.vecInput(len(words))
                 a = np.zeros(len(words))
@@ -505,14 +509,15 @@ class NeuralEasyFirstTagger(object):
                     if cumulative_attention.npvalue()[i] == 1.:
                         scores.append(-np.inf)
                         continue
-                    preattention = dy.tanh(W_cz * states_with_context[i] + w_z)
+                    preattention = dy.tanh(W_cs * states_with_context[i] + w_s)
                     if self.concatenate_last_layer:
                         r_i = O * dy.concatenate([hidden_states[i],
                                                   preattention])
                     else:
                         r_i = O * preattention
-                    probs = dy.softmax(r_i).npvalue()
-                    scores.append(max(probs))
+                    #probs = dy.softmax(r_i).npvalue()
+                    #scores.append(max(probs))
+                    scores.append(max(r_i.npvalue()))
                 k = np.argmax(scores)
                 a[k] = 1.
                 attention_weights.set(a)
