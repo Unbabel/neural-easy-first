@@ -1,6 +1,6 @@
 language=$1
 attention_type=$2
-model_type=single_state #all_states
+model_type=all_states
 temperature=1.
 discount_factor=0.
 num_sketches=$3 #-1
