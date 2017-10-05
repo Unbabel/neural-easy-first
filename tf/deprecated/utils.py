@@ -7,6 +7,7 @@ import embedding
 from scipy import stats
 import operator
 import logging
+import pdb
 
 def load_embedding(pkl_file):
     word2id = {}
@@ -29,7 +30,106 @@ def load_embedding(pkl_file):
     return emb
 
 
-def load_vocabs(train_src, train_tgt, train_features, src_limit,tgt_limit, freq_limit):
+def build_pos_vocab(filepath, store=False):
+    vocab = {"<UNK>": 0, "<PAD>": 1, "<s>": 2, "</s>": 3}
+    with codecs.open(filepath, "r", "utf8") as pos_data:
+        for line in pos_data:
+            line = line.rstrip()
+            if line == "":  # sentence end
+                continue
+            else:
+                fields = line.split()
+                word = fields[0]
+                if word not in vocab:
+                    word_id = len(vocab)
+                    vocab[word] = word_id
+    logging.info("Built vocabulary of %d words" % len(vocab))
+    if store:
+        dump_file = filepath + ".vocab.pkl"
+        pkl.dump(vocab, open(dump_file, "wb"))
+        logging.info("Stored vocabulary in %s" % dump_file)
+    return vocab
+
+
+def load_pos_data(filepath, embeddings, max_length=-1, label_dict={},
+                  train=False):
+    """
+    Given a dataset file with features and labels, and word embeddings, read them to lists and dictionaries
+    :param feature_label_file:
+    :param embedding_src:
+    :param embedding_tgt:
+    :param max_sent:
+    :param task:
+    :return:
+    """
+    # input:
+    # - file with features and labels for each tgt word
+    #   format (basic features with tags): 30      26      1.15384615385   Die     <s>     Dateien The     <s>     files   0       0       0       0       0       0       0       0       0       0       0       _       _       OK
+    # - source, target embeddings (pkl)
+    #   format: word array: loaded[0], embeddings: loaded[1]
+
+    # TODO specify feature config for feature selection
+
+    if embeddings is None:
+        # if embeddings are not given, build vocabulary  # TODO specify vocab size
+        vocab = build_pos_vocab(filepath, True)
+        word2id = {word: i for word, i in vocab.iteritems()}
+        id2word = {i: word for word, i in vocab.iteritems()}
+        embeddings = embedding.Embedding(None, word2id, id2word,
+                                         vocab["<UNK>"],
+                                         vocab["<PAD>"],
+                                         vocab["</s>"],
+                                         vocab["<s>"])
+
+    # Load words and labels
+    sentences = []
+    sentence = []
+    sentence_labels = []
+    labels = []
+    unks = set()
+    with codecs.open(filepath, "r", "utf8") as pos_data:
+        for line in pos_data:
+            line = line.rstrip()
+            if line == "":  # sentence end
+                assert len(sentence) == len(sentence_labels)
+                if max_length < 0 or len(sentence) < max_length:
+                    sentences.append(sentence)
+                    labels.append(sentence_labels)
+                sentence = []
+                sentence_labels = []
+            else:  # one word per line
+                fields = line.split("\t")
+                word = fields[0]
+                label = fields[-1]
+                if label not in label_dict:
+                    if train:
+                        label_id = len(label_dict)
+                        label_dict[label] = label_id
+                    else:
+                        # We don't allow unknown labels at test time.
+                        assert False
+                else:
+                    label_id = label_dict[label]
+
+                # lookup features
+                word_id = embeddings.get_id(word)
+
+                # keep track of unknown words
+                if word_id == embeddings.UNK_id:
+                    unks.add(word)
+
+                sentence.append([word_id])
+                sentence_labels.append(label_id)
+
+    logging.info("Loaded %d sentences" % len(sentences))
+    logging.info("%d UNK words" % len(unks))
+    if train:
+        return sentences, labels, label_dict, embeddings
+    else:
+        return sentences, labels, label_dict
+
+
+def load_vocabs(train_src, train_tgt, train_features, src_limit, tgt_limit, freq_limit):
     """
     Load the vocabulary of src and tgt size of a qe corpus
     and limit it to a certain size (by frequency).
@@ -360,7 +460,7 @@ def buckets_by_length(data, labels, buckets=20, max_len=50, mode='pad'):
     """
     input_lengths = np.array([len(s) for s in data], dtype='int')  # for dev and train (if dev given)
 
-    maxlen = max_len if max_len > 0 else max(input_lengths) + 1
+    maxlen = max_len if max_len > 0 else max(input_lengths) + 1 # Why +1?
 
     # sort data by length
     # split this array into 'bucket' many parts, these are the buckets
@@ -371,7 +471,7 @@ def buckets_by_length(data, labels, buckets=20, max_len=50, mode='pad'):
     buckets_data = [sorted_data_lengths_with_idx[i:i+bucket_size] for i in xrange(0, len(sorted_data_lengths_with_idx), bucket_size)]
     bin_edges = [min(bucket[-1][0], max_len) for bucket in buckets_data]  # max len of sequence in bucket
     logging.info("bin_edges %s" % str(bin_edges))
-    if bin_edges[-1] < maxlen:
+    if bin_edges[-1] < maxlen: # Why this step?
         bin_edges[-1] = maxlen
     logging.info("final bin_edges %s" % str(bin_edges))
     input_bucket_index = np.zeros(shape=len(data), dtype=int)
@@ -410,6 +510,7 @@ def put_in_buckets(data_array, labels, buckets, mode='pad'):
         length_indexes = np.where(input_bucket_index == bucket)[0]
         reordering_indexes[bucket] = length_indexes
         maxlen = int(np.floor(buckets[bucket]))
+        # padded will be a tuple X_padded, Y_padded, masks, np.asarray(seq_lens).
         padded = pad_data(data_array[length_indexes], labels[length_indexes], max_len=maxlen)
         bucketed_data[bucket] = padded  # in final dict, start counting by zero
     return bucketed_data, reordering_indexes
